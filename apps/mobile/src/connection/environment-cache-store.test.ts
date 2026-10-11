@@ -185,6 +185,7 @@ function makeDatabase() {
           key.split(":")[1] === kind ? [payload] : [],
         ),
       ),
+    saveCacheIfNewer: () => Effect.succeed(false),
     saveCache: (environmentId, kind, cacheKey, schemaVersion, payload) =>
       Effect.sync(() => {
         const id = cacheId(environmentId, kind, cacheKey);

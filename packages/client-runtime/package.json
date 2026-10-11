@@ -63,6 +63,10 @@
       "types": "./src/userMessage.ts",
       "default": "./src/userMessage.ts"
     },
+    "./background-sync": {
+      "types": "./src/backgroundSync/index.ts",
+      "default": "./src/backgroundSync/index.ts"
+    },
     "./connection": {
       "types": "./src/connection/index.ts",
       "default": "./src/connection/index.ts"

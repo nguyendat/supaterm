@@ -22,6 +22,8 @@ export const ClientCacheKind = Schema.Literals([
   "server-config",
   "vcs-refs",
   "project-favicon",
+  "background-shell",
+  "background-thread",
 ]);
 export type ClientCacheKind = typeof ClientCacheKind.Type;
 
@@ -209,6 +211,13 @@ export class MobileDatabase extends Context.Service<
       schemaVersion: number,
       payload: string,
     ) => Effect.Effect<void, MobileDatabaseError>;
+    readonly saveCacheIfNewer: (
+      environmentId: EnvironmentId,
+      kind: "background-shell" | "background-thread",
+      cacheKey: string,
+      schemaVersion: number,
+      payload: string,
+    ) => Effect.Effect<boolean, MobileDatabaseError>;
     readonly removeCache: (
       environmentId: EnvironmentId,
       kind: ClientCacheKind,
@@ -237,12 +246,14 @@ export class MobileDatabase extends Context.Service<
   }
 >()("@supacode/mobile/persistence/MobileDatabase") {}
 
-const makeAvailable = Effect.gen(function* () {
+const makeAvailable = Effect.fn("MobileDatabase.makeAvailable")(function* (
+  useNewConnection = false,
+) {
   const database = yield* Effect.acquireRelease(
     Effect.tryPromise({
       try: async () => {
         const SQLite = await import("expo-sqlite");
-        return SQLite.openDatabaseAsync(DATABASE_NAME);
+        return SQLite.openDatabaseAsync(DATABASE_NAME, { useNewConnection });
       },
       catch: databaseError("open"),
     }),
@@ -333,6 +344,36 @@ const makeAvailable = Effect.gen(function* () {
             ),
           catch: databaseError("save-cache"),
         }).pipe(Effect.asVoid),
+    ),
+    saveCacheIfNewer: Effect.fn("MobileDatabase.saveCacheIfNewer")(
+      (environmentId, kind, cacheKey, schemaVersion, payload) =>
+        Effect.tryPromise({
+          try: () =>
+            database.runAsync(
+              `INSERT INTO client_cache
+              (environment_id, kind, cache_key, schema_version, payload, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT (environment_id, kind, cache_key) DO UPDATE SET
+               schema_version = excluded.schema_version,
+               payload = excluded.payload,
+               updated_at = excluded.updated_at
+             WHERE COALESCE(
+               CASE WHEN json_valid(client_cache.payload)
+                 THEN json_extract(client_cache.payload, '$.snapshot.snapshotSequence')
+               END, -1
+             ) < json_extract(excluded.payload, '$.snapshot.snapshotSequence')`,
+              environmentId,
+              kind,
+              cacheKey,
+              schemaVersion,
+              payload,
+              Date.now(),
+            ),
+          catch: databaseError("save-cache"),
+        }).pipe(
+          Effect.map((result) => result.changes > 0),
+          Effect.uninterruptible,
+        ),
     ),
     removeCache: Effect.fn("MobileDatabase.removeCache")((environmentId, kind, cacheKey) =>
       Effect.tryPromise({
@@ -427,6 +468,7 @@ function makeUnavailable(error: MobileDatabaseError): MobileDatabase["Service"] 
     loadCache: () => fail,
     listCache: () => fail,
     saveCache: () => fail,
+    saveCacheIfNewer: () => fail,
     removeCache: () => fail,
     clearCacheKind: () => fail,
     clearEnvironmentCache: () => fail,
@@ -437,10 +479,11 @@ function makeUnavailable(error: MobileDatabaseError): MobileDatabase["Service"] 
   });
 }
 
-export const make = Effect.result(makeAvailable).pipe(
-  Effect.map((result) =>
-    result._tag === "Success" ? result.success : makeUnavailable(result.failure),
-  ),
-);
+const makeDatabase = Effect.fn("MobileDatabase.make")(function* (useNewConnection = false) {
+  const result = yield* Effect.result(makeAvailable(useNewConnection));
+  return result._tag === "Success" ? result.success : makeUnavailable(result.failure);
+});
 
+export const make = makeDatabase();
 export const layer = Layer.effect(MobileDatabase, make);
+export const isolatedLayer = Layer.effect(MobileDatabase, makeDatabase(true));

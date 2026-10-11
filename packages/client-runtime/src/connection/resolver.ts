@@ -120,13 +120,9 @@ const makePrimaryBroker = Effect.fn("clientRuntime.connection.broker.makePrimary
   });
 });
 
-const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")(function* () {
-  const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
-  const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
-
-  return Effect.fn("clientRuntime.connection.broker.bearer")(function* (
-    entry: ConnectionCatalogEntry & { readonly target: BearerConnectionTarget },
-  ) {
+const resolveBearerConnection = Effect.fn("clientRuntime.connection.resolveBearerConnection")(
+  function* (entry: ConnectionCatalogEntry & { readonly target: BearerConnectionTarget }) {
+    const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
     const target = entry.target;
     const profile = yield* Effect.fromOption(entry.profile, () =>
       profileMissingError(target.connectionId),
@@ -151,11 +147,50 @@ const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")
         }),
       ),
     );
-    if (!isBearerCredential(credential)) {
-      return yield* credentialMissingError(target.connectionId);
-    }
+    if (!isBearerCredential(credential)) return yield* credentialMissingError(target.connectionId);
     const connectionMethod = parseRelayAddress(profile.httpBaseUrl) ? "relay" : "direct";
     const httpBaseUrl = yield* resolveRelayOrigin(profile.httpBaseUrl, profile.relayUrl);
+    return { target, profile, credential, connectionMethod, httpBaseUrl } as const;
+  },
+);
+
+export const prepareHttpConnection = Effect.fn("clientRuntime.connection.prepareHttpConnection")(
+  function* (entry: ConnectionCatalogEntry & { readonly target: BearerConnectionTarget }) {
+    const { target, profile, credential, connectionMethod, httpBaseUrl } =
+      yield* resolveBearerConnection(entry);
+    const descriptor = yield* fetchRemoteEnvironmentDescriptor({ httpBaseUrl }).pipe(
+      Effect.mapError(mapRemoteEnvironmentError),
+    );
+    if (descriptor.environmentId !== target.environmentId) {
+      return yield* environmentMismatchError({
+        expected: target.environmentId,
+        actual: descriptor.environmentId,
+      });
+    }
+    const compatibilityError = orchestrationProtocolCompatibilityError(descriptor);
+    if (compatibilityError !== null) return yield* compatibilityError;
+    return {
+      environmentId: descriptor.environmentId,
+      label: descriptor.label,
+      httpBaseUrl,
+      socketUrl: profile.wsBaseUrl,
+      httpAuthorization: { _tag: "Bearer", token: credential.token },
+      connectionMethod,
+      target,
+    } satisfies PreparedConnection;
+  },
+);
+
+const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")(function* () {
+  const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
+  const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+  return Effect.fn("clientRuntime.connection.broker.bearer")(function* (
+    entry: ConnectionCatalogEntry & { readonly target: BearerConnectionTarget },
+  ) {
+    const { target, profile, credential, connectionMethod, httpBaseUrl } =
+      yield* resolveBearerConnection(entry).pipe(
+        Effect.provideService(ConnectionCredentialStore.ConnectionCredentialStore, credentials),
+      );
     const authorized = yield* remote.authorizeBearer({
       expectedEnvironmentId: target.environmentId,
       httpBaseUrl,
@@ -164,15 +199,7 @@ const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")
       bearerToken: credential.token,
       connectionMethod,
     });
-    return {
-      environmentId: authorized.environmentId,
-      label: authorized.label,
-      httpBaseUrl: authorized.httpBaseUrl,
-      socketUrl: authorized.socketUrl,
-      httpAuthorization: authorized.httpAuthorization,
-      connectionMethod,
-      target,
-    } satisfies PreparedConnection;
+    return { ...authorized, connectionMethod, target } satisfies PreparedConnection;
   });
 });
 
