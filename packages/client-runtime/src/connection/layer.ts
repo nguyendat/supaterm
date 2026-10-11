@@ -10,17 +10,23 @@ import * as PlatformConnectionSource from "../platform/source.ts";
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import * as RpcSession from "../rpc/session.ts";
 
-export function layerWithOptions(options: RpcSession.RpcSessionOptions) {
+/**
+ * The connection services alone. Nothing connects until `EnvironmentRegistry.start`
+ * runs, so a headless one-shot task can read the saved catalog and reach an
+ * environment over HTTP without any supervisor opening a socket.
+ */
+export function layerServices(options: RpcSession.RpcSessionOptions) {
   const layerDriver = ConnectionDriver.layer.pipe(
     Layer.provide(Layer.mergeAll(ConnectionResolver.layer, RpcSession.layer(options))),
   );
   const layerRegistry = EnvironmentRegistry.layer.pipe(Layer.provide(layerDriver));
   const layerOnboarding = ConnectionOnboarding.layer.pipe(Layer.provide(layerRegistry));
-  const layerConnectionServices = Layer.mergeAll(
-    layerRegistry,
-    layerOnboarding,
-    ConnectionResolver.layer,
+  return Layer.mergeAll(layerRegistry, layerOnboarding, ConnectionResolver.layer, layerDriver).pipe(
+    Layer.provideMerge(RemoteEnvironmentAuthorization.layer),
   );
+}
+
+export function layerWithOptions(options: RpcSession.RpcSessionOptions) {
   const layerConnectionStartup = Layer.effectDiscard(
     Effect.gen(function* () {
       const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
@@ -32,10 +38,7 @@ export function layerWithOptions(options: RpcSession.RpcSessionOptions) {
       );
     }).pipe(Effect.withSpan("clientRuntime.connection.application.start")),
   );
-  return layerConnectionStartup.pipe(
-    Layer.provideMerge(layerConnectionServices),
-    Layer.provideMerge(RemoteEnvironmentAuthorization.layer),
-  );
+  return layerConnectionStartup.pipe(Layer.provideMerge(layerServices(options)));
 }
 
 export const layer = layerWithOptions({});

@@ -86,6 +86,8 @@
         "src/features/browser/preview-stream.browser.ts!",
         "modules/supacode-relay-tunnel/index.ts!",
         "modules/supacode-relay-tunnel/android/jvm/fixtures/vectors.ts",
+        // A native background task callback calls this, not the React tree.
+        "src/connection/background-sync.ts",
       ],
       // Fonts are configured as asset paths; Expo autolinks the native packages.
       "ignoreDependencies": [

@@ -98,13 +98,16 @@ export class ConnectionDriver extends Context.Service<
  * The reported error is a transient one when any route failed transiently,
  * so the supervisor keeps retrying a route that may come back; a blocked
  * error is reported only when every attempted route was blocked.
+ *
+ * What a successful attempt yields is up to the caller: the supervisor opens
+ * a socket session, while a headless sync only authorizes HTTP over the route.
  */
-export const connectOverRoutes = Effect.fn("ConnectionDriver.connectOverRoutes")(function* <R>(
+export const connectOverRoutes = Effect.fn("ConnectionDriver.connectOverRoutes")(function* <A, R>(
   entry: ConnectionCatalogEntry,
   checkRoute: (route: ConnectionRoute) => Effect.Effect<RouteCheck>,
   connectRoute: (
     route: ConnectionRoute,
-  ) => Effect.Effect<EnvironmentConnectionLease, ConnectionAttemptError, R | Scope.Scope>,
+  ) => Effect.Effect<A, ConnectionAttemptError, R | Scope.Scope>,
 ) {
   const routes = connectionRoutes(entry);
   const checks =
