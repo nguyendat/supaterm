@@ -79,17 +79,27 @@ export const openHttpRoute = Effect.fn("BackgroundSync.openHttpRoute")(function*
   read: (endpoint: EnvironmentHttpEndpoint) => Effect.Effect<A, ConnectionAttemptError, R>,
 ) {
   const profiles = httpReadableRoutes(entry);
-  const routes = connectionRoutes(entry).filter((route) =>
+  const candidateRoutes = connectionRoutes(entry).filter((route) =>
     profiles.has(connectionRouteId(route.target)),
+  );
+  const httpClient = yield* HttpClient.HttpClient;
+  const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
+  const routes = yield* Effect.filter(candidateRoutes, (route) =>
+    credentials
+      .get(credentialConnectionId(profiles.get(connectionRouteId(route.target))!.connectionId))
+      .pipe(
+        Effect.map(
+          (credential) => Option.isSome(credential) && isBearerCredential(credential.value),
+        ),
+        Effect.orElseSucceed(() => false),
+      ),
   );
   if (routes.length === 0) {
     return yield* new ConnectionBlockedError({
       reason: "configuration",
-      detail: `${entry.target.label} has no saved route that can be read without the desktop app.`,
+      detail: `${entry.target.label} has no saved route with a usable bearer credential.`,
     });
   }
-  const httpClient = yield* HttpClient.HttpClient;
-  const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
   const scope = yield* Scope.Scope;
   const expectedEnvironmentId = entry.target.environmentId;
   const descriptors = new Map<string, ExecutionEnvironmentDescriptor>();
@@ -150,5 +160,7 @@ export const openHttpRoute = Effect.fn("BackgroundSync.openHttpRoute")(function*
     return { route, endpoint, value } satisfies HttpRoute<A>;
   });
 
-  return yield* connectOverRoutes(entryWithRoutes(entry, routes), checkRoute, connectRoute);
+  return yield* connectOverRoutes(entryWithRoutes(entry, routes), checkRoute, connectRoute, {
+    attemptTimeoutMs: 27_000,
+  });
 });

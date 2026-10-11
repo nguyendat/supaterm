@@ -25,6 +25,8 @@ export interface RelayTunnelModule extends NativeModule<RelayTunnelEvents> {
   addListener(event: "onStatus", listener: (status: RelayTunnelStatus) => void): { remove(): void };
   start(options: RelayTunnelOptions): Promise<{ origin: string }>;
   stop(hostAddress?: string): Promise<void>;
+  beginBackgroundSync(): Promise<void>;
+  endBackgroundSync(): Promise<void>;
 }
 
 export default requireNativeModule<RelayTunnelModule>("SupacodeRelayTunnel");

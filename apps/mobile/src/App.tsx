@@ -27,7 +27,10 @@ import { useUiRuntimeMemoryWarningGc } from "./lib/useUiRuntimeMemoryWarningGc";
 import { SubscriptionUsageCoordinator } from "./widgets/SubscriptionUsageCoordinator";
 import { VoiceInputProvider } from "./features/voice-input/VoiceInputProvider";
 import { GlobalVoiceInputControl } from "./features/voice-input/GlobalVoiceInputControl";
-import { registerMobileBackgroundSync } from "./connection/background-sync-scheduler";
+import {
+  cancelMobileBackgroundSync,
+  registerMobileBackgroundSync,
+} from "./connection/background-sync-scheduler";
 import { environmentCatalog } from "./connection/catalog";
 
 import "../global.css";
@@ -82,7 +85,12 @@ function AppContent() {
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "background") void registerMobileBackgroundSync().catch(() => undefined);
+      if (state === "active") {
+        cancelMobileBackgroundSync();
+        void registerMobileBackgroundSync().catch(() => undefined);
+      } else if (state === "background") {
+        void registerMobileBackgroundSync().catch(() => undefined);
+      }
     });
     return () => subscription.remove();
   }, []);

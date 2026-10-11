@@ -24,6 +24,8 @@ import {
   type ConnectionRouteKind,
   connectionRouteId,
   connectionRouteKind,
+  connectionRoutes,
+  credentialConnectionId,
 } from "../connection/routes.ts";
 import * as Persistence from "../platform/persistence.ts";
 import { RelayGateway } from "../relay/gateway.ts";
@@ -125,7 +127,12 @@ export function recentSettledThreads(
   limit: number,
 ): ReadonlyArray<OrchestrationV2ThreadShell> {
   return shell.threads
-    .filter((thread) => thread.deletedAt === null && !ACTIVE_THREAD_STATUSES.has(thread.status))
+    .filter(
+      (thread) =>
+        thread.deletedAt === null &&
+        thread.activeRunId === null &&
+        !ACTIVE_THREAD_STATUSES.has(thread.status),
+    )
     .sort(
       (left, right) =>
         DateTime.toEpochMillis(right.updatedAt) - DateTime.toEpochMillis(left.updatedAt),
@@ -449,8 +456,25 @@ export const make = Effect.gen(function* () {
     if (catalog._tag === "Failure") {
       return yield* finish("failed", new Map(), catalog.failure.message);
     }
-    const entries = [...catalog.success.values()].filter(
+    const enabledEntries = [...catalog.success.values()].filter(
       (entry) => entry.enabled && entry.unsupportedReason === undefined,
+    );
+    const entries = yield* Effect.filter(enabledEntries, (entry) =>
+      Effect.forEach(connectionRoutes(entry), (route) => {
+        if (
+          route.target._tag !== "BearerConnectionTarget" ||
+          Option.isNone(route.profile) ||
+          route.profile.value._tag !== "BearerConnectionProfile"
+        )
+          return Effect.succeed(false);
+        return credentials.get(credentialConnectionId(route.target.connectionId)).pipe(
+          Effect.map(
+            (credential) =>
+              Option.isSome(credential) && credential.value._tag === "BearerConnectionCredential",
+          ),
+          Effect.orElseSucceed(() => false),
+        );
+      }).pipe(Effect.map((routes) => routes.some(Boolean))),
     );
     const progress = new Map<EnvironmentId, EnvironmentProgress>(
       entries.map((entry) => [

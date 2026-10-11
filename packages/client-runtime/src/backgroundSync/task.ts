@@ -23,8 +23,8 @@ export interface BackgroundSyncTask {
 }
 
 /**
- * iOS: `setTaskCompleted(success: completion !== "failed")`.
- * Android: `failed` maps to `Result.retry()`, otherwise `Result.success()`.
+ * Native task adapters use this completion to report whether fresh data was
+ * written before the platform budget ended.
  */
 export type BackgroundSyncCompletion = "new-data" | "no-data" | "failed";
 

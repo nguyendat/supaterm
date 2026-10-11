@@ -5,12 +5,29 @@ import * as Runtime from "../lib/runtime";
 import * as ConnectionStorage from "./storage";
 
 /**
- * Entry point for native background work such as BGAppRefreshTask or
+ * Entry point for native background work such as BGProcessingTask or
  * WorkManager. It needs no React tree or navigation and stays out of the
  * connection runtime, so it opens no socket and never reports this device as a
  * foreground client. It shares the app's database, HTTP client, and relay
  * gateway with any running foreground session.
  */
-export const runMobileBackgroundSync = BackgroundSyncTask.makeTaskRunner(
+const runTask = BackgroundSyncTask.makeTaskRunner(
   BackgroundSync.layer.pipe(Layer.provide(ConnectionStorage.layer), Layer.provide(Runtime.layer)),
 );
+
+export async function runMobileBackgroundSync(
+  task: BackgroundSyncTask.BackgroundSyncTask,
+): Promise<BackgroundSyncTask.BackgroundSyncTaskResult> {
+  let relay: typeof import("../../modules/supacode-relay-tunnel").default | undefined;
+  try {
+    relay = (await import("../../modules/supacode-relay-tunnel")).default;
+  } catch {
+    relay = undefined;
+  }
+  try {
+    if (relay !== undefined) await relay.beginBackgroundSync();
+    return await runTask(task);
+  } finally {
+    if (relay !== undefined) await relay.endBackgroundSync().catch(() => {});
+  }
+}

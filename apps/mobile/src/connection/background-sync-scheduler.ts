@@ -1,6 +1,12 @@
 import * as BackgroundTask from "expo-background-task";
 import * as TaskManager from "expo-task-manager";
-import { connectionRoutes, loadPersistedCatalogEntries } from "@supacode/client-runtime/connection";
+import {
+  connectionRouteId,
+  credentialConnectionId,
+  connectionRoutes,
+  loadPersistedCatalogEntries,
+  CredentialStore,
+} from "@supacode/client-runtime/connection";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
@@ -15,6 +21,10 @@ export const MOBILE_BACKGROUND_SYNC_INTERVAL_MINUTES = 15;
 const PLATFORM_BUDGET_MS = 30_000;
 
 let activeController: AbortController | null = null;
+
+export function cancelMobileBackgroundSync(): void {
+  activeController?.abort();
+}
 
 TaskManager.defineTask(MOBILE_BACKGROUND_SYNC_TASK, async () => {
   if (activeController !== null) return BackgroundTask.BackgroundTaskResult.Success;
@@ -47,27 +57,38 @@ async function reconcileMobileBackgroundSync(): Promise<boolean> {
   const catalogRuntime = ManagedRuntime.make(
     ConnectionStorage.layer.pipe(Layer.provide(Runtime.layer)),
   );
-  const hasEligibleEnvironment = await catalogRuntime
-    .runPromise(
-      loadPersistedCatalogEntries().pipe(
-        Effect.map((entries) =>
-          [...entries.values()].some(
-            (entry) =>
-              entry.enabled &&
-              entry.unsupportedReason === undefined &&
-              connectionRoutes(entry).some(
-                (route) =>
-                  route.target._tag === "BearerConnectionTarget" &&
-                  Option.isSome(route.profile) &&
-                  route.profile.value._tag === "BearerConnectionProfile",
-              ),
-          ),
-        ),
-      ),
-    )
-    .catch(() => false);
+  let hasEligibleEnvironment: boolean | undefined;
+  try {
+    hasEligibleEnvironment = await catalogRuntime.runPromise(
+      Effect.gen(function* () {
+        const credentials = yield* CredentialStore.ConnectionCredentialStore;
+        const entries = yield* loadPersistedCatalogEntries();
+        const eligible = [...entries.values()].filter(
+          (entry) => entry.enabled && entry.unsupportedReason === undefined,
+        );
+        const readable = yield* Effect.forEach(eligible, (entry) =>
+          Effect.forEach(
+            connectionRoutes(entry).filter(
+              (route) =>
+                route.target._tag === "BearerConnectionTarget" &&
+                Option.isSome(route.profile) &&
+                route.profile.value._tag === "BearerConnectionProfile",
+            ),
+            (route) =>
+              credentials
+                .get(credentialConnectionId(connectionRouteId(route.target)))
+                .pipe(Effect.map((value) => Option.isSome(value))),
+          ).pipe(Effect.map((routes) => routes.some(Boolean))),
+        );
+        return readable.some(Boolean);
+      }),
+    );
+  } catch {
+    hasEligibleEnvironment = undefined;
+  }
   await catalogRuntime.dispose();
   const registered = await TaskManager.isTaskRegisteredAsync(MOBILE_BACKGROUND_SYNC_TASK);
+  if (hasEligibleEnvironment === undefined) return registered;
   if (!hasEligibleEnvironment) {
     if (registered) await BackgroundTask.unregisterTaskAsync(MOBILE_BACKGROUND_SYNC_TASK);
     return false;

@@ -1,0 +1,14 @@
+diff --git a/ios/BackgroundTaskModule.swift b/ios/BackgroundTaskModule.swift
+index f0f4e414124b17a86f8e0a57dabf8f76afd6ce09..5bdbc123345cc222e81e9e00762456f1acf1acfe 100644
+--- a/ios/BackgroundTaskModule.swift
++++ b/ios/BackgroundTaskModule.swift
+@@ -72,9 +72,6 @@ public class BackgroundTaskModule: Module {
+   }
+ 
+   @objc func handleTasksExpiredNotification(_ notification: Notification) {
+-    guard let url = notification.userInfo?["url"] as? URL else {
+-      return
+-    }
+     self.sendEvent(onTasksExpired, [:])
+   }
+ }

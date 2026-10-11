@@ -5,8 +5,6 @@ import {
 } from "@supacode/client-runtime/platform";
 import { ConnectionTransientError } from "@supacode/client-runtime/connection";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
-import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as SecureStore from "expo-secure-store";
@@ -52,6 +50,9 @@ interface CatalogStore {
   ) => Effect.Effect<void, ConnectionTransientError>;
 }
 
+const storageLocks = new WeakMap<object, Semaphore.Semaphore>();
+const migratedCatalogStorages = new WeakSet<object>();
+
 export const make = Effect.fn("mobile.connectionStorage.makeCatalogStore")(function* () {
   const storage = yield* MobileSecureStorage.MobileSecureStorage;
   const getItem = (key: string) =>
@@ -62,8 +63,13 @@ export const make = Effect.fn("mobile.connectionStorage.makeCatalogStore")(funct
       .pipe(Effect.mapError((cause) => catalogError("save", cause)));
   const deleteItem = (key: string) =>
     storage.removeItem(key).pipe(Effect.mapError((cause) => catalogError("delete", cause)));
-  const state = yield* Ref.make<Option.Option<ConnectionCatalogDocumentType>>(Option.none());
-  const lock = yield* Semaphore.make(1);
+  const lock =
+    storageLocks.get(storage) ??
+    (() => {
+      const created = Semaphore.makeUnsafe(1);
+      storageLocks.set(storage, created);
+      return created;
+    })();
 
   const loadLegacyCatalog = Effect.fn("mobile.connectionStorage.loadLegacyCatalog")(function* () {
     const legacyRaw = yield* getItem(LEGACY_CONNECTIONS_KEY);
@@ -87,14 +93,9 @@ export const make = Effect.fn("mobile.connectionStorage.makeCatalogStore")(funct
   });
 
   const loadUnlocked = Effect.fn("mobile.connectionStorage.loadCatalog")(function* () {
-    const cached = yield* Ref.get(state);
-    if (Option.isSome(cached)) {
-      return cached.value;
-    }
     const raw = yield* getItem(CONNECTION_CATALOG_KEY);
-    let catalog: ConnectionCatalogDocumentType;
     if (raw !== null && raw.trim() !== "") {
-      catalog = yield* decodeCatalog(raw).pipe(
+      const catalog = yield* decodeCatalog(raw).pipe(
         Effect.catch((error) =>
           Effect.logWarning("Discarding corrupt mobile connection catalog", error).pipe(
             Effect.andThen(deleteItem(CONNECTION_CATALOG_KEY)),
@@ -102,13 +103,14 @@ export const make = Effect.fn("mobile.connectionStorage.makeCatalogStore")(funct
           ),
         ),
       );
-      const encoded = yield* encodeCatalog(catalog);
-      yield* setCatalogItem(encoded);
-    } else {
-      catalog = yield* loadLegacyCatalog();
+      if (!migratedCatalogStorages.has(storage)) {
+        const encoded = yield* encodeCatalog(catalog);
+        yield* setCatalogItem(encoded);
+        migratedCatalogStorages.add(storage);
+      }
+      return catalog;
     }
-    yield* Ref.set(state, Option.some(catalog));
-    return catalog;
+    return yield* loadLegacyCatalog();
   });
 
   const read = lock.withPermits(1)(loadUnlocked());
@@ -119,7 +121,6 @@ export const make = Effect.fn("mobile.connectionStorage.makeCatalogStore")(funct
           const next = transform(yield* loadUnlocked());
           const encoded = yield* encodeCatalog(next);
           yield* setCatalogItem(encoded);
-          yield* Ref.set(state, Option.some(next));
         }),
       );
     },

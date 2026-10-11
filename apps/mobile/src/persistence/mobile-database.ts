@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import type { SQLiteDatabase } from "expo-sqlite";
 
 const DATABASE_NAME = "supacode-client.db";
@@ -273,14 +274,18 @@ const makeAvailable = Effect.gen(function* () {
     }),
     (openDatabase) => Effect.promise(() => openDatabase.closeAsync()).pipe(Effect.ignore),
   );
+  const writeLock = Semaphore.makeUnsafe(1);
 
   yield* Effect.tryPromise({
     try: async () => {
-      await database.execAsync("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
+      await database.execAsync(
+        "PRAGMA journal_mode = WAL; PRAGMA checkpoint_fullfsync = ON; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;",
+      );
       const schema = await database.getFirstAsync<{ readonly user_version: number }>(
         "PRAGMA user_version",
       );
       await database.withExclusiveTransactionAsync(async (transaction) => {
+        await transaction.execAsync("PRAGMA busy_timeout = 5000;");
         await transaction.execAsync(`
               CREATE TABLE IF NOT EXISTS client_cache (
                 environment_id TEXT NOT NULL,
@@ -348,253 +353,276 @@ const makeAvailable = Effect.gen(function* () {
     saveCache: Effect.fn("MobileDatabase.saveCache")(
       (environmentId, kind, cacheKey, schemaVersion, payload) => {
         if (kind !== "shell" && kind !== "thread") {
-          return Effect.tryPromise({
-            try: () =>
-              database.runAsync(
-                `INSERT INTO client_cache
+          return writeLock.withPermits(1)(
+            Effect.tryPromise({
+              try: () =>
+                database.runAsync(
+                  `INSERT INTO client_cache
                         (environment_id, kind, cache_key, schema_version, payload, updated_at)
                        VALUES (?, ?, ?, ?, ?, ?)
                        ON CONFLICT (environment_id, kind, cache_key) DO UPDATE SET
                          schema_version = excluded.schema_version,
                          payload = excluded.payload,
                          updated_at = excluded.updated_at`,
-                environmentId,
-                kind,
-                cacheKey,
-                schemaVersion,
-                payload,
-                Date.now(),
-              ),
-            catch: databaseError("save-cache"),
-          }).pipe(Effect.asVoid);
+                  environmentId,
+                  kind,
+                  cacheKey,
+                  schemaVersion,
+                  payload,
+                  Date.now(),
+                ),
+              catch: databaseError("save-cache"),
+            }).pipe(Effect.asVoid),
+          );
         }
-        return Effect.tryPromise({
-          try: () =>
-            database.withExclusiveTransactionAsync(async (transaction) => {
-              await transaction.runAsync(
-                `INSERT INTO client_cache
+        return writeLock.withPermits(1)(
+          Effect.tryPromise({
+            try: () =>
+              database.withExclusiveTransactionAsync(async (transaction) => {
+                await transaction.execAsync("PRAGMA busy_timeout = 5000;");
+                await transaction.runAsync(
+                  `INSERT INTO client_cache
                         (environment_id, kind, cache_key, schema_version, payload, updated_at)
                        VALUES (?, ?, ?, ?, ?, ?)
                        ON CONFLICT (environment_id, kind, cache_key) DO UPDATE SET
                          schema_version = excluded.schema_version,
                          payload = excluded.payload,
                          updated_at = excluded.updated_at`,
-                environmentId,
-                kind,
-                cacheKey,
-                schemaVersion,
-                payload,
-                Date.now(),
-              );
-              if (kind === "shell" || kind === "thread") {
-                const sequence = snapshotSequenceFromPayload(payload);
-                if (sequence === undefined) {
-                  await transaction.runAsync(
-                    `DELETE FROM client_cache_sequence
+                  environmentId,
+                  kind,
+                  cacheKey,
+                  schemaVersion,
+                  payload,
+                  Date.now(),
+                );
+                if (kind === "shell" || kind === "thread") {
+                  const sequence = snapshotSequenceFromPayload(payload);
+                  if (sequence === undefined) {
+                    await transaction.runAsync(
+                      `DELETE FROM client_cache_sequence
                              WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
-                    environmentId,
-                    kind,
-                    cacheKey,
-                  );
-                } else {
-                  await transaction.runAsync(
-                    `INSERT INTO client_cache_sequence
+                      environmentId,
+                      kind,
+                      cacheKey,
+                    );
+                  } else {
+                    await transaction.runAsync(
+                      `INSERT INTO client_cache_sequence
                             (environment_id, kind, cache_key, snapshot_sequence)
                            VALUES (?, ?, ?, ?)
                            ON CONFLICT (environment_id, kind, cache_key) DO UPDATE SET
                              snapshot_sequence = excluded.snapshot_sequence`,
-                    environmentId,
-                    kind,
-                    cacheKey,
-                    sequence,
-                  );
+                      environmentId,
+                      kind,
+                      cacheKey,
+                      sequence,
+                    );
+                  }
                 }
-              }
-            }),
-          catch: databaseError("save-cache"),
-        }).pipe(Effect.asVoid);
+              }),
+            catch: databaseError("save-cache"),
+          }).pipe(Effect.asVoid),
+        );
       },
     ),
     saveCacheIfNewer: Effect.fn("MobileDatabase.saveCacheIfNewer")(
       (environmentId, kind, cacheKey, schemaVersion, payload, snapshotSequence) => {
         let saved = false;
-        return Effect.tryPromise({
-          try: () =>
-            database.withExclusiveTransactionAsync(async (transaction) => {
-              const sequenceRow = await transaction.getFirstAsync<{
-                readonly snapshotSequence: number;
-              }>(
-                `SELECT snapshot_sequence AS snapshotSequence
+        return writeLock.withPermits(1)(
+          Effect.tryPromise({
+            try: () =>
+              database.withExclusiveTransactionAsync(async (transaction) => {
+                await transaction.execAsync("PRAGMA busy_timeout = 5000;");
+                const sequenceRow = await transaction.getFirstAsync<{
+                  readonly snapshotSequence: number;
+                }>(
+                  `SELECT snapshot_sequence AS snapshotSequence
                          FROM client_cache_sequence
                          WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
-                environmentId,
-                kind,
-                cacheKey,
-              );
-              const cacheRow = await transaction.getFirstAsync<{ readonly payload: string }>(
-                `SELECT payload
+                  environmentId,
+                  kind,
+                  cacheKey,
+                );
+                const cacheRow = await transaction.getFirstAsync<{ readonly payload: string }>(
+                  `SELECT payload
                          FROM client_cache
                          WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
-                environmentId,
-                kind,
-                cacheKey,
-              );
-              let cachedSequence = sequenceRow?.snapshotSequence;
-              if (cachedSequence === undefined && cacheRow !== null)
-                cachedSequence = snapshotSequenceFromPayload(cacheRow.payload);
-              if (cachedSequence !== undefined && cachedSequence > snapshotSequence) return;
-              if (cachedSequence === snapshotSequence && cacheRow?.payload === payload) return;
+                  environmentId,
+                  kind,
+                  cacheKey,
+                );
+                let cachedSequence = sequenceRow?.snapshotSequence;
+                if (cachedSequence === undefined && cacheRow !== null)
+                  cachedSequence = snapshotSequenceFromPayload(cacheRow.payload);
+                if (cachedSequence !== undefined && cachedSequence > snapshotSequence) return;
+                if (cachedSequence === snapshotSequence && cacheRow?.payload === payload) return;
 
-              await transaction.runAsync(
-                `INSERT INTO client_cache
+                await transaction.runAsync(
+                  `INSERT INTO client_cache
                         (environment_id, kind, cache_key, schema_version, payload, updated_at)
                        VALUES (?, ?, ?, ?, ?, ?)
                        ON CONFLICT (environment_id, kind, cache_key) DO UPDATE SET
                          schema_version = excluded.schema_version,
                          payload = excluded.payload,
                          updated_at = excluded.updated_at`,
-                environmentId,
-                kind,
-                cacheKey,
-                schemaVersion,
-                payload,
-                Date.now(),
-              );
-              await transaction.runAsync(
-                `INSERT INTO client_cache_sequence
+                  environmentId,
+                  kind,
+                  cacheKey,
+                  schemaVersion,
+                  payload,
+                  Date.now(),
+                );
+                await transaction.runAsync(
+                  `INSERT INTO client_cache_sequence
                         (environment_id, kind, cache_key, snapshot_sequence)
                        VALUES (?, ?, ?, ?)
                        ON CONFLICT (environment_id, kind, cache_key) DO UPDATE SET
                          snapshot_sequence = excluded.snapshot_sequence`,
-                environmentId,
-                kind,
-                cacheKey,
-                snapshotSequence,
-              );
-              saved = true;
-            }),
-          catch: databaseError("save-cache"),
-        }).pipe(Effect.map(() => saved));
-      },
-    ),
-    removeCache: Effect.fn("MobileDatabase.removeCache")((environmentId, kind, cacheKey) =>
-      Effect.tryPromise({
-        try: () =>
-          database.withExclusiveTransactionAsync(async (transaction) => {
-            await transaction.runAsync(
-              `DELETE FROM client_cache
-                       WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
-              environmentId,
-              kind,
-              cacheKey,
-            );
-            await transaction.runAsync(
-              `DELETE FROM client_cache_sequence
-                       WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
-              environmentId,
-              kind,
-              cacheKey,
-            );
-          }),
-        catch: databaseError("remove-cache"),
-      }).pipe(Effect.asVoid),
-    ),
-    removeCacheIfSequence: Effect.fn("MobileDatabase.removeCacheIfSequence")(
-      (environmentId, kind, cacheKey, snapshotSequence) => {
-        let removed = false;
-        return Effect.tryPromise({
-          try: () =>
-            database.withExclusiveTransactionAsync(async (transaction) => {
-              const row = await transaction.getFirstAsync<{
-                readonly snapshotSequence: number;
-              }>(
-                `SELECT snapshot_sequence AS snapshotSequence
-                         FROM client_cache_sequence
-                         WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
-                environmentId,
-                kind,
-                cacheKey,
-              );
-              if (row === null) {
-                const cacheRow = await transaction.getFirstAsync<{ readonly payload: string }>(
-                  `SELECT payload
-                           FROM client_cache
-                           WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
                   environmentId,
                   kind,
                   cacheKey,
+                  snapshotSequence,
                 );
-                if (
-                  cacheRow === null ||
-                  snapshotSequenceFromPayload(cacheRow.payload) !== snapshotSequence
-                ) {
-                  return;
-                }
-              } else if (row.snapshotSequence !== snapshotSequence) {
-                return;
-              }
+                saved = true;
+              }),
+            catch: databaseError("save-cache"),
+          }).pipe(Effect.map(() => saved)),
+        );
+      },
+    ),
+    removeCache: Effect.fn("MobileDatabase.removeCache")((environmentId, kind, cacheKey) =>
+      writeLock.withPermits(1)(
+        Effect.tryPromise({
+          try: () =>
+            database.withExclusiveTransactionAsync(async (transaction) => {
+              await transaction.execAsync("PRAGMA busy_timeout = 5000;");
               await transaction.runAsync(
                 `DELETE FROM client_cache
-                         WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
+                       WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
                 environmentId,
                 kind,
                 cacheKey,
               );
               await transaction.runAsync(
                 `DELETE FROM client_cache_sequence
-                         WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
+                       WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
                 environmentId,
                 kind,
                 cacheKey,
               );
-              removed = true;
             }),
           catch: databaseError("remove-cache"),
-        }).pipe(Effect.map(() => removed));
+        }).pipe(Effect.asVoid),
+      ),
+    ),
+    removeCacheIfSequence: Effect.fn("MobileDatabase.removeCacheIfSequence")(
+      (environmentId, kind, cacheKey, snapshotSequence) => {
+        let removed = false;
+        return writeLock.withPermits(1)(
+          Effect.tryPromise({
+            try: () =>
+              database.withExclusiveTransactionAsync(async (transaction) => {
+                await transaction.execAsync("PRAGMA busy_timeout = 5000;");
+                const row = await transaction.getFirstAsync<{
+                  readonly snapshotSequence: number;
+                }>(
+                  `SELECT snapshot_sequence AS snapshotSequence
+                         FROM client_cache_sequence
+                         WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
+                  environmentId,
+                  kind,
+                  cacheKey,
+                );
+                if (row === null) {
+                  const cacheRow = await transaction.getFirstAsync<{ readonly payload: string }>(
+                    `SELECT payload
+                           FROM client_cache
+                           WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
+                    environmentId,
+                    kind,
+                    cacheKey,
+                  );
+                  if (
+                    cacheRow === null ||
+                    snapshotSequenceFromPayload(cacheRow.payload) !== snapshotSequence
+                  ) {
+                    return;
+                  }
+                } else if (row.snapshotSequence !== snapshotSequence) {
+                  return;
+                }
+                await transaction.runAsync(
+                  `DELETE FROM client_cache
+                         WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
+                  environmentId,
+                  kind,
+                  cacheKey,
+                );
+                await transaction.runAsync(
+                  `DELETE FROM client_cache_sequence
+                         WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
+                  environmentId,
+                  kind,
+                  cacheKey,
+                );
+                removed = true;
+              }),
+            catch: databaseError("remove-cache"),
+          }).pipe(Effect.map(() => removed)),
+        );
       },
     ),
     clearCacheKind: Effect.fn("MobileDatabase.clearCacheKind")((environmentId, kind) =>
-      Effect.tryPromise({
-        try: () =>
-          database.withExclusiveTransactionAsync(async (transaction) => {
-            await transaction.runAsync(
-              "DELETE FROM client_cache WHERE environment_id = ? AND kind = ?",
-              environmentId,
-              kind,
-            );
-            await transaction.runAsync(
-              "DELETE FROM client_cache_sequence WHERE environment_id = ? AND kind = ?",
-              environmentId,
-              kind,
-            );
-          }),
-        catch: databaseError("clear-cache-kind"),
-      }).pipe(Effect.asVoid),
+      writeLock.withPermits(1)(
+        Effect.tryPromise({
+          try: () =>
+            database.withExclusiveTransactionAsync(async (transaction) => {
+              await transaction.execAsync("PRAGMA busy_timeout = 5000;");
+              await transaction.runAsync(
+                "DELETE FROM client_cache WHERE environment_id = ? AND kind = ?",
+                environmentId,
+                kind,
+              );
+              await transaction.runAsync(
+                "DELETE FROM client_cache_sequence WHERE environment_id = ? AND kind = ?",
+                environmentId,
+                kind,
+              );
+            }),
+          catch: databaseError("clear-cache-kind"),
+        }).pipe(Effect.asVoid),
+      ),
     ),
     clearEnvironmentCache: Effect.fn("MobileDatabase.clearEnvironmentCache")((environmentId) =>
+      writeLock.withPermits(1)(
+        Effect.tryPromise({
+          try: () =>
+            database.withExclusiveTransactionAsync(async (transaction) => {
+              await transaction.execAsync("PRAGMA busy_timeout = 5000;");
+              await transaction.runAsync(
+                "DELETE FROM client_cache WHERE environment_id = ?",
+                environmentId,
+              );
+              await transaction.runAsync(
+                "DELETE FROM client_cache_sequence WHERE environment_id = ?",
+                environmentId,
+              );
+            }),
+          catch: databaseError("clear-environment-cache"),
+        }).pipe(Effect.asVoid),
+      ),
+    ),
+    clearAllCaches: writeLock.withPermits(1)(
       Effect.tryPromise({
         try: () =>
           database.withExclusiveTransactionAsync(async (transaction) => {
-            await transaction.runAsync(
-              "DELETE FROM client_cache WHERE environment_id = ?",
-              environmentId,
-            );
-            await transaction.runAsync(
-              "DELETE FROM client_cache_sequence WHERE environment_id = ?",
-              environmentId,
-            );
+            await transaction.execAsync("PRAGMA busy_timeout = 5000;");
+            await transaction.runAsync("DELETE FROM client_cache");
+            await transaction.runAsync("DELETE FROM client_cache_sequence");
           }),
-        catch: databaseError("clear-environment-cache"),
+        catch: databaseError("clear-all-caches"),
       }).pipe(Effect.asVoid),
     ),
-    clearAllCaches: Effect.tryPromise({
-      try: () =>
-        database.withExclusiveTransactionAsync(async (transaction) => {
-          await transaction.runAsync("DELETE FROM client_cache");
-          await transaction.runAsync("DELETE FROM client_cache_sequence");
-        }),
-      catch: databaseError("clear-all-caches"),
-    }).pipe(Effect.asVoid),
     inspectCaches: Effect.tryPromise({
       try: () =>
         database.getAllAsync<unknown>(`
@@ -630,19 +658,21 @@ const makeAvailable = Effect.gen(function* () {
       catch: databaseError("load-preferences"),
     }).pipe(Effect.map(Option.fromNullishOr)),
     savePreferencesJson: Effect.fn("MobileDatabase.savePreferencesJson")((payload, updatedAt) =>
-      Effect.tryPromise({
-        try: () =>
-          database.runAsync(
-            `INSERT INTO client_preferences (singleton, payload, updated_at)
+      writeLock.withPermits(1)(
+        Effect.tryPromise({
+          try: () =>
+            database.runAsync(
+              `INSERT INTO client_preferences (singleton, payload, updated_at)
                    VALUES (1, ?, ?)
                    ON CONFLICT (singleton) DO UPDATE SET
                      payload = excluded.payload,
                      updated_at = excluded.updated_at`,
-            payload,
-            updatedAt,
-          ),
-        catch: databaseError("save-preferences"),
-      }).pipe(Effect.asVoid),
+              payload,
+              updatedAt,
+            ),
+          catch: databaseError("save-preferences"),
+        }).pipe(Effect.asVoid),
+      ),
     ),
   });
 });

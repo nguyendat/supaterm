@@ -105,7 +105,9 @@ export const connectOverRoutes = Effect.fn("ConnectionDriver.connectOverRoutes")
   connectRoute: (
     route: ConnectionRoute,
   ) => Effect.Effect<A, ConnectionAttemptError, R | Scope.Scope>,
+  options?: { readonly attemptTimeoutMs?: number },
 ) {
+  const attemptTimeoutMs = options?.attemptTimeoutMs ?? 15_000;
   const routes = connectionRoutes(entry);
   const checks =
     routes.length === 1
@@ -137,7 +139,7 @@ export const connectOverRoutes = Effect.fn("ConnectionDriver.connectOverRoutes")
     const routeScope = yield* Scope.fork(attemptScope);
     const result = yield* connectRoute(route).pipe(
       Effect.timeoutOrElse({
-        duration: "15 seconds",
+        duration: attemptTimeoutMs,
         orElse: () =>
           Effect.fail(
             new ConnectionTransientError({
