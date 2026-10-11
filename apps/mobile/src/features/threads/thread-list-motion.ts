@@ -1,5 +1,7 @@
 const MAX_CHANGED_ROWS = 20;
 export const THREAD_LIST_MOTION_DURATION = 220;
+/** Rows entering a bottom-aligned list wait until its slide has mostly settled. */
+export const THREAD_LIST_ALIGNED_ENTRY_DELAY = 140;
 
 export type ThreadListMotionItem = {
   readonly key: string;

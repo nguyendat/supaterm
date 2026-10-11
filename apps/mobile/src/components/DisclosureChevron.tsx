@@ -12,16 +12,22 @@ import { isKeyboardMotionSuppressed } from "../lib/motionInput";
 import { MOTION_ENTER_DURATION_MS } from "../lib/motionTiming";
 import { SymbolView } from "./AppSymbol";
 
+const RIGHT_CHEVRON_EXPANDED_ANGLE = { down: 90, up: -90 } as const;
+
 export function DisclosureChevron(
   props: Pick<ComponentProps<typeof SymbolView>, "size" | "tintColor" | "tintColorClassName"> & {
     readonly expanded: boolean;
     readonly collapsedDirection?: "right" | "down";
+    /** Where a right-pointing chevron turns when expanded. */
+    readonly expandedDirection?: "down" | "up";
     readonly duration?: number;
   },
 ) {
   const reducedMotion = useReducedMotionPreference() || isKeyboardMotionSuppressed();
   const direction = props.collapsedDirection ?? "down";
-  const angle = props.expanded ? (direction === "right" ? 90 : 180) : 0;
+  const expandedAngle =
+    direction === "right" ? RIGHT_CHEVRON_EXPANDED_ANGLE[props.expandedDirection ?? "down"] : 180;
+  const angle = props.expanded ? expandedAngle : 0;
   const duration = props.duration ?? MOTION_ENTER_DURATION_MS;
   const rotation = useSharedValue(angle);
   useLayoutEffect(() => {

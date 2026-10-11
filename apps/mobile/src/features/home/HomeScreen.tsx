@@ -4,6 +4,7 @@ import { type LegendListRef } from "@legendapp/list/react-native";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import Animated from "react-native-reanimated";
 import { useThreadListMotion } from "../threads/use-thread-list-motion";
+import { useListRestoreAnchor } from "../../lib/useListRestoreAnchor";
 import {
   type EnvironmentProject,
   type EnvironmentThreadShell,
@@ -640,6 +641,7 @@ export function HomeScreen(props: HomeScreenProps) {
         snoozeEnvironmentIds,
         queuedThreadKeys,
         shelfPreferencesLoading: !shelfPreferencesLoaded,
+        shelvesExpandUpward: true,
       }),
     [
       nowMinute,
@@ -671,6 +673,24 @@ export function HomeScreen(props: HomeScreenProps) {
     lift: searchKeyboardLift,
   });
   const prepareListMotion = listMotion.prepare;
+  // A toggled shelf header stays where it was tapped while its rows open or
+  // close above it. A long list scrolled to its top opens downward instead,
+  // so the rows land on screen.
+  const shelfAnchor = useListRestoreAnchor();
+  const anchorShelf = shelfAnchor.anchor;
+  const toggleShelf = useCallback(
+    (key: ThreadListV2ListItem["key"], toggle: () => void) => {
+      const state = listRef.current?.getState();
+      if (state?.isAtStart === true && state.alignItemsAtEndPadding === 0) {
+        prepareListMotion();
+      } else {
+        anchorShelf(key);
+        prepareListMotion({ anchored: true });
+      }
+      toggle();
+    },
+    [anchorShelf, prepareListMotion],
+  );
   const renderV2ItemContent = useCallback(
     ({ item }: { readonly item: ThreadListV2ListItem }) => {
       if (item.type === "v2-pending") {
@@ -706,7 +726,8 @@ export function HomeScreen(props: HomeScreenProps) {
             count={item.count}
             disabled={item.disabled}
             expanded={item.expanded}
-            onToggle={toggleActiveShelf}
+            expandsUpward={item.expandsUpward}
+            onToggle={() => toggleShelf(item.key, toggleActiveShelf)}
           />
         );
       }
@@ -719,7 +740,8 @@ export function HomeScreen(props: HomeScreenProps) {
             count={item.count}
             disabled={item.disabled}
             expanded={item.expanded}
-            onToggle={togglePinnedShelf}
+            expandsUpward={item.expandsUpward}
+            onToggle={() => toggleShelf(item.key, togglePinnedShelf)}
           />
         );
       }
@@ -729,7 +751,8 @@ export function HomeScreen(props: HomeScreenProps) {
             count={item.count}
             disabled={item.disabled}
             expanded={item.expanded}
-            onToggle={toggleWorkingShelf}
+            expandsUpward={item.expandsUpward}
+            onToggle={() => toggleShelf(item.key, toggleWorkingShelf)}
           />
         );
       }
@@ -739,7 +762,8 @@ export function HomeScreen(props: HomeScreenProps) {
             count={item.count}
             disabled={item.disabled}
             expanded={item.expanded}
-            onToggle={toggleSnoozedShelf}
+            expandsUpward={item.expandsUpward}
+            onToggle={() => toggleShelf(item.key, toggleSnoozedShelf)}
           />
         );
       }
@@ -749,10 +773,8 @@ export function HomeScreen(props: HomeScreenProps) {
             count={item.count}
             disabled={item.disabled}
             expanded={item.expanded}
-            onToggle={() => {
-              prepareListMotion();
-              toggleSettledShelf();
-            }}
+            expandsUpward={item.expandsUpward}
+            onToggle={() => toggleShelf(item.key, toggleSettledShelf)}
           />
         );
       }
@@ -852,12 +874,12 @@ export function HomeScreen(props: HomeScreenProps) {
       threadSearchMatchByKey,
       titleRegenerationEnvironmentIds,
       showMoreSettled,
-      toggleSettledShelf,
-      prepareListMotion,
-      toggleSnoozedShelf,
-      togglePinnedShelf,
+      toggleShelf,
       toggleActiveShelf,
+      togglePinnedShelf,
       toggleWorkingShelf,
+      toggleSnoozedShelf,
+      toggleSettledShelf,
       v2ProjectTitleByProjectKey,
       props.searchQuery,
     ],
@@ -1060,6 +1082,8 @@ export function HomeScreen(props: HomeScreenProps) {
               )
             }
             style={{ flex: 1 }}
+            maintainVisibleContentPosition={shelfAnchor.maintainVisibleContentPosition}
+            onItemSizeChanged={shelfAnchor.onItemSizeChanged}
             sharedValues={listMotion.sharedValues}
             itemsContainerStyle={listMotion.alignmentStyle}
             alignItemsAtEnd
@@ -1067,6 +1091,9 @@ export function HomeScreen(props: HomeScreenProps) {
             contentInsetAdjustmentBehavior="never"
             contentInset={Platform.OS === "ios" ? { top: insets.top } : undefined}
             contentInsetStartAdjustment={Platform.OS === "ios" ? insets.top : 0}
+            // The scroll view starts below the inset; the list's scroll anchoring
+            // needs to know that before the first scroll event reports it.
+            initialScrollOffset={Platform.OS === "ios" ? -insets.top : undefined}
             showsVerticalScrollIndicator={false}
             keyboardDismissMode="on-drag"
             keyboardShouldPersistTaps="handled"

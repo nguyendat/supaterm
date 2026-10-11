@@ -704,6 +704,7 @@ function ThreadNavigationSidebarPane(
               count={item.count}
               disabled={item.disabled}
               expanded={item.expanded}
+              expandsUpward={item.expandsUpward}
               onToggle={toggleActiveShelf}
               pane="sidebar"
             />
@@ -714,6 +715,7 @@ function ThreadNavigationSidebarPane(
               count={item.count}
               disabled={item.disabled}
               expanded={item.expanded}
+              expandsUpward={item.expandsUpward}
               onToggle={togglePinnedShelf}
               pane="sidebar"
             />
@@ -724,6 +726,7 @@ function ThreadNavigationSidebarPane(
               count={item.count}
               disabled={item.disabled}
               expanded={item.expanded}
+              expandsUpward={item.expandsUpward}
               onToggle={toggleWorkingShelf}
               pane="sidebar"
             />
@@ -734,6 +737,7 @@ function ThreadNavigationSidebarPane(
               count={item.count}
               disabled={item.disabled}
               expanded={item.expanded}
+              expandsUpward={item.expandsUpward}
               onToggle={toggleSnoozedShelf}
               pane="sidebar"
             />
@@ -744,6 +748,7 @@ function ThreadNavigationSidebarPane(
               count={item.count}
               disabled={item.disabled}
               expanded={item.expanded}
+              expandsUpward={item.expandsUpward}
               onToggle={() => {
                 prepareListMotion();
                 toggleSettledShelf();

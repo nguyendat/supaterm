@@ -412,6 +412,7 @@ describe("buildThreadListV2Items", () => {
         key: "v2-active-header",
         count: 3,
         expanded: false,
+        expandsUpward: false,
         disabled: false,
       },
     ]);
@@ -565,6 +566,7 @@ describe("buildThreadListV2Items", () => {
         key: "v2-pinned-shelf", // gitleaks:allow -- static list item identity
         count: 1,
         expanded: false,
+        expandsUpward: false,
         disabled: false,
       },
     ]);
@@ -1297,6 +1299,25 @@ describe("buildThreadListV2ListItems", () => {
         (item) => item.type === "v2-show-more",
       ),
     ).toBe(false);
+    const upward = buildThreadListV2ListItems({ ...input, shelvesExpandUpward: true });
+    expect(
+      upward.map((item) => (item.type === "v2-thread" ? item.item.thread.id : item.type)),
+    ).toEqual([
+      "v2-show-more",
+      "settled-two",
+      "v2-settled-shelf",
+      "snoozed",
+      "v2-snoozed-shelf",
+      "working",
+      "v2-working-shelf",
+      "active",
+      "v2-active-header",
+      "pinned",
+      "v2-pinned-shelf",
+    ]);
+    expect(upward.flatMap((item) => ("expandsUpward" in item ? [item.expandsUpward] : []))).toEqual(
+      [true, true, true, true, true],
+    );
   });
 
   const layout = buildThreadListV2Items({
@@ -1399,6 +1420,33 @@ describe("buildThreadListV2ListItems", () => {
       ["pending", false, false],
       ["draft", true, true],
       ["draft", false, false],
+    ]);
+  });
+
+  it("keeps queued tasks inside Active when shelves expand upward", () => {
+    const items = buildThreadListV2ListItems({
+      items: layout.items,
+      settledCount: layout.settledCount,
+      settledShelfHeaderIndex: layout.settledShelfHeaderIndex,
+      pendingTasks: [makeDraftTask("draft-1"), makePendingTask("queued-1")],
+      shelvesExpandUpward: true,
+    });
+
+    expect(
+      items.map((item) =>
+        item.type === "v2-thread"
+          ? [item.item.thread.id, item.showTrailingDivider]
+          : item.type === "v2-pending"
+            ? [item.pendingTask.title, item.showTrailingDivider]
+            : item.type,
+      ),
+    ).toEqual([
+      ["settled", false],
+      "v2-settled-shelf",
+      ["active", false],
+      ["queued-1", false],
+      "v2-active-header",
+      ["draft-1", false],
     ]);
   });
 
@@ -2195,6 +2243,7 @@ describe("threadListV2ListItemsAreEqual", () => {
       ...identity,
       count: 2,
       expanded: true,
+      expandsUpward: false,
       disabled: false,
     } as const;
     expect(threadListV2ListItemsAreEqual(shelf, { ...shelf })).toBe(true);

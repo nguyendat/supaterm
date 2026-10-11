@@ -6,6 +6,7 @@ import {
   useAnimatedReaction,
   useAnimatedStyle,
   useSharedValue,
+  withDelay,
   withTiming,
   type EntryAnimationsValues,
   type ExitAnimationsValues,
@@ -16,6 +17,7 @@ import {
 import { useReducedMotionPreference } from "../../lib/useReducedMotionPreference";
 import {
   shouldAnimateThreadList,
+  THREAD_LIST_ALIGNED_ENTRY_DELAY,
   THREAD_LIST_MOTION_DURATION,
   type ThreadListMotionItem,
 } from "./thread-list-motion";
@@ -43,13 +45,31 @@ export function useThreadListMotion(input: {
   const deadline = useSharedValue(0);
   const alignmentPadding = useSharedValue(0);
   const alignmentOffset = useSharedValue(0);
-  const prepare = useCallback(() => {
-    if (!ready || reducedMotion || scrolling || searching || isKeyboardMotionSuppressed()) return;
-    runOnUI(() => {
-      "worklet";
-      deadline.set(performance.now() + 300);
-    })();
-  }, [deadline, ready, reducedMotion, scrolling, searching]);
+  const anchoredUntil = useSharedValue(0);
+  const skipUntil = useRef(0);
+  /** Call before a local change. An anchored change is one the list keeps in
+      place by scrolling once its rows overflow, so it switches in place there. */
+  const prepare = useCallback(
+    (options?: { readonly anchored?: boolean }) => {
+      if (!ready || reducedMotion || scrolling || searching || isKeyboardMotionSuppressed()) return;
+      const anchored = options?.anchored === true;
+      if (anchored && alignmentPadding.get() === 0) {
+        skipUntil.current = performance.now() + 300;
+        runOnUI(() => {
+          "worklet";
+          deadline.set(0);
+        })();
+        return;
+      }
+      runOnUI((anchoredChange: boolean) => {
+        "worklet";
+        const until = performance.now() + 300;
+        deadline.set(until);
+        anchoredUntil.set(anchoredChange ? until : 0);
+      })(anchored);
+    },
+    [alignmentPadding, anchoredUntil, deadline, ready, reducedMotion, scrolling, searching],
+  );
   const timing = useMemo(
     () => ({
       duration: THREAD_LIST_MOTION_DURATION,
@@ -61,6 +81,7 @@ export function useThreadListMotion(input: {
   useLayoutEffect(() => {
     const animate =
       ready &&
+      performance.now() >= skipUntil.current &&
       previous.current !== null &&
       !isKeyboardMotionSuppressed() &&
       shouldAnimateThreadList({
@@ -83,7 +104,9 @@ export function useThreadListMotion(input: {
   useAnimatedReaction(
     () => ({ padding: alignmentPadding.value, deadline: deadline.value }),
     (next, previous) => {
-      if (next.deadline === 0) {
+      // An anchored change that overflows is kept in place by the list's scroll
+      // position instead of this offset.
+      if (next.deadline === 0 || (next.padding === 0 && performance.now() < anchoredUntil.value)) {
         alignmentOffset.set(0);
       } else if (previous && next.padding !== previous.padding) {
         if (performance.now() < next.deadline) {
@@ -143,14 +166,19 @@ export function useThreadListMotion(input: {
         performance.now() < deadline.value &&
         values.targetGlobalOriginY + values.targetHeight > 0 &&
         values.targetGlobalOriginY < values.windowHeight;
+      // Rows inserted into a bottom-aligned list slide in over their neighbours,
+      // so they fade in once that slide has nearly settled.
+      const delay = alignmentPadding.value > 0 ? THREAD_LIST_ALIGNED_ENTRY_DELAY : 0;
       return {
         initialValues: {
           opacity: animateEntry ? 0 : 1,
           transform: [{ translateY: animateEntry ? -4 : 0 }],
         },
         animations: {
-          opacity: animateEntry ? withTiming(1, entryTiming) : 1,
-          transform: [{ translateY: animateEntry ? withTiming(0, entryTiming) : 0 }],
+          opacity: animateEntry ? withDelay(delay, withTiming(1, entryTiming)) : 1,
+          transform: [
+            { translateY: animateEntry ? withDelay(delay, withTiming(0, entryTiming)) : 0 },
+          ],
         },
       };
     };
@@ -170,5 +198,5 @@ export function useThreadListMotion(input: {
       };
     };
     return { layout, entering, exiting, alignmentStyle, prepare, sharedValues };
-  }, [alignmentStyle, deadline, prepare, sharedValues, timing]);
+  }, [alignmentPadding, alignmentStyle, deadline, prepare, sharedValues, timing]);
 }

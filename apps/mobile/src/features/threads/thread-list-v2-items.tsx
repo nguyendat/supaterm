@@ -151,6 +151,7 @@ function ThreadListV2Section(props: {
   readonly pane?: "screen" | "sidebar";
   readonly disclosure?: {
     readonly expanded: boolean;
+    readonly expandsUpward?: boolean;
     readonly disabled?: boolean;
     readonly onToggle: () => void;
     readonly accessibilityLabel: string;
@@ -178,6 +179,7 @@ function ThreadListV2Section(props: {
         <DisclosureChevron
           expanded={props.disclosure.expanded}
           collapsedDirection="right"
+          expandedDirection={props.disclosure.expandsUpward ? "up" : "down"}
           duration={THREAD_LIST_MOTION_DURATION}
           size={10}
           tintColorClassName={
@@ -221,6 +223,8 @@ type ThreadListV2ShelfHeaderProps = {
   readonly count: number;
   readonly disabled?: boolean;
   readonly expanded: boolean;
+  /** The shelf's rows sit above the header; see `shelvesExpandUpward`. */
+  readonly expandsUpward?: boolean;
   readonly onToggle: () => void;
   readonly pane?: "screen" | "sidebar";
 };
@@ -243,6 +247,7 @@ function ThreadListV2ShelfHeader(
       pane={props.pane}
       disclosure={{
         expanded: props.expanded,
+        expandsUpward: props.expandsUpward,
         disabled: props.disabled,
         onToggle: props.onToggle,
         accessibilityLabel: `${props.count} ${props.kind} ${props.count === 1 ? "thread" : "threads"}`,

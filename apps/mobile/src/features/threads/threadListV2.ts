@@ -326,42 +326,14 @@ export interface ThreadListV2PendingListItem {
   readonly showTrailingDivider: boolean;
 }
 
-export interface ThreadListV2PinnedShelfListItem {
-  readonly type: "v2-pinned-shelf";
-  readonly key: "v2-pinned-shelf"; // gitleaks:allow -- static list item identity
+/** A collapsible shelf's header row. */
+interface ThreadListV2ShelfHeaderListItem<Type extends string> {
+  readonly type: Type;
+  readonly key: Type;
   readonly count: number;
   readonly expanded: boolean;
-  readonly disabled: boolean;
-}
-
-export interface ThreadListV2ActiveHeaderListItem {
-  readonly type: "v2-active-header";
-  readonly key: "v2-active-header";
-  readonly count: number;
-  readonly expanded: boolean;
-  readonly disabled: boolean;
-}
-
-export interface ThreadListV2ShowMoreListItem {
-  readonly type: "v2-show-more";
-  readonly key: "v2-show-more";
-  readonly hiddenCount: number;
-}
-
-export interface ThreadListV2WorkingShelfListItem {
-  readonly type: "v2-working-shelf";
-  readonly key: "v2-working-shelf";
-  readonly count: number;
-  readonly expanded: boolean;
-  /** See the snoozed shelf header's field. */
-  readonly disabled: boolean;
-}
-
-export interface ThreadListV2SnoozedShelfListItem {
-  readonly type: "v2-snoozed-shelf";
-  readonly key: "v2-snoozed-shelf";
-  readonly count: number;
-  readonly expanded: boolean;
+  /** The shelf's rows sit above the header; see `shelvesExpandUpward`. */
+  readonly expandsUpward: boolean;
   /** Shelf preferences still loading: the toggle is disabled until they
       arrive. Carried on the item because a recycled cell ignores the render
       closure — without it the header would stay visibly disabled (or enabled
@@ -369,13 +341,16 @@ export interface ThreadListV2SnoozedShelfListItem {
   readonly disabled: boolean;
 }
 
-export interface ThreadListV2SettledShelfListItem {
-  readonly type: "v2-settled-shelf";
-  readonly key: "v2-settled-shelf";
-  readonly count: number;
-  readonly expanded: boolean;
-  /** See the snoozed shelf header's field. */
-  readonly disabled: boolean;
+export type ThreadListV2PinnedShelfListItem = ThreadListV2ShelfHeaderListItem<"v2-pinned-shelf">; // gitleaks:allow -- static list item identity
+export type ThreadListV2ActiveHeaderListItem = ThreadListV2ShelfHeaderListItem<"v2-active-header">;
+export type ThreadListV2WorkingShelfListItem = ThreadListV2ShelfHeaderListItem<"v2-working-shelf">;
+export type ThreadListV2SnoozedShelfListItem = ThreadListV2ShelfHeaderListItem<"v2-snoozed-shelf">;
+export type ThreadListV2SettledShelfListItem = ThreadListV2ShelfHeaderListItem<"v2-settled-shelf">;
+
+export interface ThreadListV2ShowMoreListItem {
+  readonly type: "v2-show-more";
+  readonly key: "v2-show-more";
+  readonly hiddenCount: number;
 }
 
 export type ThreadListV2ListItem =
@@ -431,6 +406,7 @@ export function threadListV2ListItemsAreEqual(
         previous.type === item.type &&
         previous.count === item.count &&
         previous.expanded === item.expanded &&
+        previous.expandsUpward === item.expandsUpward &&
         previous.disabled === item.disabled
       );
     case "v2-show-more":
@@ -488,6 +464,9 @@ export function buildThreadListV2ListItems(input: {
   /** True while the shelf expansion preferences are still loading; stamped
       onto both shelf headers so the disabled state reaches recycled cells. */
   readonly shelfPreferencesLoading?: boolean;
+  /** Puts each shelf's rows above its header. A list aligned to its bottom
+      edge needs this so toggling a shelf leaves the header where it was. */
+  readonly shelvesExpandUpward?: boolean;
 }): ThreadListV2ListItem[] {
   const queuedThreadKeys = input.queuedThreadKeys?.size ? input.queuedThreadKeys : undefined;
   const threadItems = input.items.map((item): ThreadListV2ListItem => {
@@ -545,64 +524,86 @@ export function buildThreadListV2ListItems(input: {
   const pinnedCount = input.pinnedCount ?? pinnedEnd;
   const activeCount = input.activeCount ?? activeEnd - pinnedEnd;
   const shelfDisabled = input.shelfPreferencesLoading === true;
+  const expandsUpward = input.shelvesExpandUpward === true;
   const result: ThreadListV2ListItem[] = [];
+  const pushShelf = (
+    header: ThreadListV2ListItem,
+    rows: ReadonlyArray<ThreadListV2ListItem>,
+  ): void => {
+    if (expandsUpward) result.push(...rows, header);
+    else result.push(header, ...rows);
+  };
   if (settledShelfHeaderIndex !== null && settledCount > 0) {
-    result.push({
-      type: "v2-settled-shelf",
-      key: "v2-settled-shelf",
-      count: settledCount,
-      expanded: input.settledShelfExpanded !== false,
-      disabled: shelfDisabled,
-    });
-    if (input.settledShelfExpanded !== false && hiddenSettledCount > 0) {
-      result.push({
-        type: "v2-show-more",
-        key: "v2-show-more",
-        hiddenCount: hiddenSettledCount,
-      });
-    }
-    result.push(...threadItems.slice(settledShelfHeaderIndex));
+    const settledRows = threadItems.slice(settledShelfHeaderIndex);
+    pushShelf(
+      {
+        type: "v2-settled-shelf",
+        key: "v2-settled-shelf",
+        count: settledCount,
+        expanded: input.settledShelfExpanded !== false,
+        expandsUpward,
+        disabled: shelfDisabled,
+      },
+      input.settledShelfExpanded !== false && hiddenSettledCount > 0
+        ? [
+            { type: "v2-show-more", key: "v2-show-more", hiddenCount: hiddenSettledCount },
+            ...settledRows,
+          ]
+        : settledRows,
+    );
   }
   if (snoozedShelfHeaderIndex !== null && snoozedCount > 0) {
-    result.push({
-      type: "v2-snoozed-shelf",
-      key: "v2-snoozed-shelf",
-      count: snoozedCount,
-      expanded: input.snoozedShelfExpanded === true,
-      disabled: shelfDisabled,
-    });
-    result.push(...threadItems.slice(snoozedShelfHeaderIndex, snoozedEnd));
+    pushShelf(
+      {
+        type: "v2-snoozed-shelf",
+        key: "v2-snoozed-shelf",
+        count: snoozedCount,
+        expanded: input.snoozedShelfExpanded === true,
+        expandsUpward,
+        disabled: shelfDisabled,
+      },
+      threadItems.slice(snoozedShelfHeaderIndex, snoozedEnd),
+    );
   }
   if (workingShelfHeaderIndex !== null && workingCount > 0) {
-    result.push({
-      type: "v2-working-shelf",
-      key: "v2-working-shelf",
-      count: workingCount,
-      expanded: input.workingShelfExpanded === true,
-      disabled: shelfDisabled,
-    });
-    result.push(...threadItems.slice(workingShelfHeaderIndex, workingEnd));
+    pushShelf(
+      {
+        type: "v2-working-shelf",
+        key: "v2-working-shelf",
+        count: workingCount,
+        expanded: input.workingShelfExpanded === true,
+        expandsUpward,
+        disabled: shelfDisabled,
+      },
+      threadItems.slice(workingShelfHeaderIndex, workingEnd),
+    );
   }
   if (activeCount > 0 || pendingItems.length > 0) {
-    result.push({
-      type: "v2-active-header",
-      key: "v2-active-header",
-      count: activeCount + pendingItems.length,
-      expanded: input.activeShelfExpanded !== false,
-      disabled: shelfDisabled,
-    });
-    result.push(...threadItems.slice(pinnedEnd, activeEnd));
-    if (input.activeShelfExpanded !== false) result.push(...pendingItems);
+    const activeRows = threadItems.slice(pinnedEnd, activeEnd);
+    pushShelf(
+      {
+        type: "v2-active-header",
+        key: "v2-active-header",
+        count: activeCount + pendingItems.length,
+        expanded: input.activeShelfExpanded !== false,
+        expandsUpward,
+        disabled: shelfDisabled,
+      },
+      input.activeShelfExpanded !== false ? [...activeRows, ...pendingItems] : activeRows,
+    );
   }
   if (pinnedCount > 0) {
-    result.push({
-      type: "v2-pinned-shelf",
-      key: "v2-pinned-shelf", // gitleaks:allow -- static list item identity
-      count: pinnedCount,
-      expanded: input.pinnedShelfExpanded !== false,
-      disabled: shelfDisabled,
-    });
-    result.push(...threadItems.slice(0, pinnedEnd));
+    pushShelf(
+      {
+        type: "v2-pinned-shelf",
+        key: "v2-pinned-shelf", // gitleaks:allow -- static list item identity
+        count: pinnedCount,
+        expanded: input.pinnedShelfExpanded !== false,
+        expandsUpward,
+        disabled: shelfDisabled,
+      },
+      threadItems.slice(0, pinnedEnd),
+    );
   }
   result.push(...draftItems);
   // Hairlines depend on the final neighbour, so they are stamped after the
