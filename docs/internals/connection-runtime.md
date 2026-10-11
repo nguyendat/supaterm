@@ -20,8 +20,10 @@ Foregrounding, an explicit retry, and an offline report probe the established
 session, and only a failed probe reconnects. Offline reports are often wrong, for
 example for a loopback server. Mobile resume uses a short probe and preserves a
 healthy session so its subscriptions can resume without downloading another
-shell snapshot. A failed resume probe permits one immediate connection attempt
-even while the network reports offline. Returning to mobile also restarts an
+shell snapshot. A replacement session on the same server version can reuse a
+recent in-memory shell cursor. A version change or aged authority triggers an
+HTTP refresh. A failed resume probe permits one immediate connection attempt even
+while the network reports offline. Returning to mobile also restarts an
 in-flight connection attempt, whose routes may belong to the previous network.
 Desktop foregrounding leaves ordinary in-flight attempts alone.
 
