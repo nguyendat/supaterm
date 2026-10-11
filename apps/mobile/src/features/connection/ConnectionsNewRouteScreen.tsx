@@ -60,7 +60,7 @@ export function ConnectionsNewRouteScreen({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const screenFocused = useIsFocused();
-  const scannerLockedRef = useRef(false);
+  const [scannerLocked, setScannerLocked] = useState(false);
 
   const [scanComplete, setScanComplete] = useState(false);
   const attemptedAutoConnectRef = useRef<string | null>(null);
@@ -121,10 +121,8 @@ export function ConnectionsNewRouteScreen({
   useEffect(() => () => setPendingConnectionError(null), []);
 
   const handleScanPress = useCallback(async () => {
-    if (isSubmitting) return;
     const permission = await requestCameraPermission();
     if (permission.granted) {
-      scannerLockedRef.current = false;
       setScanComplete(false);
       return;
     }
@@ -137,7 +135,39 @@ export function ConnectionsNewRouteScreen({
         { text: "Open Settings", onPress: () => void Linking.openSettings() },
       ],
     );
-  }, [isSubmitting, requestCameraPermission]);
+  }, [requestCameraPermission]);
+
+  const handleQrScan = useCallback(
+    ({ data }: { readonly data: string }) => {
+      if (scannerLocked) {
+        return;
+      }
+
+      setScannerLocked(true);
+
+      try {
+        const pairingUrl = extractPairingUrlFromQrPayload(data);
+        const { host, code } = parsePairingUrl(pairingUrl);
+        setOriginalPairingUrl(pairingUrl);
+        setHostInput(host);
+        setCodeInput(code);
+        onChangeConnectionPairingUrl(pairingUrl);
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        setScanComplete(true);
+        setScannerLocked(false);
+      } catch (error) {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Alert.alert(
+          "Invalid QR code",
+          error instanceof Error ? error.message : "Scanned QR code was not recognized.",
+        );
+        setTimeout(() => {
+          setScannerLocked(false);
+        }, 600);
+      }
+    },
+    [onChangeConnectionPairingUrl, scannerLocked],
+  );
 
   const connectAndClose = useCallback(
     async (pairingUrl: string, replaceWithHome: boolean) => {
@@ -161,37 +191,6 @@ export function ConnectionsNewRouteScreen({
       await connect().finally(() => setIsSubmitting(false));
     },
     [navigation, onChangeConnectionPairingUrl, onConnectPress, params.routeFor],
-  );
-
-  const handleQrScan = useCallback(
-    ({ data }: { readonly data: string }) => {
-      if (scannerLockedRef.current || isSubmitting) {
-        return;
-      }
-
-      scannerLockedRef.current = true;
-
-      try {
-        const pairingUrl = extractPairingUrlFromQrPayload(data);
-        const { host, code } = parsePairingUrl(pairingUrl);
-        setOriginalPairingUrl(pairingUrl);
-        setHostInput(host);
-        setCodeInput(code);
-        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        setScanComplete(true);
-        void connectAndClose(pairingUrl, false);
-      } catch (error) {
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        Alert.alert(
-          "Invalid QR code",
-          error instanceof Error ? error.message : "Scanned QR code was not recognized.",
-        );
-        setTimeout(() => {
-          scannerLockedRef.current = false;
-        }, 600);
-      }
-    },
-    [connectAndClose, isSubmitting],
   );
 
   const handleSubmit = useCallback(async () => {
@@ -237,9 +236,7 @@ export function ConnectionsNewRouteScreen({
       >
         <View collapsable={false} className="gap-6.5">
           <PairingScanCard
-            cameraActive={
-              cameraPermission?.granted === true && screenFocused && !scanComplete && !isSubmitting
-            }
+            cameraActive={cameraPermission?.granted === true && screenFocused && !scanComplete}
             onScan={handleQrScan}
             onScanPress={() => {
               void handleScanPress();
