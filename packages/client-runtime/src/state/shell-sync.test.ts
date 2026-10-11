@@ -517,7 +517,7 @@ describe("environment shell synchronization", () => {
       expect(yield* Ref.get(loaderCalls)).toBe(3);
       expect(decisions.at(-1)?.[1]).toMatchObject({
         cursorResumes: 5,
-        httpRefreshes: 3,
+        httpRefreshAttempts: 3,
         socketFallbacks: 0,
       });
     }).pipe(

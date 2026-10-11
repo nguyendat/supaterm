@@ -80,7 +80,7 @@ interface ShellAuthority extends ShellSubscription {
 
 interface ShellSyncMetrics {
   cursorResumes: number;
-  httpRefreshes: number;
+  httpRefreshAttempts: number;
   socketFallbacks: number;
 }
 
@@ -112,7 +112,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
   const activeSubscription = yield* Ref.make<ShellSubscription | null>(null);
   const syncMetrics: ShellSyncMetrics = {
     cursorResumes: 0,
-    httpRefreshes: 0,
+    httpRefreshAttempts: 0,
     socketFallbacks: 0,
   };
   const latestLiveSnapshot = yield* Ref.make<Option.Option<OrchestrationV2ShellSnapshot>>(
@@ -374,7 +374,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         let current = yield* SubscriptionRef.get(state);
         const needsHttpRefresh = !hasAuthoritativeSnapshot || Option.isNone(current.snapshot);
         if (needsHttpRefresh) {
-          syncMetrics.httpRefreshes += 1;
+          syncMetrics.httpRefreshAttempts += 1;
           const prepared = yield* SubscriptionRef.get(supervisor.prepared).pipe(
             Effect.flatMap(
               Option.match({
