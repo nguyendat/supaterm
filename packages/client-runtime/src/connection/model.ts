@@ -110,6 +110,9 @@ export interface PreparedConnection {
   readonly target: ConnectionTarget;
 }
 
+/** What an authenticated HTTP request needs; a socket URL is not required. */
+export type EnvironmentHttpEndpoint = Pick<PreparedConnection, "httpBaseUrl" | "httpAuthorization">;
+
 export type SupervisorConnectionPhase =
   | "available"
   | "offline"

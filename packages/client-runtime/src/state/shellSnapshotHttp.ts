@@ -7,7 +7,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientError, type HttpClientResponse } from "effect/http";
 
-import type { PreparedConnection } from "../connection/model.ts";
+import type { EnvironmentHttpEndpoint, PreparedConnection } from "../connection/model.ts";
 import { environmentEndpointUrl } from "../environment/endpoint.ts";
 import {
   executeAuthenticatedEnvironmentHttpRequest,
@@ -34,7 +34,7 @@ const DEFAULT_SHELL_SNAPSHOT_TIMEOUT_MS = 20_000;
  */
 export const fetchEnvironmentShellSnapshot = Effect.fn(
   "clientRuntime.state.fetchEnvironmentShellSnapshot",
-)(function* (input: { readonly prepared: PreparedConnection; readonly timeoutMs?: number }) {
+)(function* (input: { readonly prepared: EnvironmentHttpEndpoint; readonly timeoutMs?: number }) {
   return yield* executeAuthenticatedEnvironmentHttpRequest({
     ...input,
     group: "orchestration",

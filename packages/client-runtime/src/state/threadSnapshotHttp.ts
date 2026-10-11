@@ -2,7 +2,7 @@ import type { OrchestrationV2ThreadDetailSnapshot, ThreadId } from "@supacode/co
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
-import type { PreparedConnection } from "../connection/model.ts";
+import type { EnvironmentHttpEndpoint, PreparedConnection } from "../connection/model.ts";
 import { environmentEndpointUrl } from "../environment/endpoint.ts";
 import type { RemoteEnvironmentRequestError } from "../rpc/http.ts";
 import {
@@ -50,7 +50,7 @@ export type ThreadSnapshotLoadResult =
 export const fetchEnvironmentThreadSnapshot = Effect.fn(
   "clientRuntime.state.fetchEnvironmentThreadSnapshot",
 )(function* (input: {
-  readonly prepared: PreparedConnection;
+  readonly prepared: EnvironmentHttpEndpoint;
   readonly threadId: ThreadId;
   readonly timeoutMs?: number;
 }) {

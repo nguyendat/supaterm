@@ -18,7 +18,6 @@ import * as ClientCapabilities from "../platform/capabilities.ts";
 import {
   type ConnectionCatalogEntry,
   type ConnectionCredential,
-  type ConnectionProfile,
   type ConnectionRegistration,
   type ConnectionRoute,
   type PlatformConnectionRegistration,
@@ -27,11 +26,10 @@ import {
   connectionRegistrationCatalogEntry,
 } from "./catalog.ts";
 import * as ConnectionCredentialStore from "./credentialStore.ts";
-import * as ConnectionProfileStore from "./profileStore.ts";
+import { loadPersistedCatalogEntries } from "./persistedCatalog.ts";
 import * as Connectivity from "./connectivity.ts";
 import type {
   ConnectionAttemptError,
-  ConnectionTarget,
   PersistedConnectionTarget,
   NetworkStatus,
   SupervisorConnectionState,
@@ -195,11 +193,9 @@ interface EnvironmentServiceScope {
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const registryScope = yield* Scope.Scope;
-  const storage = yield* Persistence.ConnectionTargetStore;
   const registrations = yield* Persistence.ConnectionRegistrationStore;
   const cache = yield* Persistence.EnvironmentCacheStore;
   const ownedDataCleanup = yield* Persistence.EnvironmentOwnedDataCleanup;
-  const profiles = yield* ConnectionProfileStore.ConnectionProfileStore;
   const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
   const githubRoutingPermissions = yield* GitHubRoutingPermissions;
   const connectivity = yield* Connectivity.Connectivity;
@@ -246,52 +242,8 @@ export const make = Effect.gen(function* () {
       yield* releaseRouteTransports(route, environmentId);
     }
   });
-  const persistedTargets = yield* storage.list;
-  const disabledEnvironmentIds = new Set(yield* storage.listDisabled);
-  const loadRoute = Effect.fn("EnvironmentRegistry.loadRoute")(function* (
-    target: ConnectionTarget,
-  ) {
-    const profile: Option.Option<ConnectionProfile> =
-      target._tag === "BearerConnectionTarget" || target._tag === "SshConnectionTarget"
-        ? yield* profiles.get(target.connectionId)
-        : Option.none();
-    return { target, profile } satisfies ConnectionRoute;
-  });
-  const persistedRoutesByEnvironment = new Map<EnvironmentId, Array<ConnectionTarget>>();
-  for (const target of persistedTargets) {
-    const routes = persistedRoutesByEnvironment.get(target.environmentId) ?? [];
-    routes.push(target);
-    persistedRoutesByEnvironment.set(target.environmentId, routes);
-  }
-  const initialEntries = new Map(
-    yield* Effect.forEach(
-      persistedRoutesByEnvironment,
-      Effect.fn("EnvironmentRegistry.loadCatalogEntry")(function* ([environmentId, targets]) {
-        const loaded = yield* Effect.forEach(targets, loadRoute, { concurrency: "unbounded" });
-        const seen = new Set<string>();
-        const usable = loaded.filter((route) => {
-          const id = connectionRouteId(route.target);
-          if (seen.has(id)) return false;
-          seen.add(id);
-          return !(id.startsWith("learned:") && Option.isNone(route.profile));
-        });
-        const routes = usable.length > 0 ? usable : loaded.slice(0, 1);
-        const first = routes[0]!;
-        return [
-          environmentId,
-          entryWithRoutes(
-            {
-              target: first.target,
-              profile: first.profile,
-              enabled: !disabledEnvironmentIds.has(environmentId),
-            },
-            routes,
-          ),
-        ] as const;
-      }),
-      { concurrency: "unbounded" },
-    ),
-  );
+  const initialEntries = yield* loadPersistedCatalogEntries();
+  const persistedEnvironmentIdList = [...initialEntries.keys()];
   const entries =
     yield* SubscriptionRef.make<ReadonlyMap<EnvironmentId, ConnectionCatalogEntry>>(initialEntries);
   const networkStatus = yield* SubscriptionRef.make(yield* connectivity.status);
@@ -300,7 +252,7 @@ export const make = Effect.gen(function* () {
   >(new Map());
   const platformEnvironmentIds = yield* Ref.make<ReadonlySet<EnvironmentId>>(new Set());
   const persistedEnvironmentIds = yield* Ref.make<ReadonlySet<EnvironmentId>>(
-    new Set(persistedRoutesByEnvironment.keys()),
+    new Set(persistedEnvironmentIdList),
   );
   interface LeaseLock {
     readonly semaphore: Semaphore.Semaphore;
@@ -507,7 +459,7 @@ export const make = Effect.gen(function* () {
       return;
     }
     yield* Effect.forEach(
-      persistedRoutesByEnvironment.keys(),
+      persistedEnvironmentIdList,
       (environmentId) =>
         acquireSupervisor(environmentId).pipe(
           Effect.catchTags({ EnvironmentNotRegisteredError: () => Effect.void }),

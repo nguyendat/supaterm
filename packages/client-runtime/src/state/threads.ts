@@ -44,6 +44,11 @@ import {
 } from "./threadHistoryMerge.ts";
 import * as ThreadSnapshotLoader from "./threadSnapshotHttp.ts";
 import {
+  historyFromHttpSnapshot,
+  shouldPersistThread,
+  snapshotToPersist,
+} from "./threadCachePolicy.ts";
+import {
   EMPTY_ENVIRONMENT_THREAD_STATE,
   type EnvironmentThreadState,
   type EnvironmentThreadStatus,
@@ -83,40 +88,6 @@ function historyMetaFromCachedSnapshot(
     expanded: false,
     latestLocalTurnOrdinal: snapshot.latestLocalTurnOrdinal ?? null,
   };
-}
-
-function snapshotToPersist(
-  snapshotSequence: number,
-  projection: OrchestrationV2ThreadProjection,
-  history: ThreadHistoryMeta,
-  acceptsBoundedSnapshots: boolean,
-): OrchestrationV2ThreadDetailSnapshot {
-  // A complete bounded snapshot still proves paging support. Retain that evidence
-  // so a thread that grows while closed can resume with a bounded fallback.
-  if (acceptsBoundedSnapshots || history.hasMoreHistory || history.historyCursor !== null) {
-    return {
-      snapshotSequence,
-      projection,
-      historyCursor: history.historyCursor,
-      hasMoreHistory: history.hasMoreHistory,
-      latestLocalTurnOrdinal: history.latestLocalTurnOrdinal,
-    };
-  }
-  return { snapshotSequence, projection };
-}
-
-function shouldPersistThread(
-  thread: OrchestrationV2ThreadProjection,
-  history: ThreadHistoryMeta,
-): boolean {
-  // After the user loads older pages the in-memory timeline can grow large.
-  // Keep those expanded projections out of the monolithic cache.
-  if (history.expanded) {
-    return false;
-  }
-  return !thread.runs.some(
-    (run) => run.status === "preparing" || run.status === "starting" || run.status === "running",
-  );
 }
 
 interface ThreadResumeSnapshot {
@@ -832,17 +803,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
               yield* applyLock.withPermits(1)(
                 Effect.gen(function* () {
                   yield* SubscriptionRef.set(lastSequence, httpResult.snapshot.snapshotSequence);
-                  const history: ThreadHistoryMeta =
-                    httpResult.history !== undefined
-                      ? {
-                          historyCursor: httpResult.history.historyCursor,
-                          hasMoreHistory: httpResult.history.hasMoreHistory,
-                          loading: false,
-                          error: null,
-                          expanded: false,
-                          latestLocalTurnOrdinal: httpResult.history.latestLocalTurnOrdinal ?? null,
-                        }
-                      : EMPTY_THREAD_HISTORY_META;
+                  const history = historyFromHttpSnapshot(httpResult.history);
                   yield* setThread(httpResult.snapshot.projection, { history });
                   yield* remember;
                 }),
