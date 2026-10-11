@@ -11,8 +11,10 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as References from "effect/References";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -338,8 +340,18 @@ describe("environment shell synchronization", () => {
     }),
   );
 
-  it.effect("resubscribes from the in-memory shell cursor when the app becomes active", () =>
-    Effect.gen(function* () {
+  it.effect("resubscribes from the in-memory shell cursor when the app becomes active", () => {
+    const decisions: Array<ReadonlyArray<unknown>> = [];
+    const logger = Logger.make(({ logLevel, message }) => {
+      if (
+        logLevel === "Debug" &&
+        Array.isArray(message) &&
+        message[0] === "Environment shell synchronization decision"
+      ) {
+        decisions.push(message);
+      }
+    });
+    return Effect.gen(function* () {
       const events = yield* Queue.unbounded<OrchestrationV2ShellStreamItem>();
       const wakeups = yield* Queue.unbounded<ConnectionWakeups.ConnectionWakeup>();
       const loaderCalls = yield* Ref.make(0);
@@ -503,8 +515,16 @@ describe("environment shell synchronization", () => {
       }
       expect(yield* Ref.get(capturedAfterSequences)).toEqual([10, 40, 40, 40, 40, 40, 20, 30]);
       expect(yield* Ref.get(loaderCalls)).toBe(3);
-    }),
-  );
+      expect(decisions.at(-1)?.[1]).toMatchObject({
+        cursorResumes: 8,
+        httpRefreshes: 3,
+        socketFallbacks: 0,
+      });
+    }).pipe(
+      Effect.provide(Logger.layer([logger], { mergeWithExisting: false })),
+      Effect.provideService(References.MinimumLogLevel, "Debug"),
+    );
+  });
 
   it.effect("throttles shell writes and flushes the latest snapshot on disconnect", () =>
     Effect.gen(function* () {

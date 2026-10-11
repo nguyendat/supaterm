@@ -78,6 +78,12 @@ interface ShellAuthority extends ShellSubscription {
   readonly appliedAt: number;
 }
 
+interface ShellSyncMetrics {
+  cursorResumes: number;
+  httpRefreshes: number;
+  socketFallbacks: number;
+}
+
 export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")(function* () {
   const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
   const cache = yield* Persistence.EnvironmentCacheStore;
@@ -104,6 +110,11 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
   const awaitingCompletion = yield* Ref.make(false);
   const lastAuthoritative = yield* Ref.make<ShellAuthority | null>(null);
   const activeSubscription = yield* Ref.make<ShellSubscription | null>(null);
+  const syncMetrics: ShellSyncMetrics = {
+    cursorResumes: 0,
+    httpRefreshes: 0,
+    socketFallbacks: 0,
+  };
   const latestLiveSnapshot = yield* Ref.make<Option.Option<OrchestrationV2ShellSnapshot>>(
     Option.none(),
   );
@@ -348,18 +359,21 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
 
         const authority = yield* Ref.get(lastAuthoritative);
         const now = yield* Clock.currentTimeMillis;
-        const hasAuthoritativeSnapshot =
+        const sameSessionResume = authority !== null && authority.session === session;
+        const crossSessionResume =
           authority !== null &&
-          (authority.session === session ||
-            (serverVersion !== null &&
-              authority.serverVersion === serverVersion &&
-              now - authority.appliedAt <= CROSS_SESSION_RESUME_WINDOW_MS));
+          authority.session !== session &&
+          serverVersion !== null &&
+          authority.serverVersion === serverVersion &&
+          now - authority.appliedAt <= CROSS_SESSION_RESUME_WINDOW_MS;
+        const hasAuthoritativeSnapshot = sameSessionResume || crossSessionResume;
         if (hasAuthoritativeSnapshot && authority !== null) {
           yield* Ref.set(lastAuthoritative, { ...authority, session });
         }
         let canResume = hasAuthoritativeSnapshot;
         let current = yield* SubscriptionRef.get(state);
         if (!hasAuthoritativeSnapshot || Option.isNone(current.snapshot)) {
+          syncMetrics.httpRefreshes += 1;
           const prepared = yield* SubscriptionRef.get(supervisor.prepared).pipe(
             Effect.flatMap(
               Option.match({
@@ -399,8 +413,24 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         // If the authoritative refresh failed, omit the cached cursor so the
         // socket fallback sends a complete snapshot for this new session.
         if (!canResume || Option.isNone(current.snapshot)) {
+          syncMetrics.socketFallbacks += 1;
+          yield* Effect.logDebug("Environment shell synchronization decision", {
+            environmentId,
+            decision: "socket-fallback",
+            ...syncMetrics,
+          });
           return supportsCompletionMarker ? { requestCompletionMarker: true as const } : {};
         }
+        syncMetrics.cursorResumes += 1;
+        yield* Effect.logDebug("Environment shell synchronization decision", {
+          environmentId,
+          decision: crossSessionResume
+            ? "cross-session-cursor-resume"
+            : sameSessionResume
+              ? "same-session-cursor-resume"
+              : "http-refresh-cursor-resume",
+          ...syncMetrics,
+        });
         if (!supportsCompletionMarker) {
           // Without a completion marker there is no synchronized signal for a
           // resumed subscription, so report live immediately, like threads.
