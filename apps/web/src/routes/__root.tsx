@@ -79,6 +79,7 @@ import {
 import { getDesktopSnapShotBridge } from "../lib/desktopSnapShot";
 import { installDesktopPasteAsText } from "../lib/desktopPasteAsText";
 import { shouldResumeSnapShotSetupOnStartup } from "../lib/snapShotSetupResume";
+import { shouldResumePairingSetupOnStartup } from "../lib/pairingSetupResume";
 
 export const Route = createRootRoute({
   beforeLoad: async ({ location }) => {
@@ -99,6 +100,14 @@ export const Route = createRootRoute({
     }
 
     const authGateState = await resolveInitialServerAuthGateState();
+    if (
+      authGateState.status === "authenticated" &&
+      window.desktopBridge &&
+      shouldResumePairingSetupOnStartup() &&
+      location.pathname !== "/settings/connections"
+    ) {
+      throw redirect({ to: "/settings/connections", replace: true });
+    }
     if (
       authGateState.status === "authenticated" &&
       getDesktopSnapShotBridge() &&

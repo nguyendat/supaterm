@@ -70,6 +70,7 @@ import {
 } from "./pairingUrls";
 import { PairingLinkCreatedDialog } from "./PairingLinkCreatedDialog";
 import { CreatePairingLinkDialog } from "./CreatePairingLinkDialog";
+import { clearPairingSetupResume, savePairingSetupResume } from "~/lib/pairingSetupResume";
 import {
   applyWslEnableSelection,
   canRevokeOtherClients,
@@ -77,6 +78,7 @@ import {
   isWslSettingsRowVisible,
   selectQrEndpointOption,
   createRelayPairingEndpoint,
+  mergeServerPairingEndpoints,
   resolvePairingLinkRoutes,
 } from "./ConnectionsSettings.logic";
 import {
@@ -154,7 +156,6 @@ import {
   revokeOtherServerClientSessions,
   revokeServerClientSession,
   revokeServerPairingLink,
-  isLoopbackHostname,
   usePrimarySessionState,
   type ServerClientSessionRecord,
   type ServerPairingLinkRecord,
@@ -184,6 +185,7 @@ import { desktopWslStateAtom, refreshDesktopWslState } from "~/state/desktopWslS
 import {
   type EnvironmentPresentation,
   useEnvironments,
+  useEnvironmentHttpBaseUrl,
   usePrimaryEnvironment,
 } from "~/state/environments";
 import { APP_VERSION } from "~/branding";
@@ -419,7 +421,9 @@ function selectPairingEndpoint(
   endpoints: ReadonlyArray<AdvertisedEndpoint>,
   defaultEndpointKey?: string | null,
 ): AdvertisedEndpoint | null {
-  const availableEndpoints = endpoints.filter(isQrShareableEndpoint);
+  const availableEndpoints = endpoints.filter(
+    (endpoint) => isQrShareableEndpoint(endpoint) && isQrShareablePairingUrl(endpoint.httpBaseUrl),
+  );
   if (defaultEndpointKey) {
     const selectedEndpoint = availableEndpoints.find(
       (endpoint) => endpointDefaultPreferenceKey(endpoint) === defaultEndpointKey,
@@ -600,7 +604,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
     const endpoint = selectPairingEndpoint(endpoints, defaultEndpointKey);
     return resolveShareablePairingUrl(
       credential,
-      endpoint?.httpBaseUrl ?? (endpointUrl || window.location.href),
+      endpoint?.httpBaseUrl ?? endpointUrl,
       pairingHints,
       endpoint === null || endpoint.compatibility.hostedHttpsApp === "compatible",
     );
@@ -1019,6 +1023,9 @@ const ConnectedClientListRow = memo(function ConnectedClientListRow({
 type AuthorizedClientsHeaderActionProps = {
   triggerRef: RefObject<HTMLButtonElement | null>;
   relayEnabled: boolean;
+  hasShareableEndpoint: boolean;
+  connectionLoading: boolean;
+  onEnableNetworkAccess?: (() => Promise<boolean>) | undefined;
   onPairingLinkCreated: (result: AuthPairingCredentialResult, relay?: RelayConnectionInfo) => void;
   clientSessions: ReadonlyArray<ServerClientSessionRecord> | null;
   isRevokingOtherClients: boolean;
@@ -1029,6 +1036,9 @@ type AuthorizedClientsHeaderActionProps = {
 const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderAction({
   triggerRef,
   relayEnabled,
+  hasShareableEndpoint,
+  connectionLoading,
+  onEnableNetworkAccess,
   onPairingLinkCreated,
   clientSessions,
   isRevokingOtherClients,
@@ -1053,6 +1063,9 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
       <CreatePairingLinkDialog
         triggerRef={triggerRef}
         relayEnabled={relayEnabled}
+        hasShareableEndpoint={hasShareableEndpoint}
+        connectionLoading={connectionLoading}
+        onEnableNetworkAccess={onEnableNetworkAccess}
         delegatableScopes={delegatableScopes}
         onPairingLinkCreated={onPairingLinkCreated}
       />
@@ -1607,6 +1620,7 @@ export function ConnectionsSettings() {
     reportFailure: false,
   });
   const primaryEnvironmentId = primaryEnvironment?.environmentId ?? null;
+  const primaryHttpBaseUrl = useEnvironmentHttpBaseUrl(primaryEnvironmentId);
   const primarySessionState = usePrimarySessionState();
   const currentSessionScopes = primarySessionState.data?.authenticated
     ? (primarySessionState.data.permissions ?? primarySessionState.data.scopes ?? null)
@@ -1911,7 +1925,7 @@ export function ConnectionsSettings() {
         primaryEnvironmentId === null ||
         !readEnvironmentScope(primaryEnvironmentId, AuthEnvironmentMaintainScope)
       )
-        return;
+        return false;
       setIsUpdatingDesktopServerExposure(true);
       setDesktopServerExposureMutationError(null);
       try {
@@ -1919,6 +1933,7 @@ export function ConnectionsSettings() {
         refreshDesktopNetworkAccessState();
         setIsDesktopServerExposureDialogOpen(false);
         setIsUpdatingDesktopServerExposure(false);
+        return true;
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Failed to update network exposure.";
@@ -1932,10 +1947,19 @@ export function ConnectionsSettings() {
           }),
         );
         setIsUpdatingDesktopServerExposure(false);
+        return false;
       }
     },
     [desktopBridge, primaryEnvironmentId],
   );
+
+  const handleEnablePairingNetworkAccess = useCallback(async () => {
+    if (primaryEnvironmentId === null) return false;
+    savePairingSetupResume(primaryEnvironmentId);
+    const enabled = await handleDesktopServerExposureChange(true);
+    if (!enabled) clearPairingSetupResume();
+    return enabled;
+  }, [primaryEnvironmentId, handleDesktopServerExposureChange]);
 
   const handleConfirmDesktopServerExposureChange = useCallback(() => {
     if (pendingDesktopServerExposureMode === null) return;
@@ -2395,23 +2419,29 @@ export function ConnectionsSettings() {
     [relayEndpointUrl],
   );
   const visibleDesktopAdvertisedEndpoints = useMemo(
-    () => [
-      ...visibleDesktopNetworkAdvertisedEndpoints,
-      ...(tailscaleHttpsEndpoint ? [tailscaleHttpsEndpoint] : []),
-      ...(relayEndpoint ? [relayEndpoint] : []),
+    () =>
+      mergeServerPairingEndpoints(
+        [
+          ...visibleDesktopNetworkAdvertisedEndpoints,
+          ...(tailscaleHttpsEndpoint ? [tailscaleHttpsEndpoint] : []),
+          ...(relayEndpoint ? [relayEndpoint] : []),
+        ],
+        primaryServerConfig?.directEndpoints ?? [],
+      ),
+    [
+      tailscaleHttpsEndpoint,
+      visibleDesktopNetworkAdvertisedEndpoints,
+      relayEndpoint,
+      primaryServerConfig?.directEndpoints,
     ],
-    [tailscaleHttpsEndpoint, visibleDesktopNetworkAdvertisedEndpoints, relayEndpoint],
   );
   const pairingHints = useMemo(
     () => ({
       environmentId: primaryServerConfig?.environment.environmentId,
       relayUrl: relayStatus?.relayUrl,
-      routes: [
-        ...visibleDesktopAdvertisedEndpoints
-          .filter((endpoint) => endpoint.status !== "unavailable")
-          .map((endpoint) => endpoint.httpBaseUrl),
-        ...(primaryServerConfig?.directEndpoints ?? []).map((endpoint) => endpoint.httpBaseUrl),
-      ],
+      routes: visibleDesktopAdvertisedEndpoints
+        .filter((endpoint) => endpoint.status !== "unavailable")
+        .map((endpoint) => endpoint.httpBaseUrl),
     }),
     [primaryServerConfig, relayStatus?.relayUrl, visibleDesktopAdvertisedEndpoints],
   );
@@ -2423,23 +2453,20 @@ export function ConnectionsSettings() {
   const defaultDesktopAdvertisedEndpoint = useMemo(
     () =>
       defaultDesktopNetworkAdvertisedEndpoint ??
-      selectPairingEndpoint(
-        [
-          ...(tailscaleHttpsEndpoint ? [tailscaleHttpsEndpoint] : []),
-          ...(relayEndpoint ? [relayEndpoint] : []),
-        ],
-        defaultAdvertisedEndpointKey,
-      ),
+      selectPairingEndpoint(visibleDesktopAdvertisedEndpoints, defaultAdvertisedEndpointKey),
     [
       defaultAdvertisedEndpointKey,
       defaultDesktopNetworkAdvertisedEndpoint,
-      tailscaleHttpsEndpoint,
-      relayEndpoint,
+      visibleDesktopAdvertisedEndpoints,
     ],
   );
   const defaultDesktopAdvertisedEndpointKey = defaultDesktopAdvertisedEndpoint
     ? endpointDefaultPreferenceKey(defaultDesktopAdvertisedEndpoint)
     : null;
+  const pairingEndpointUrl = desktopServerExposureState?.endpointUrl ?? primaryHttpBaseUrl;
+  const hasShareablePairingEndpoint =
+    defaultDesktopAdvertisedEndpoint !== null ||
+    (pairingEndpointUrl !== null && isQrShareablePairingUrl(pairingEndpointUrl));
   const createdPairingLinkShare = useMemo(() => {
     const created =
       createdPairingLinkId === null
@@ -2453,13 +2480,7 @@ export function ConnectionsSettings() {
       primaryServerConfig?.settings,
     );
     const endpoint = selectPairingEndpoint(routes.endpoints, defaultDesktopAdvertisedEndpointKey);
-    const endpointUrl =
-      endpoint?.httpBaseUrl ??
-      desktopServerExposureState?.endpointUrl ??
-      ((window.location.protocol === "http:" || window.location.protocol === "https:") &&
-      !isLoopbackHostname(window.location.hostname)
-        ? window.location.origin
-        : null);
+    const endpointUrl = endpoint?.httpBaseUrl ?? pairingEndpointUrl;
     return resolvePairingShareValue(
       created.credential,
       endpointUrl,
@@ -2473,7 +2494,7 @@ export function ConnectionsSettings() {
     pairingHints,
     primaryServerConfig?.settings,
     defaultDesktopAdvertisedEndpointKey,
-    desktopServerExposureState?.endpointUrl,
+    pairingEndpointUrl,
   ]);
   const handleSetDefaultAdvertisedEndpoint = useCallback(
     (endpoint: AdvertisedEndpoint) => {
@@ -3084,7 +3105,7 @@ export function ConnectionsSettings() {
       <PairingClientsList
         relaySettings={primaryServerConfig?.settings}
         pairingHints={pairingHints}
-        endpointUrl={desktopServerExposureState?.endpointUrl}
+        endpointUrl={pairingEndpointUrl}
         endpoints={visibleDesktopAdvertisedEndpoints}
         defaultEndpointKey={defaultDesktopAdvertisedEndpointKey}
         presentation={presentation}
@@ -3309,6 +3330,18 @@ export function ConnectionsSettings() {
                   <AuthorizedClientsHeaderAction
                     triggerRef={pairingLinkTriggerRef}
                     relayEnabled={primaryServerConfig?.settings.publicRelayEnabled ?? false}
+                    hasShareableEndpoint={hasShareablePairingEndpoint}
+                    connectionLoading={
+                      primaryServerConfig === null ||
+                      (desktopNetworkAccess.isPending && desktopNetworkAccess.data === null)
+                    }
+                    onEnableNetworkAccess={
+                      desktopBridge &&
+                      canManageLocalBackend &&
+                      desktopServerExposureState?.mode === "local-only"
+                        ? handleEnablePairingNetworkAccess
+                        : undefined
+                    }
                     delegatableScopes={currentSessionScopes ?? []}
                     onPairingLinkCreated={handlePairingLinkCreated}
                     clientSessions={

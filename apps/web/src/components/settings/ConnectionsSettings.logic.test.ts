@@ -10,7 +10,49 @@ import {
   togglePairingScopeSelection,
   resolvePairingLinkRoutes,
   createRelayPairingEndpoint,
+  mergeServerPairingEndpoints,
 } from "./ConnectionsSettings.logic";
+import { resolveShareablePairingUrl } from "./pairingUrls";
+import { resolveRemotePairingTarget } from "@supacode/shared/remote";
+
+it.each([
+  { kind: "lan", httpBaseUrl: "http://192.168.1.44:3773/" },
+  { kind: "tailnet", httpBaseUrl: "https://machine.ts.net/" },
+] as const)(
+  "shares server-advertised $kind access from a browser without desktop endpoints",
+  (direct) => {
+    const endpoints = mergeServerPairingEndpoints([], [direct]);
+    const endpoint = endpoints.find(isQrShareableEndpoint);
+    expect(endpoint).toBeDefined();
+    const link = resolveShareablePairingUrl(
+      "PAIRCODE",
+      endpoint?.httpBaseUrl,
+      {},
+      endpoint?.compatibility.hostedHttpsApp === "compatible",
+    );
+    expect(link).not.toBeNull();
+    expect(resolveRemotePairingTarget({ pairingUrl: link! })).toMatchObject({
+      httpBaseUrl: direct.httpBaseUrl,
+      credential: "PAIRCODE",
+    });
+  },
+);
+
+it("keeps desktop endpoint metadata when the server advertises the same route", () => {
+  const desktop = makeEndpoint({ httpBaseUrl: "http://192.168.1.44:3773/" });
+  expect(
+    mergeServerPairingEndpoints(
+      [desktop],
+      [{ kind: "lan", httpBaseUrl: "http://192.168.1.44:3773" }],
+    ),
+  ).toEqual([desktop]);
+});
+
+it("does not turn server-advertised loopback into a remote pairing route", () => {
+  expect(
+    mergeServerPairingEndpoints([], [{ kind: "lan", httpBaseUrl: "http://127.0.0.1:3773/" }]),
+  ).toEqual([]);
+});
 
 it("shares the confirmed relay route before its status subscription arrives", () => {
   const relay = {

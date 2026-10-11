@@ -28,10 +28,10 @@ export function resolvePairingShareValue(
     return { value: credential, kind: "code" as const, qrShareable: false };
   return {
     value:
-      (hostedPairingAllowed ? resolveHostedPairingUrl(endpointUrl, credential, hints) : null) ??
-      resolveDesktopPairingUrl(endpointUrl, credential, hints),
+      (hostedPairingAllowed ? resolveHostedPairingUrl(endpoint.origin, credential, hints) : null) ??
+      resolveDesktopPairingUrl(endpoint.origin, credential, hints),
     kind: "link" as const,
-    qrShareable: isQrShareablePairingUrl(endpointUrl),
+    qrShareable: isQrShareablePairingUrl(endpoint.origin),
   };
 }
 

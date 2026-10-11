@@ -7,10 +7,52 @@ import {
   type DesktopWslState,
   type RelayConnectionInfo,
   type ServerSettings,
+  type ServerDirectEndpoint,
   normalizeRelayServerUrl,
 } from "@supacode/contracts";
-import { createAdvertisedEndpoint } from "@supacode/shared/advertisedEndpoint";
+import {
+  createAdvertisedEndpoint,
+  normalizeHttpBaseUrl,
+} from "@supacode/shared/advertisedEndpoint";
 import type { PairingRouteHints } from "@supacode/shared/remote";
+import { isQrShareablePairingUrl } from "./pairingUrls";
+
+export function mergeServerPairingEndpoints(
+  advertisedEndpoints: ReadonlyArray<AdvertisedEndpoint>,
+  directEndpoints: ReadonlyArray<ServerDirectEndpoint>,
+): ReadonlyArray<AdvertisedEndpoint> {
+  const endpoints = [...advertisedEndpoints];
+  for (const direct of directEndpoints) {
+    if (!isQrShareablePairingUrl(direct.httpBaseUrl)) continue;
+    const httpBaseUrl = normalizeHttpBaseUrl(direct.httpBaseUrl);
+    if (
+      endpoints.some(
+        (endpoint) => endpoint.status !== "unavailable" && endpoint.httpBaseUrl === httpBaseUrl,
+      )
+    )
+      continue;
+    const tailnet = direct.kind === "tailnet";
+    const label = tailnet ? "Tailscale" : "Local network";
+    endpoints.push(
+      createAdvertisedEndpoint({
+        id: `server-direct:${httpBaseUrl}`,
+        label,
+        provider: {
+          id: tailnet ? "server-tailnet" : "server-lan",
+          label,
+          kind: tailnet ? "private-network" : "core",
+          isAddon: false,
+        },
+        httpBaseUrl,
+        reachability: tailnet ? "private-network" : "lan",
+        hostedHttpsCompatibility:
+          new URL(httpBaseUrl).protocol === "https:" ? "compatible" : "mixed-content-blocked",
+        source: "server",
+      }),
+    );
+  }
+  return endpoints;
+}
 
 export function createRelayPairingEndpoint(relayEndpoint: string) {
   return createAdvertisedEndpoint({

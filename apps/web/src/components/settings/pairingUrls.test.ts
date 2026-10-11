@@ -11,6 +11,28 @@ import {
 } from "./pairingUrls";
 
 describe("settings pairing URL helpers", () => {
+  it.each(["http://192.168.1.44:3773", "https://machine.ts.net"])(
+    "uses the server origin without carrying page queries into pairing: %s",
+    (host) => {
+      const result = resolvePairingShareValue(
+        "PAIRCODE",
+        `${host}/settings/connections?host=https://unrelated.invalid#token=OLD`,
+      );
+      expect(resolveRemotePairingTarget({ pairingUrl: result.value })).toMatchObject({
+        httpBaseUrl: `${host}/`,
+        credential: "PAIRCODE",
+      });
+      expect(result.value).not.toContain("unrelated.invalid");
+    },
+  );
+
+  it("does not make a loopback endpoint shareable through a page host query", () => {
+    const endpoint = "http://127.0.0.1:3773/settings/connections?host=https://unrelated.invalid";
+    const result = resolvePairingShareValue("PAIRCODE", endpoint);
+    expect(result.qrShareable).toBe(false);
+    expect(resolveShareablePairingUrl("PAIRCODE", endpoint)).toBeNull();
+    expect(result.value).not.toContain("unrelated.invalid");
+  });
   it.each([
     "supacode://app/pair#token=PAIRCODE&env=machine",
     "file:///Applications/Supacode/index.html",
