@@ -64,9 +64,9 @@ import { cn } from "../../lib/utils";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
 import { formatElapsedDurationLabel, formatExpiresInLabel } from "../../timestampFormat";
 import {
-  resolveDesktopPairingUrl,
-  resolveHostedPairingUrl,
   resolvePairingShareValue,
+  resolveShareablePairingUrl,
+  isQrShareablePairingUrl,
 } from "./pairingUrls";
 import { PairingLinkCreatedDialog } from "./PairingLinkCreatedDialog";
 import { CreatePairingLinkDialog } from "./CreatePairingLinkDialog";
@@ -143,7 +143,6 @@ import { AnimatedHeight } from "../AnimatedHeight";
 import { InlineConfirmLabel, InlineConfirmTooltip } from "../InlineConfirm";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { Textarea } from "../ui/textarea";
-import { setPairingTokenOnUrl } from "../../pairingUrl";
 import type { PairingRouteHints } from "@supacode/shared/remote";
 import {
   emptyRemotePairingForm,
@@ -420,7 +419,7 @@ function selectPairingEndpoint(
   endpoints: ReadonlyArray<AdvertisedEndpoint>,
   defaultEndpointKey?: string | null,
 ): AdvertisedEndpoint | null {
-  const availableEndpoints = endpoints.filter((endpoint) => endpoint.status !== "unavailable");
+  const availableEndpoints = endpoints.filter(isQrShareableEndpoint);
   if (defaultEndpointKey) {
     const selectedEndpoint = availableEndpoints.find(
       (endpoint) => endpointDefaultPreferenceKey(endpoint) === defaultEndpointKey,
@@ -429,12 +428,7 @@ function selectPairingEndpoint(
       return selectedEndpoint;
     }
   }
-  return (
-    availableEndpoints.find((endpoint) => endpoint.isDefault) ??
-    availableEndpoints.find((endpoint) => endpoint.reachability !== "loopback") ??
-    availableEndpoints.find((endpoint) => endpoint.compatibility.hostedHttpsApp === "compatible") ??
-    null
-  );
+  return availableEndpoints.find((endpoint) => endpoint.isDefault) ?? availableEndpoints[0] ?? null;
 }
 
 function isTailscaleHttpsEndpoint(endpoint: AdvertisedEndpoint): boolean {
@@ -470,18 +464,12 @@ function resolveAdvertisedEndpointPairingUrl(
   credential: string,
   hints: PairingRouteHints,
 ): string {
-  if (endpoint.compatibility.hostedHttpsApp === "compatible") {
-    return (
-      resolveHostedPairingUrl(endpoint.httpBaseUrl, credential, hints) ??
-      resolveDesktopPairingUrl(endpoint.httpBaseUrl, credential, hints)
-    );
-  }
-  return resolveDesktopPairingUrl(endpoint.httpBaseUrl, credential, hints);
-}
-
-function resolveCurrentOriginPairingUrl(credential: string, hints: PairingRouteHints): string {
-  const url = new URL("/pair", window.location.href);
-  return setPairingTokenOnUrl(url, credential, hints).toString();
+  return resolvePairingShareValue(
+    credential,
+    endpoint.httpBaseUrl,
+    hints,
+    endpoint.compatibility.hostedHttpsApp === "compatible",
+  ).value;
 }
 
 function isHostedAppPairingUrl(value: string): boolean {
@@ -607,23 +595,16 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
   const [qrEndpointId, setQrEndpointId] = useState<string | null>(null);
   const qrPanelId = useId();
 
-  const currentOriginPairingUrl = useMemo(
-    () => (credential ? resolveCurrentOriginPairingUrl(credential, pairingHints) : null),
-    [credential, pairingHints],
-  );
-  const hostedPairingUrl = useMemo(
-    () =>
-      credential && endpointUrl != null && endpointUrl !== ""
-        ? resolveHostedPairingUrl(endpointUrl, credential, pairingHints)
-        : null,
-    [endpointUrl, credential, pairingHints],
-  );
-  const endpointPairingUrl = useMemo(() => {
+  const shareablePairingUrl = useMemo(() => {
+    if (!credential) return null;
     const endpoint = selectPairingEndpoint(endpoints, defaultEndpointKey);
-    return endpoint && credential
-      ? resolveAdvertisedEndpointPairingUrl(endpoint, credential, pairingHints)
-      : null;
-  }, [defaultEndpointKey, endpoints, credential, pairingHints]);
+    return resolveShareablePairingUrl(
+      credential,
+      endpoint?.httpBaseUrl ?? (endpointUrl || window.location.href),
+      pairingHints,
+      endpoint === null || endpoint.compatibility.hostedHttpsApp === "compatible",
+    );
+  }, [defaultEndpointKey, endpoints, endpointUrl, credential, pairingHints]);
   const endpointCopyOptions = useMemo(() => {
     const options: Array<{
       readonly id: string;
@@ -650,22 +631,15 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
     }
     return options;
   }, [endpoints, credential, pairingHints]);
-  const shareablePairingUrl =
-    endpointPairingUrl ??
-    (credential && endpointUrl != null && endpointUrl !== ""
-      ? (hostedPairingUrl ?? resolveDesktopPairingUrl(endpointUrl, credential, pairingHints))
-      : isLoopbackHostname(window.location.hostname)
-        ? null
-        : currentOriginPairingUrl);
   // Value of the copy attempt that last failed. The clipboard-failure reveal
   // dialog must show exactly what failed to copy, not the row's default URL.
   const [failedCopyValue, setFailedCopyValue] = useState<string | null>(null);
   const revealValue = failedCopyValue ?? shareablePairingUrl ?? credential ?? "";
   const isRevealValueUrl = revealValue !== credential;
   const isRevealValueHostedAppPairingUrl = isRevealValueUrl && isHostedAppPairingUrl(revealValue);
-  // Never render a QR for a loopback URL, even in the manual-copy fallback.
   const isRevealValueQrShareable =
-    endpointCopyOptions.find((option) => option.url === revealValue)?.qrShareable ?? true;
+    isQrShareablePairingUrl(revealValue) &&
+    (endpointCopyOptions.find((option) => option.url === revealValue)?.qrShareable ?? true);
   const canCopyToClipboard =
     typeof window !== "undefined" &&
     window.isSecureContext &&
@@ -738,10 +712,10 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
     defaultEndpointKey,
   );
   const qrPairingUrl = selectedQrOption?.url ?? shareablePairingUrl;
-  // With no endpoint list the fallback is never loopback: selectPairingEndpoint
-  // skips loopback and the current-origin fallback is guarded by
-  // isLoopbackHostname, so only an explicit loopback selection hides the QR.
-  const canRenderQrForSelection = selectedQrOption?.qrShareable ?? true;
+  const canRenderQrForSelection =
+    qrPairingUrl !== null &&
+    isQrShareablePairingUrl(qrPairingUrl) &&
+    (selectedQrOption?.qrShareable ?? true);
   if (expiresAtMs <= nowMs) {
     return null;
   }
@@ -772,8 +746,8 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
               Create a new link to share from this client.
             </p>
           ) : shareablePairingUrl === null ? (
-            <p className="text-2xs text-muted-foreground/70">
-              Copy the token and pair from another client using this backend&apos;s reachable host.
+            <p className="max-w-prose text-xs leading-5 text-muted-foreground">
+              Turn on Public relay or Network access on the host to connect another device.
             </p>
           ) : null}
         </div>
@@ -3145,7 +3119,7 @@ export function ConnectionsSettings() {
             }
           />
         ) : desktopServerExposureState ? (
-          "Limited to this machine."
+          "Direct access is limited to this machine. Public relay and Tailscale HTTPS are separate."
         ) : (
           "Loading…"
         )
@@ -3167,7 +3141,7 @@ export function ConnectionsSettings() {
           : currentAuthPolicy === "remote-reachable"
             ? "Remote access is already configured. Change network exposure where the server starts."
             : currentAuthPolicy === "loopback-browser"
-              ? "Only this machine can connect. Restart with a non-loopback host for remote pairing."
+              ? "Direct access is limited to this machine. Use Public relay, or restart with network access enabled."
               : "Network exposure information is unavailable."
       }
       control={

@@ -6,9 +6,52 @@ import {
   resolveDesktopPairingUrl,
   resolveHostedPairingUrl,
   resolvePairingShareValue,
+  resolveShareablePairingUrl,
+  isQrShareablePairingUrl,
 } from "./pairingUrls";
 
 describe("settings pairing URL helpers", () => {
+  it.each([
+    "supacode://app/pair#token=PAIRCODE&env=machine",
+    "file:///Applications/Supacode/index.html",
+    "http://localhost:3773/pair#token=PAIRCODE",
+    "http://127.0.0.1:3773/pair#token=PAIRCODE",
+    "http://[::1]:3773/pair#token=PAIRCODE",
+    "https://app.next.supacode.sh/pair?host=http%3A%2F%2F127.0.0.1%3A3773#token=PAIRCODE",
+    "https://app.next.supacode.sh/pair?host=supacode%3A%2F%2Fapp#token=PAIRCODE",
+    "https://app.next.supacode.sh/pair?host=invalid#token=PAIRCODE",
+    "PAIRCODE",
+  ])("does not offer a QR for an unreachable pairing URL: %s", (url) => {
+    expect(isQrShareablePairingUrl(url)).toBe(false);
+  });
+
+  it.each([
+    "supacode://app/",
+    "file:///Applications/Supacode/index.html",
+    "http://localhost:3773",
+    "http://127.0.0.1:3773",
+    "http://[::1]:3773",
+    null,
+  ])("does not offer a default sharing link without a remote endpoint: %s", (endpoint) => {
+    expect(resolveShareablePairingUrl("PAIRCODE", endpoint)).toBeNull();
+  });
+
+  it.each(["http://192.168.1.44:3773", "https://machine.ts.net"])(
+    "keeps a reachable endpoint shareable: %s",
+    (host) => {
+      const url = resolveShareablePairingUrl("PAIRCODE", host, {
+        environmentId: EnvironmentId.make("machine"),
+      });
+      expect(url).not.toBeNull();
+      expect(isQrShareablePairingUrl(url!)).toBe(true);
+      expect(resolveRemotePairingTarget({ pairingUrl: url! })).toMatchObject({
+        credential: "PAIRCODE",
+        httpBaseUrl: `${host}/`,
+        environmentId: "machine",
+      });
+    },
+  );
+
   it.each(["supacode://app", "file:///Applications/Supacode/index.html"])(
     "shows the code instead of creating a remote link from %s",
     (origin) => {
@@ -33,6 +76,13 @@ describe("settings pairing URL helpers", () => {
     });
     expect(result.kind).toBe("link");
     expect(result.qrShareable).toBe(true);
+    expect(
+      resolveShareablePairingUrl("PAIRCODE", host, {
+        environmentId: EnvironmentId.make("machine"),
+        relayUrl,
+      }),
+    ).toBe(result.value);
+    expect(isQrShareablePairingUrl(result.value)).toBe(true);
     expect(resolveRemotePairingTarget({ pairingUrl: result.value })).toMatchObject({
       credential: "PAIRCODE",
       httpBaseUrl: host,

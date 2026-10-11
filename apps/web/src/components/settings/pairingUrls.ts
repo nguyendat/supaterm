@@ -2,6 +2,20 @@ import { buildHostedPairingUrl } from "../../hostedPairing";
 import { buildPairingUrl, type PairingRouteHints } from "@supacode/shared/remote";
 import { isLoopbackHostname } from "../../environments/primary/target";
 
+export function isQrShareablePairingUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    const endpoint = new URL(url.searchParams.get("host") ?? url.href);
+    return (
+      (endpoint.protocol === "http:" || endpoint.protocol === "https:") &&
+      !isLoopbackHostname(endpoint.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function resolvePairingShareValue(
   credential: string,
   endpointUrl: string | null | undefined,
@@ -17,8 +31,18 @@ export function resolvePairingShareValue(
       (hostedPairingAllowed ? resolveHostedPairingUrl(endpointUrl, credential, hints) : null) ??
       resolveDesktopPairingUrl(endpointUrl, credential, hints),
     kind: "link" as const,
-    qrShareable: !isLoopbackHostname(endpoint.hostname),
+    qrShareable: isQrShareablePairingUrl(endpointUrl),
   };
+}
+
+export function resolveShareablePairingUrl(
+  credential: string,
+  endpointUrl: string | null | undefined,
+  hints: PairingRouteHints = {},
+  hostedPairingAllowed = true,
+): string | null {
+  const result = resolvePairingShareValue(credential, endpointUrl, hints, hostedPairingAllowed);
+  return result.qrShareable ? result.value : null;
 }
 
 export function resolveDesktopPairingUrl(

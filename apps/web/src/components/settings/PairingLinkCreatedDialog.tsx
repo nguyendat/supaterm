@@ -49,12 +49,14 @@ export function PairingLinkCreatedDialog({
       <DialogPopup className="max-w-md" finalFocus={finalFocus} initialFocus={copyButtonRef}>
         <DialogHeader>
           <DialogTitle>
-            {isLink ? "Your pairing link is ready" : "Your pairing code is ready"}
+            {isLink ? "Your pairing link is ready" : "Pairing code created"}
           </DialogTitle>
           <DialogDescription>
             {result?.qrShareable
               ? "Scan the QR code or open the link on your other device to connect."
-              : "Use this one-time link or code on a device that can reach this environment."}
+              : isLink
+                ? "This link works on this machine. Turn on Public relay or Network access on the host to connect another device."
+                : "Turn on Public relay or Network access on the host, then use this code to pair another device."}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
