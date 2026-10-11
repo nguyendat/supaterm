@@ -8,6 +8,7 @@ subpath. The package intentionally has no root export.
 | Subpath               | Responsibility                                                    |
 | --------------------- | ----------------------------------------------------------------- |
 | `authorization`       | Bearer pairing, WebSocket tickets, and environment authorization  |
+| `background-sync`     | Headless one-shot cache refresh over HTTP for OS background tasks |
 | `connection`          | Targets, catalog, supervision, retries, registry, and onboarding  |
 | `environment`         | Environment identity, descriptors, endpoints, and scoped keys     |
 | `errors`              | Shared client error inspection                                    |

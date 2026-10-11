@@ -71,6 +71,10 @@
       "types": "./src/authorization/index.ts",
       "default": "./src/authorization/index.ts"
     },
+    "./background-sync": {
+      "types": "./src/backgroundSync/index.ts",
+      "default": "./src/backgroundSync/index.ts"
+    },
     "./environment": {
       "types": "./src/environment/index.ts",
       "default": "./src/environment/index.ts"

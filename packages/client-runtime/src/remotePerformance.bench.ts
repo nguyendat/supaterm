@@ -71,14 +71,7 @@ const requests: Record<
     bearerToken: "test-token",
   }),
   "load remote snapshot with 100 messages": fetchEnvironmentThreadSnapshot({
-    prepared: {
-      environmentId: target.environmentId,
-      label: target.label,
-      httpBaseUrl: target.httpBaseUrl,
-      socketUrl: target.wsBaseUrl,
-      httpAuthorization: null,
-      target,
-    },
+    prepared: { httpBaseUrl: target.httpBaseUrl, httpAuthorization: null },
     threadId: thread.thread.id,
   }),
 };
