@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { HttpClient } from "effect/http";
 
-import type { PreparedConnection } from "../connection/model.ts";
+import type { PreparedConnection, PreparedHttpConnection } from "../connection/model.ts";
 import { environmentEndpointUrl } from "../environment/endpoint.ts";
 import {
   executeAuthenticatedEnvironmentHttpRequest,
@@ -19,7 +19,7 @@ const DEFAULT_BOUNDED_THREAD_SNAPSHOT_TIMEOUT_MS = 6_000;
 export const fetchEnvironmentBoundedThreadSnapshot = Effect.fn(
   "clientRuntime.state.fetchEnvironmentBoundedThreadSnapshot",
 )(function* (input: {
-  readonly prepared: PreparedConnection;
+  readonly prepared: PreparedHttpConnection;
   readonly threadId: ThreadId;
   readonly timeoutMs?: number;
 }) {

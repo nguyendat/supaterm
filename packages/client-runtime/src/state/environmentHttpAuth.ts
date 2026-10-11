@@ -5,7 +5,7 @@ import {
 } from "@supacode/contracts";
 import { FetchHttpClient } from "effect/http";
 
-import type { PreparedConnection, PreparedHttpAuthorization } from "../connection/model.ts";
+import type { PreparedHttpConnection, PreparedHttpAuthorization } from "../connection/model.ts";
 import {
   executeEnvironmentHttpRequest,
   makeEnvironmentHttpApiGroupClient,
@@ -57,7 +57,7 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
   E,
   R,
 >(input: {
-  readonly prepared: PreparedConnection;
+  readonly prepared: PreparedHttpConnection;
   readonly url: (httpBaseUrl: string) => string;
   readonly timeoutMs: number;
   readonly group: Group;

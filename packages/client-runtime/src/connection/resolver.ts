@@ -120,13 +120,8 @@ const makePrimaryBroker = Effect.fn("clientRuntime.connection.broker.makePrimary
   });
 });
 
-const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")(function* () {
-  const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
-  const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
-
-  return Effect.fn("clientRuntime.connection.broker.bearer")(function* (
-    entry: ConnectionCatalogEntry & { readonly target: BearerConnectionTarget },
-  ) {
+export const bearerRouteCredentials = Effect.fn("ConnectionResolver.bearerRouteCredentials")(
+  function* (entry: ConnectionCatalogEntry & { readonly target: BearerConnectionTarget }) {
     const target = entry.target;
     const profile = yield* Effect.fromOption(entry.profile, () =>
       profileMissingError(target.connectionId),
@@ -143,6 +138,7 @@ const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")
         actual: profile.environmentId,
       });
     }
+    const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
     const credential = yield* credentials.get(credentialConnectionId(target.connectionId)).pipe(
       Effect.flatMap(
         Option.match({
@@ -154,6 +150,21 @@ const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")
     if (!isBearerCredential(credential)) {
       return yield* credentialMissingError(target.connectionId);
     }
+    return { profile, credential };
+  },
+);
+
+const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")(function* () {
+  const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
+  const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+
+  return Effect.fn("clientRuntime.connection.broker.bearer")(function* (
+    entry: ConnectionCatalogEntry & { readonly target: BearerConnectionTarget },
+  ) {
+    const target = entry.target;
+    const { profile, credential } = yield* bearerRouteCredentials(entry).pipe(
+      Effect.provideService(ConnectionCredentialStore.ConnectionCredentialStore, credentials),
+    );
     const connectionMethod = parseRelayAddress(profile.httpBaseUrl) ? "relay" : "direct";
     const httpBaseUrl = yield* resolveRelayOrigin(profile.httpBaseUrl, profile.relayUrl);
     const authorized = yield* remote.authorizeBearer({

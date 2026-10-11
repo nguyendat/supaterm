@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./background-sync": {
+      "types": "./src/background/sync.ts",
+      "default": "./src/background/sync.ts"
+    },
     "./user-input-auto-dismiss-pause": {
       "types": "./src/userInputAutoDismissPause.ts",
       "default": "./src/userInputAutoDismissPause.ts"

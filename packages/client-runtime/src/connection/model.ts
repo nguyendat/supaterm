@@ -100,14 +100,17 @@ export interface PreparedHttpAuthorization {
   readonly token: string;
 }
 
-export interface PreparedConnection {
+export interface PreparedHttpConnection {
   readonly connectionMethod?: ClientConnectionMethod;
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly httpBaseUrl: string;
-  readonly socketUrl: string;
   readonly httpAuthorization: PreparedHttpAuthorization | null;
   readonly target: ConnectionTarget;
+}
+
+export interface PreparedConnection extends PreparedHttpConnection {
+  readonly socketUrl: string;
 }
 
 export type SupervisorConnectionPhase =

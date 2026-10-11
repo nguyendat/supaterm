@@ -99,12 +99,16 @@ export class ConnectionDriver extends Context.Service<
  * so the supervisor keeps retrying a route that may come back; a blocked
  * error is reported only when every attempted route was blocked.
  */
-export const connectOverRoutes = Effect.fn("ConnectionDriver.connectOverRoutes")(function* <R>(
+export const connectOverRoutes = Effect.fn("ConnectionDriver.connectOverRoutes")(function* <
+  A,
+  R,
+  RCheck,
+>(
   entry: ConnectionCatalogEntry,
-  checkRoute: (route: ConnectionRoute) => Effect.Effect<RouteCheck>,
+  checkRoute: (route: ConnectionRoute) => Effect.Effect<RouteCheck, never, RCheck>,
   connectRoute: (
     route: ConnectionRoute,
-  ) => Effect.Effect<EnvironmentConnectionLease, ConnectionAttemptError, R | Scope.Scope>,
+  ) => Effect.Effect<A, ConnectionAttemptError, R | Scope.Scope>,
 ) {
   const routes = connectionRoutes(entry);
   const checks =
@@ -203,43 +207,52 @@ export const connectOverRoutes = Effect.fn("ConnectionDriver.connectOverRoutes")
   );
 });
 
+export const checkConnectionRoute = (
+  entry: ConnectionCatalogEntry,
+  route: ConnectionRoute,
+  timeoutMs: number,
+  resolveOrigin: typeof resolveRelayOrigin = resolveRelayOrigin,
+) => {
+  const httpBaseUrl = routeHttpBaseUrl(route);
+  if (httpBaseUrl === null) return Effect.succeed<RouteCheck>("unchecked");
+  const profile = Option.getOrNull(route.profile);
+  const origin =
+    parseRelayAddress(httpBaseUrl) === null
+      ? Effect.succeed(httpBaseUrl)
+      : resolveOrigin(
+          httpBaseUrl,
+          profile?._tag === "BearerConnectionProfile" ? profile.relayUrl : undefined,
+        );
+  // The descriptor is public, so this sends no credential to whatever
+  // answers at a saved LAN address on a different network.
+  return origin.pipe(
+    Effect.flatMap((resolved) =>
+      fetchRemoteEnvironmentDescriptor({ httpBaseUrl: resolved, timeoutMs }),
+    ),
+    Effect.map((descriptor): RouteCheck =>
+      descriptor.environmentId === entry.target.environmentId ? "answered" : "silent",
+    ),
+    Effect.timeoutOrElse({
+      duration: timeoutMs,
+      orElse: () => Effect.succeed<RouteCheck>("silent"),
+    }),
+    Effect.orElseSucceed((): RouteCheck => "silent"),
+    Effect.withSpan("ConnectionDriver.checkRoute", {
+      attributes: { "connection.target.kind": route.target._tag },
+    }),
+  );
+};
+
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const resolver = yield* ConnectionResolver.ConnectionResolver;
   const sessions = yield* RpcSession.RpcSessionFactory;
   const httpClient = yield* HttpClient.HttpClient;
 
-  const checkRoute = (entry: ConnectionCatalogEntry, route: ConnectionRoute, timeoutMs: number) => {
-    const httpBaseUrl = routeHttpBaseUrl(route);
-    if (httpBaseUrl === null) return Effect.succeed<RouteCheck>("unchecked");
-    const profile = Option.getOrNull(route.profile);
-    const origin =
-      parseRelayAddress(httpBaseUrl) === null
-        ? Effect.succeed(httpBaseUrl)
-        : resolveRelayOrigin(
-            httpBaseUrl,
-            profile?._tag === "BearerConnectionProfile" ? profile.relayUrl : undefined,
-          );
-    // The descriptor is public, so this sends no credential to whatever
-    // answers at a saved LAN address on a different network.
-    return origin.pipe(
-      Effect.flatMap((resolved) =>
-        fetchRemoteEnvironmentDescriptor({ httpBaseUrl: resolved, timeoutMs }),
-      ),
-      Effect.map((descriptor): RouteCheck =>
-        descriptor.environmentId === entry.target.environmentId ? "answered" : "silent",
-      ),
-      Effect.timeoutOrElse({
-        duration: timeoutMs,
-        orElse: () => Effect.succeed<RouteCheck>("silent"),
-      }),
-      Effect.orElseSucceed((): RouteCheck => "silent"),
+  const checkRoute = (entry: ConnectionCatalogEntry, route: ConnectionRoute, timeoutMs: number) =>
+    checkConnectionRoute(entry, route, timeoutMs).pipe(
       Effect.provideService(HttpClient.HttpClient, httpClient),
-      Effect.withSpan("ConnectionDriver.checkRoute", {
-        attributes: { "connection.target.kind": route.target._tag },
-      }),
     );
-  };
 
   const connect = Effect.fn("ConnectionDriver.connect")(function* (
     entry: ConnectionCatalogEntry,
