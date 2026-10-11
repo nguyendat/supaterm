@@ -516,7 +516,7 @@ describe("environment shell synchronization", () => {
       expect(yield* Ref.get(capturedAfterSequences)).toEqual([10, 40, 40, 40, 40, 40, 20, 30]);
       expect(yield* Ref.get(loaderCalls)).toBe(3);
       expect(decisions.at(-1)?.[1]).toMatchObject({
-        cursorResumes: 8,
+        cursorResumes: 5,
         httpRefreshes: 3,
         socketFallbacks: 0,
       });

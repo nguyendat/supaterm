@@ -372,7 +372,8 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         }
         let canResume = hasAuthoritativeSnapshot;
         let current = yield* SubscriptionRef.get(state);
-        if (!hasAuthoritativeSnapshot || Option.isNone(current.snapshot)) {
+        const needsHttpRefresh = !hasAuthoritativeSnapshot || Option.isNone(current.snapshot);
+        if (needsHttpRefresh) {
           syncMetrics.httpRefreshes += 1;
           const prepared = yield* SubscriptionRef.get(supervisor.prepared).pipe(
             Effect.flatMap(
@@ -421,14 +422,18 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
           });
           return supportsCompletionMarker ? { requestCompletionMarker: true as const } : {};
         }
-        syncMetrics.cursorResumes += 1;
+        let decision: "http-refresh" | "cross-session-cursor-resume" | "same-session-cursor-resume";
+        if (needsHttpRefresh) {
+          decision = "http-refresh";
+        } else {
+          syncMetrics.cursorResumes += 1;
+          decision = crossSessionResume
+            ? "cross-session-cursor-resume"
+            : "same-session-cursor-resume";
+        }
         yield* Effect.logDebug("Environment shell synchronization decision", {
           environmentId,
-          decision: crossSessionResume
-            ? "cross-session-cursor-resume"
-            : sameSessionResume
-              ? "same-session-cursor-resume"
-              : "http-refresh-cursor-resume",
+          decision,
           ...syncMetrics,
         });
         if (!supportsCompletionMarker) {
