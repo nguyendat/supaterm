@@ -40,7 +40,7 @@ try {
   activeController = null;
 }
 
-export async function registerMobileBackgroundSync(): Promise<boolean> {
+async function reconcileMobileBackgroundSync(): Promise<boolean> {
   if ((await BackgroundTask.getStatusAsync()) === BackgroundTask.BackgroundTaskStatus.Restricted) {
     return false;
   }
@@ -78,4 +78,14 @@ export async function registerMobileBackgroundSync(): Promise<boolean> {
     });
   }
   return true;
+}
+
+let registrationQueue = Promise.resolve(false);
+
+export function registerMobileBackgroundSync(): Promise<boolean> {
+  registrationQueue = registrationQueue.then(
+    reconcileMobileBackgroundSync,
+    reconcileMobileBackgroundSync,
+  );
+  return registrationQueue;
 }

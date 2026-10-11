@@ -153,9 +153,14 @@ export const make = Effect.fn("MobileEnvironmentCacheStore.make")(function* () {
         environmentId,
         snapshot,
       }).pipe(Effect.mapError((cause) => persistenceError("save-shell", cause)));
-      yield* database
-        .saveCache(environmentId, "shell", "snapshot", ORCHESTRATION_CACHE_SCHEMA_VERSION, payload)
-        .pipe(Effect.mapError(mapDatabaseError("save-shell")));
+      yield* saveSnapshot(
+        database,
+        environmentId,
+        "shell",
+        "snapshot",
+        payload,
+        snapshot.snapshotSequence,
+      ).pipe(Effect.mapError(mapDatabaseError("save-shell")));
     }),
     saveShellIfNewer: Effect.fn("MobileEnvironmentCache.saveShellIfNewer")(
       function* (environmentId, snapshot) {
@@ -196,9 +201,14 @@ export const make = Effect.fn("MobileEnvironmentCacheStore.make")(function* () {
         threadId,
         snapshot,
       }).pipe(Effect.mapError((cause) => persistenceError("save-thread", cause)));
-      yield* database
-        .saveCache(environmentId, "thread", threadId, ORCHESTRATION_CACHE_SCHEMA_VERSION, payload)
-        .pipe(Effect.mapError(mapDatabaseError("save-thread")));
+      yield* saveSnapshot(
+        database,
+        environmentId,
+        "thread",
+        threadId,
+        payload,
+        snapshot.snapshotSequence,
+      ).pipe(Effect.mapError(mapDatabaseError("save-thread")));
     }),
     saveThreadIfNewer: Effect.fn("MobileEnvironmentCache.saveThreadIfNewer")(
       function* (environmentId, snapshot) {

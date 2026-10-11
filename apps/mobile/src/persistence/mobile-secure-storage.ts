@@ -23,7 +23,11 @@ export class MobileSecureStorage extends Context.Service<
   MobileSecureStorage,
   {
     readonly getItem: (key: string) => Effect.Effect<string | null, MobileSecureStorageError>;
-    readonly setItem: (key: string, value: string) => Effect.Effect<void, MobileSecureStorageError>;
+    readonly setItem: (
+      key: string,
+      value: string,
+      options?: SecureStore.SecureStoreOptions,
+    ) => Effect.Effect<void, MobileSecureStorageError>;
     readonly removeItem: (key: string) => Effect.Effect<void, MobileSecureStorageError>;
   }
 >()("@supacode/mobile/persistence/MobileSecureStorage") {}
@@ -35,9 +39,9 @@ export const make = MobileSecureStorage.of({
       catch: (cause) => new MobileSecureStorageError({ operation: "read", key, cause }),
     }),
   ),
-  setItem: Effect.fn("MobileSecureStorage.setItem")((key, value) =>
+  setItem: Effect.fn("MobileSecureStorage.setItem")((key, value, options) =>
     Effect.tryPromise({
-      try: () => SecureStore.setItemAsync(key, value),
+      try: () => SecureStore.setItemAsync(key, value, options),
       catch: (cause) => new MobileSecureStorageError({ operation: "write", key, cause }),
     }),
   ),

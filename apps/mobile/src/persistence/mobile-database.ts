@@ -524,9 +524,10 @@ const makeAvailable = Effect.gen(function* () {
                   kind,
                   cacheKey,
                 );
-                if (cacheRow === null) {
-                  if (snapshotSequence !== null) return;
-                } else if (snapshotSequenceFromPayload(cacheRow.payload) !== snapshotSequence) {
+                if (
+                  cacheRow === null ||
+                  snapshotSequenceFromPayload(cacheRow.payload) !== snapshotSequence
+                ) {
                   return;
                 }
               } else if (row.snapshotSequence !== snapshotSequence) {

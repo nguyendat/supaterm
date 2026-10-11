@@ -9,12 +9,16 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as SecureStore from "expo-secure-store";
 
 import * as MobileSecureStorage from "../persistence/mobile-secure-storage";
 import { migrateLegacyConnectionCatalog } from "./migration";
 
 export const CONNECTION_CATALOG_KEY = "supacode.connection-catalog.v1";
 export const LEGACY_CONNECTIONS_KEY = "supacode.connections";
+const CATALOG_STORAGE_OPTIONS: SecureStore.SecureStoreOptions = {
+  keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+};
 
 function catalogError(operation: string, cause: unknown) {
   return new ConnectionTransientError({
@@ -52,8 +56,10 @@ export const make = Effect.fn("mobile.connectionStorage.makeCatalogStore")(funct
   const storage = yield* MobileSecureStorage.MobileSecureStorage;
   const getItem = (key: string) =>
     storage.getItem(key).pipe(Effect.mapError((cause) => catalogError("load", cause)));
-  const setItem = (key: string, value: string) =>
-    storage.setItem(key, value).pipe(Effect.mapError((cause) => catalogError("save", cause)));
+  const setCatalogItem = (value: string) =>
+    storage
+      .setItem(CONNECTION_CATALOG_KEY, value, CATALOG_STORAGE_OPTIONS)
+      .pipe(Effect.mapError((cause) => catalogError("save", cause)));
   const deleteItem = (key: string) =>
     storage.removeItem(key).pipe(Effect.mapError((cause) => catalogError("delete", cause)));
   const state = yield* Ref.make<Option.Option<ConnectionCatalogDocumentType>>(Option.none());
@@ -74,7 +80,7 @@ export const make = Effect.fn("mobile.connectionStorage.makeCatalogStore")(funct
           );
     if (legacyRaw !== null && legacyRaw.trim() !== "") {
       const encoded = yield* encodeCatalog(catalog);
-      yield* setItem(CONNECTION_CATALOG_KEY, encoded);
+      yield* setCatalogItem(encoded);
       yield* deleteItem(LEGACY_CONNECTIONS_KEY);
     }
     return catalog;
@@ -96,6 +102,8 @@ export const make = Effect.fn("mobile.connectionStorage.makeCatalogStore")(funct
           ),
         ),
       );
+      const encoded = yield* encodeCatalog(catalog);
+      yield* setCatalogItem(encoded);
     } else {
       catalog = yield* loadLegacyCatalog();
     }
@@ -110,7 +118,7 @@ export const make = Effect.fn("mobile.connectionStorage.makeCatalogStore")(funct
         Effect.gen(function* () {
           const next = transform(yield* loadUnlocked());
           const encoded = yield* encodeCatalog(next);
-          yield* setItem(CONNECTION_CATALOG_KEY, encoded);
+          yield* setCatalogItem(encoded);
           yield* Ref.set(state, Option.some(next));
         }),
       );

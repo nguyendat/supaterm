@@ -308,6 +308,17 @@ describe("mobile SQLite environment cache store", () => {
         expect(Option.getOrThrow(yield* store.loadShell(ENVIRONMENT_ID)).projects[0]!.title).toBe(
           "Updated",
         );
+
+        yield* store.saveShellIfNewer!(ENVIRONMENT_ID, {
+          ...SHELL_SNAPSHOT,
+          snapshotSequence: SHELL_SNAPSHOT.snapshotSequence + 1,
+          projects: SHELL_SNAPSHOT.projects.map((project) => ({ ...project, title: "Background" })),
+        });
+        yield* store.saveShell(ENVIRONMENT_ID, foreground);
+
+        const afterForegroundWrite = Option.getOrThrow(yield* store.loadShell(ENVIRONMENT_ID));
+        expect(afterForegroundWrite.snapshotSequence).toBe(SHELL_SNAPSHOT.snapshotSequence + 1);
+        expect(afterForegroundWrite.projects[0]!.title).toBe("Background");
       }),
   );
 

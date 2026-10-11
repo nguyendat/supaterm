@@ -4,6 +4,7 @@ import {
   type OrchestrationV2ThreadDetailSnapshot,
   type OrchestrationV2ThreadShell,
   ThreadId,
+  type ThreadPullRequestLink,
 } from "@supacode/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
@@ -18,6 +19,7 @@ import * as TestClock from "effect/testing/TestClock";
 import * as ConnectionCredentialStore from "../connection/credentialStore.ts";
 import * as ConnectionProfileStore from "../connection/profileStore.ts";
 import * as Persistence from "../platform/persistence.ts";
+import type { DeferredShellSnapshot } from "../state/shellPullRequests.ts";
 import { layerRemoteHttpClient } from "../rpc/http.ts";
 import {
   v2Now,
@@ -129,7 +131,7 @@ function environmentServer(
 
 function makeCache(
   initial: {
-    readonly shell?: OrchestrationV2ShellSnapshot;
+    readonly shell?: DeferredShellSnapshot;
     readonly threads?: ReadonlyArray<OrchestrationV2ThreadDetailSnapshot>;
   } = {},
   beforeThreadWrite: (threadId: ThreadId) => Effect.Effect<void> = () => Effect.void,
@@ -201,6 +203,42 @@ const threadRequests = (requests: ReadonlyArray<RecordedRequest>) =>
   );
 
 describe("BackgroundSync", () => {
+  it.effect(
+    "retains deferred cached pull request links when an equal-sequence shell omits them",
+    () => {
+      const link: ThreadPullRequestLink = {
+        host: "github.com",
+        repository: "supabitapp/supacode-next",
+        number: 42,
+        url: "https://github.com/supabitapp/supacode-next/pull/42",
+        source: "agent",
+        linkedAt: "2026-07-29T12:00:00.000Z",
+        snapshot: null,
+        stack: null,
+      };
+      const thread = row(threadA, LATER);
+      const server = environmentServer({ rows: [thread] });
+      const cache = makeCache({
+        shell: {
+          ...v2ShellSnapshot,
+          snapshotSequence: SHELL_SEQUENCE,
+          threads: [thread],
+          loadPullRequests: Effect.succeed(new Map([[threadA, [link]]])),
+        },
+      });
+      const store = {
+        ...cache.store,
+        saveShellIfNewer: (_: typeof ENVIRONMENT_ID, snapshot: OrchestrationV2ShellSnapshot) =>
+          cache.store.saveShell(ENVIRONMENT_ID, snapshot).pipe(Effect.as(true)),
+      };
+      return Effect.gen(function* () {
+        const sync = yield* BackgroundSync.BackgroundSync;
+        yield* sync.run({ budgetMs: 25_000, maxThreadsPerEnvironment: 0 });
+        expect(cache.shell()?.threads[0]?.pullRequests).toEqual([link]);
+      }).pipe(Effect.provide(syncLayer(server.fetchFn, store)));
+    },
+  );
+
   it.effect("stores the shell and the stale recent threads, each with its own sequence", () => {
     const server = environmentServer();
     const cache = makeCache({ threads: [detail(threadB, EARLIER, 30)] });

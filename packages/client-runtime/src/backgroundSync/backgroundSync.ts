@@ -383,9 +383,13 @@ export const make = Effect.gen(function* () {
       ),
     );
     const shell = yield* completeShellSnapshot(opened.value, Option.getOrNull(cached));
+    const cachedForMerge =
+      Option.isSome(cached) && cached.value.snapshotSequence === shell.snapshotSequence
+        ? yield* completeShellSnapshot(cached.value, null)
+        : Option.getOrNull(cached);
     const shellToPersist =
-      cachedSequenceOf(cached) === shell.snapshotSequence && Option.isSome(cached)
-        ? mergeEqualSequenceShellSnapshot(cached.value, shell)
+      cachedForMerge?.snapshotSequence === shell.snapshotSequence
+        ? mergeEqualSequenceShellSnapshot(cachedForMerge, shell)
         : shell;
     yield* saveIfNewer(
       shellToPersist.snapshotSequence,

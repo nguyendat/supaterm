@@ -8,7 +8,7 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { createStaticNavigation } from "@react-navigation/native";
 
-import { RegistryContext } from "@effect/atom-react";
+import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { ThreadArrangementHost } from "./features/threads/ThreadArrangementSheet";
 import { ConfirmDialogHost } from "./components/ConfirmDialogHost";
 import { prepareNativeShowcaseCapture } from "./features/showcase/nativeShowcaseScene";
@@ -28,6 +28,7 @@ import { SubscriptionUsageCoordinator } from "./widgets/SubscriptionUsageCoordin
 import { VoiceInputProvider } from "./features/voice-input/VoiceInputProvider";
 import { GlobalVoiceInputControl } from "./features/voice-input/GlobalVoiceInputControl";
 import { registerMobileBackgroundSync } from "./connection/background-sync-scheduler";
+import { environmentCatalog } from "./connection/catalog";
 
 import "../global.css";
 
@@ -61,14 +62,6 @@ function SplashScreenCoordinator() {
 export default function App() {
   useUiRuntimeMemoryWarningGc();
 
-  useEffect(() => {
-    void registerMobileBackgroundSync().catch(() => undefined);
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "background") void registerMobileBackgroundSync().catch(() => undefined);
-    });
-    return () => subscription.remove();
-  }, []);
-
   return (
     <RegistryContext.Provider value={appAtomRegistry}>
       <AppearancePreferencesProvider>
@@ -80,6 +73,19 @@ export default function App() {
 
 function AppContent() {
   const { themeAppearance } = useAppearancePreferences();
+  const catalog = useAtomValue(environmentCatalog.catalogValueAtom);
+
+  useEffect(() => {
+    if (!catalog.isReady) return;
+    void registerMobileBackgroundSync().catch(() => undefined);
+  }, [catalog]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "background") void registerMobileBackgroundSync().catch(() => undefined);
+    });
+    return () => subscription.remove();
+  }, []);
   const navigationTheme = useMobileNavigationTheme();
 
   return (
