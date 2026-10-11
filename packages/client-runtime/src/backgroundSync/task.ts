@@ -44,6 +44,9 @@ export function completionFor(
   report: BackgroundSync.BackgroundSyncReport,
 ): BackgroundSyncCompletion {
   if (report.outcome === "failed") return "failed";
+  if (report.environments.some((environment) => environment.status === "failed")) {
+    return "failed";
+  }
   const wrote = report.environments.some(
     (environment) =>
       environment.shell?._tag === "saved" ||

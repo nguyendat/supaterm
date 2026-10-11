@@ -77,10 +77,17 @@ export class EnvironmentCacheStore extends Context.Service<
     readonly loadShell: (
       environmentId: EnvironmentId,
     ) => Effect.Effect<Option.Option<DeferredShellSnapshot>, ConnectionPersistenceError>;
+    readonly loadShellWithoutHydration?: (
+      environmentId: EnvironmentId,
+    ) => Effect.Effect<Option.Option<DeferredShellSnapshot>, ConnectionPersistenceError>;
     readonly saveShell: (
       environmentId: EnvironmentId,
       snapshot: OrchestrationV2ShellSnapshot,
     ) => Effect.Effect<void, ConnectionPersistenceError>;
+    readonly saveShellIfNewer?: (
+      environmentId: EnvironmentId,
+      snapshot: OrchestrationV2ShellSnapshot,
+    ) => Effect.Effect<boolean, ConnectionPersistenceError>;
     readonly loadThread: (
       environmentId: EnvironmentId,
       threadId: ThreadId,
@@ -92,10 +99,19 @@ export class EnvironmentCacheStore extends Context.Service<
       environmentId: EnvironmentId,
       snapshot: OrchestrationV2ThreadDetailSnapshot,
     ) => Effect.Effect<void, ConnectionPersistenceError>;
+    readonly saveThreadIfNewer?: (
+      environmentId: EnvironmentId,
+      snapshot: OrchestrationV2ThreadDetailSnapshot,
+    ) => Effect.Effect<boolean, ConnectionPersistenceError>;
     readonly removeThread: (
       environmentId: EnvironmentId,
       threadId: ThreadId,
     ) => Effect.Effect<void, ConnectionPersistenceError>;
+    readonly removeThreadIfSequence?: (
+      environmentId: EnvironmentId,
+      threadId: ThreadId,
+      snapshotSequence: number | null,
+    ) => Effect.Effect<boolean, ConnectionPersistenceError>;
     /**
      * The last complete server configuration. This deliberately includes provider
      * metadata so offline task creation can still offer the models a user last saw.

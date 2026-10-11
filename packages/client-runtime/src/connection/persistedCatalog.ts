@@ -37,7 +37,7 @@ export const loadPersistedCatalogEntries = Effect.fn("loadPersistedCatalogEntrie
     yield* Effect.forEach(
       persistedRoutesByEnvironment,
       Effect.fn("loadPersistedCatalogEntries.loadEntry")(function* ([environmentId, targets]) {
-        const loaded = yield* Effect.forEach(targets, loadRoute, { concurrency: "unbounded" });
+        const loaded = yield* Effect.forEach(targets, loadRoute, { concurrency: 2 });
         const seen = new Set<string>();
         const usable = loaded.filter((route) => {
           const id = connectionRouteId(route.target);
@@ -59,7 +59,7 @@ export const loadPersistedCatalogEntries = Effect.fn("loadPersistedCatalogEntrie
           ),
         ] as const;
       }),
-      { concurrency: "unbounded" },
+      { concurrency: 2 },
     ),
   );
 });

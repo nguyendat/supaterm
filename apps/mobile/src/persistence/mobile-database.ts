@@ -7,7 +7,7 @@ import * as Schema from "effect/Schema";
 import type { SQLiteDatabase } from "expo-sqlite";
 
 const DATABASE_NAME = "supacode-client.db";
-const DATABASE_SCHEMA_VERSION = 1;
+const DATABASE_SCHEMA_VERSION = 2;
 const LEGACY_CACHE_DIRECTORIES = [
   "connection-shell-snapshots",
   "shell-snapshots",
@@ -87,6 +87,17 @@ interface LegacyCacheRecord {
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+function snapshotSequenceFromPayload(payload: string): number | undefined {
+  try {
+    const parsed = objectRecord(JSON.parse(payload));
+    const snapshot = objectRecord(parsed?.snapshot);
+    const sequence = snapshot?.snapshotSequence ?? parsed?.snapshotSequence;
+    return typeof sequence === "number" ? sequence : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function decodeLegacyCacheRecord(
@@ -209,11 +220,25 @@ export class MobileDatabase extends Context.Service<
       schemaVersion: number,
       payload: string,
     ) => Effect.Effect<void, MobileDatabaseError>;
+    readonly saveCacheIfNewer?: (
+      environmentId: EnvironmentId,
+      kind: ClientCacheKind,
+      cacheKey: string,
+      schemaVersion: number,
+      payload: string,
+      snapshotSequence: number,
+    ) => Effect.Effect<boolean, MobileDatabaseError>;
     readonly removeCache: (
       environmentId: EnvironmentId,
       kind: ClientCacheKind,
       cacheKey: string,
     ) => Effect.Effect<void, MobileDatabaseError>;
+    readonly removeCacheIfSequence?: (
+      environmentId: EnvironmentId,
+      kind: ClientCacheKind,
+      cacheKey: string,
+      snapshotSequence: number | null,
+    ) => Effect.Effect<boolean, MobileDatabaseError>;
     readonly clearCacheKind: (
       environmentId: EnvironmentId,
       kind: ClientCacheKind,
@@ -270,6 +295,14 @@ const makeAvailable = Effect.gen(function* () {
               CREATE INDEX IF NOT EXISTS client_cache_environment_updated
                 ON client_cache (environment_id, updated_at DESC);
 
+              CREATE TABLE IF NOT EXISTS client_cache_sequence (
+                environment_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                cache_key TEXT NOT NULL,
+                snapshot_sequence INTEGER NOT NULL,
+                PRIMARY KEY (environment_id, kind, cache_key)
+              ) WITHOUT ROWID;
+
               CREATE TABLE IF NOT EXISTS client_preferences (
                 singleton INTEGER PRIMARY KEY NOT NULL CHECK (singleton = 1),
                 payload TEXT NOT NULL,
@@ -313,60 +346,252 @@ const makeAvailable = Effect.gen(function* () {
       }).pipe(Effect.map((rows) => rows.map((row) => row.payload))),
     ),
     saveCache: Effect.fn("MobileDatabase.saveCache")(
-      (environmentId, kind, cacheKey, schemaVersion, payload) =>
-        Effect.tryPromise({
+      (environmentId, kind, cacheKey, schemaVersion, payload) => {
+        if (kind !== "shell" && kind !== "thread") {
+          return Effect.tryPromise({
+            try: () =>
+              database.runAsync(
+                `INSERT INTO client_cache
+                        (environment_id, kind, cache_key, schema_version, payload, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?)
+                       ON CONFLICT (environment_id, kind, cache_key) DO UPDATE SET
+                         schema_version = excluded.schema_version,
+                         payload = excluded.payload,
+                         updated_at = excluded.updated_at`,
+                environmentId,
+                kind,
+                cacheKey,
+                schemaVersion,
+                payload,
+                Date.now(),
+              ),
+            catch: databaseError("save-cache"),
+          }).pipe(Effect.asVoid);
+        }
+        return Effect.tryPromise({
           try: () =>
-            database.runAsync(
-              `INSERT INTO client_cache
-                      (environment_id, kind, cache_key, schema_version, payload, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?)
-                     ON CONFLICT (environment_id, kind, cache_key) DO UPDATE SET
-                       schema_version = excluded.schema_version,
-                       payload = excluded.payload,
-                       updated_at = excluded.updated_at`,
-              environmentId,
-              kind,
-              cacheKey,
-              schemaVersion,
-              payload,
-              Date.now(),
-            ),
+            database.withExclusiveTransactionAsync(async (transaction) => {
+              await transaction.runAsync(
+                `INSERT INTO client_cache
+                        (environment_id, kind, cache_key, schema_version, payload, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?)
+                       ON CONFLICT (environment_id, kind, cache_key) DO UPDATE SET
+                         schema_version = excluded.schema_version,
+                         payload = excluded.payload,
+                         updated_at = excluded.updated_at`,
+                environmentId,
+                kind,
+                cacheKey,
+                schemaVersion,
+                payload,
+                Date.now(),
+              );
+              if (kind === "shell" || kind === "thread") {
+                const sequence = snapshotSequenceFromPayload(payload);
+                if (sequence === undefined) {
+                  await transaction.runAsync(
+                    `DELETE FROM client_cache_sequence
+                             WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
+                    environmentId,
+                    kind,
+                    cacheKey,
+                  );
+                } else {
+                  await transaction.runAsync(
+                    `INSERT INTO client_cache_sequence
+                            (environment_id, kind, cache_key, snapshot_sequence)
+                           VALUES (?, ?, ?, ?)
+                           ON CONFLICT (environment_id, kind, cache_key) DO UPDATE SET
+                             snapshot_sequence = excluded.snapshot_sequence`,
+                    environmentId,
+                    kind,
+                    cacheKey,
+                    sequence,
+                  );
+                }
+              }
+            }),
           catch: databaseError("save-cache"),
-        }).pipe(Effect.asVoid),
+        }).pipe(Effect.asVoid);
+      },
+    ),
+    saveCacheIfNewer: Effect.fn("MobileDatabase.saveCacheIfNewer")(
+      (environmentId, kind, cacheKey, schemaVersion, payload, snapshotSequence) => {
+        let saved = false;
+        return Effect.tryPromise({
+          try: () =>
+            database.withExclusiveTransactionAsync(async (transaction) => {
+              const sequenceRow = await transaction.getFirstAsync<{
+                readonly snapshotSequence: number;
+              }>(
+                `SELECT snapshot_sequence AS snapshotSequence
+                         FROM client_cache_sequence
+                         WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
+                environmentId,
+                kind,
+                cacheKey,
+              );
+              const cacheRow = await transaction.getFirstAsync<{ readonly payload: string }>(
+                `SELECT payload
+                         FROM client_cache
+                         WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
+                environmentId,
+                kind,
+                cacheKey,
+              );
+              let cachedSequence = sequenceRow?.snapshotSequence;
+              if (cachedSequence === undefined && cacheRow !== null)
+                cachedSequence = snapshotSequenceFromPayload(cacheRow.payload);
+              if (cachedSequence !== undefined && cachedSequence > snapshotSequence) return;
+              if (cachedSequence === snapshotSequence && cacheRow?.payload === payload) return;
+
+              await transaction.runAsync(
+                `INSERT INTO client_cache
+                        (environment_id, kind, cache_key, schema_version, payload, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?)
+                       ON CONFLICT (environment_id, kind, cache_key) DO UPDATE SET
+                         schema_version = excluded.schema_version,
+                         payload = excluded.payload,
+                         updated_at = excluded.updated_at`,
+                environmentId,
+                kind,
+                cacheKey,
+                schemaVersion,
+                payload,
+                Date.now(),
+              );
+              await transaction.runAsync(
+                `INSERT INTO client_cache_sequence
+                        (environment_id, kind, cache_key, snapshot_sequence)
+                       VALUES (?, ?, ?, ?)
+                       ON CONFLICT (environment_id, kind, cache_key) DO UPDATE SET
+                         snapshot_sequence = excluded.snapshot_sequence`,
+                environmentId,
+                kind,
+                cacheKey,
+                snapshotSequence,
+              );
+              saved = true;
+            }),
+          catch: databaseError("save-cache"),
+        }).pipe(Effect.map(() => saved));
+      },
     ),
     removeCache: Effect.fn("MobileDatabase.removeCache")((environmentId, kind, cacheKey) =>
       Effect.tryPromise({
         try: () =>
-          database.runAsync(
-            `DELETE FROM client_cache
-                     WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
-            environmentId,
-            kind,
-            cacheKey,
-          ),
+          database.withExclusiveTransactionAsync(async (transaction) => {
+            await transaction.runAsync(
+              `DELETE FROM client_cache
+                       WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
+              environmentId,
+              kind,
+              cacheKey,
+            );
+            await transaction.runAsync(
+              `DELETE FROM client_cache_sequence
+                       WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
+              environmentId,
+              kind,
+              cacheKey,
+            );
+          }),
         catch: databaseError("remove-cache"),
       }).pipe(Effect.asVoid),
+    ),
+    removeCacheIfSequence: Effect.fn("MobileDatabase.removeCacheIfSequence")(
+      (environmentId, kind, cacheKey, snapshotSequence) => {
+        let removed = false;
+        return Effect.tryPromise({
+          try: () =>
+            database.withExclusiveTransactionAsync(async (transaction) => {
+              const row = await transaction.getFirstAsync<{
+                readonly snapshotSequence: number;
+              }>(
+                `SELECT snapshot_sequence AS snapshotSequence
+                         FROM client_cache_sequence
+                         WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
+                environmentId,
+                kind,
+                cacheKey,
+              );
+              if (row === null) {
+                const cacheRow = await transaction.getFirstAsync<{ readonly payload: string }>(
+                  `SELECT payload
+                           FROM client_cache
+                           WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
+                  environmentId,
+                  kind,
+                  cacheKey,
+                );
+                if (cacheRow === null) {
+                  if (snapshotSequence !== null) return;
+                } else if (snapshotSequenceFromPayload(cacheRow.payload) !== snapshotSequence) {
+                  return;
+                }
+              } else if (row.snapshotSequence !== snapshotSequence) {
+                return;
+              }
+              await transaction.runAsync(
+                `DELETE FROM client_cache
+                         WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
+                environmentId,
+                kind,
+                cacheKey,
+              );
+              await transaction.runAsync(
+                `DELETE FROM client_cache_sequence
+                         WHERE environment_id = ? AND kind = ? AND cache_key = ?`,
+                environmentId,
+                kind,
+                cacheKey,
+              );
+              removed = true;
+            }),
+          catch: databaseError("remove-cache"),
+        }).pipe(Effect.map(() => removed));
+      },
     ),
     clearCacheKind: Effect.fn("MobileDatabase.clearCacheKind")((environmentId, kind) =>
       Effect.tryPromise({
         try: () =>
-          database.runAsync(
-            "DELETE FROM client_cache WHERE environment_id = ? AND kind = ?",
-            environmentId,
-            kind,
-          ),
+          database.withExclusiveTransactionAsync(async (transaction) => {
+            await transaction.runAsync(
+              "DELETE FROM client_cache WHERE environment_id = ? AND kind = ?",
+              environmentId,
+              kind,
+            );
+            await transaction.runAsync(
+              "DELETE FROM client_cache_sequence WHERE environment_id = ? AND kind = ?",
+              environmentId,
+              kind,
+            );
+          }),
         catch: databaseError("clear-cache-kind"),
       }).pipe(Effect.asVoid),
     ),
     clearEnvironmentCache: Effect.fn("MobileDatabase.clearEnvironmentCache")((environmentId) =>
       Effect.tryPromise({
         try: () =>
-          database.runAsync("DELETE FROM client_cache WHERE environment_id = ?", environmentId),
+          database.withExclusiveTransactionAsync(async (transaction) => {
+            await transaction.runAsync(
+              "DELETE FROM client_cache WHERE environment_id = ?",
+              environmentId,
+            );
+            await transaction.runAsync(
+              "DELETE FROM client_cache_sequence WHERE environment_id = ?",
+              environmentId,
+            );
+          }),
         catch: databaseError("clear-environment-cache"),
       }).pipe(Effect.asVoid),
     ),
     clearAllCaches: Effect.tryPromise({
-      try: () => database.runAsync("DELETE FROM client_cache"),
+      try: () =>
+        database.withExclusiveTransactionAsync(async (transaction) => {
+          await transaction.runAsync("DELETE FROM client_cache");
+          await transaction.runAsync("DELETE FROM client_cache_sequence");
+        }),
       catch: databaseError("clear-all-caches"),
     }).pipe(Effect.asVoid),
     inspectCaches: Effect.tryPromise({

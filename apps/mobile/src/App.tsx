@@ -2,7 +2,7 @@ import { PermissionUpdateNotice } from "./components/PermissionUpdateNotice";
 import * as Linking from "expo-linking";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
-import { Platform, StatusBar } from "react-native";
+import { AppState, Platform, StatusBar } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -27,6 +27,7 @@ import { useUiRuntimeMemoryWarningGc } from "./lib/useUiRuntimeMemoryWarningGc";
 import { SubscriptionUsageCoordinator } from "./widgets/SubscriptionUsageCoordinator";
 import { VoiceInputProvider } from "./features/voice-input/VoiceInputProvider";
 import { GlobalVoiceInputControl } from "./features/voice-input/GlobalVoiceInputControl";
+import { registerMobileBackgroundSync } from "./connection/background-sync-scheduler";
 
 import "../global.css";
 
@@ -59,6 +60,14 @@ function SplashScreenCoordinator() {
 
 export default function App() {
   useUiRuntimeMemoryWarningGc();
+
+  useEffect(() => {
+    void registerMobileBackgroundSync().catch(() => undefined);
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "background") void registerMobileBackgroundSync().catch(() => undefined);
+    });
+    return () => subscription.remove();
+  }, []);
 
   return (
     <RegistryContext.Provider value={appAtomRegistry}>

@@ -175,6 +175,7 @@ function cacheId(
 function makeDatabase() {
   const values = new Map<string, string>();
   const schemaVersions = new Map<string, number>();
+  const sequences = new Map<string, number>();
   const removed: Array<string> = [];
   const database = MobileDatabase.MobileDatabase.of({
     loadCache: (environmentId, kind, cacheKey) =>
@@ -190,31 +191,58 @@ function makeDatabase() {
         const id = cacheId(environmentId, kind, cacheKey);
         values.set(id, payload);
         schemaVersions.set(id, schemaVersion);
+        if (kind === "shell" || kind === "thread") {
+          const parsed = JSON.parse(payload) as {
+            readonly snapshot?: { readonly snapshotSequence?: number };
+          };
+          const sequence = parsed.snapshot?.snapshotSequence;
+          if (sequence !== undefined) sequences.set(id, sequence);
+        }
+      }),
+    saveCacheIfNewer: (environmentId, kind, cacheKey, schemaVersion, payload, sequence) =>
+      Effect.sync(() => {
+        const id = cacheId(environmentId, kind, cacheKey);
+        const cached = sequences.get(id);
+        if (cached !== undefined && (cached > sequence || values.get(id) === payload)) return false;
+        values.set(id, payload);
+        schemaVersions.set(id, schemaVersion);
+        sequences.set(id, sequence);
+        return true;
       }),
     removeCache: (environmentId, kind, cacheKey) =>
       Effect.sync(() => {
         const id = cacheId(environmentId, kind, cacheKey);
         removed.push(id);
         values.delete(id);
+        sequences.delete(id);
       }),
     clearCacheKind: (environmentId, kind) =>
       Effect.sync(() => {
         for (const key of values.keys()) {
-          if (key.startsWith(`${environmentId}:${kind}:`)) values.delete(key);
+          if (key.startsWith(`${environmentId}:${kind}:`)) {
+            values.delete(key);
+            sequences.delete(key);
+          }
         }
       }),
     clearEnvironmentCache: (environmentId) =>
       Effect.sync(() => {
         for (const key of values.keys()) {
-          if (key.startsWith(`${environmentId}:`)) values.delete(key);
+          if (key.startsWith(`${environmentId}:`)) {
+            values.delete(key);
+            sequences.delete(key);
+          }
         }
       }),
-    clearAllCaches: Effect.sync(() => values.clear()),
+    clearAllCaches: Effect.sync(() => {
+      values.clear();
+      sequences.clear();
+    }),
     inspectCaches: Effect.succeed([]),
     loadPreferencesJson: Effect.succeed(Option.none()),
     savePreferencesJson: () => Effect.void,
   });
-  return { database, removed, schemaVersions, values };
+  return { database, removed, schemaVersions, sequences, values };
 }
 
 describe("mobile SQLite environment cache store", () => {
@@ -254,6 +282,33 @@ describe("mobile SQLite environment cache store", () => {
         ORCHESTRATION_CACHE_SCHEMA_VERSION,
       );
     }),
+  );
+
+  it.effect(
+    "keeps equal-sequence foreground metadata while rejecting stale background writes",
+    () =>
+      Effect.gen(function* () {
+        const memory = makeDatabase();
+        const store = yield* make().pipe(
+          Effect.provideService(MobileDatabase.MobileDatabase, memory.database),
+        );
+        const foreground = {
+          ...SHELL_SNAPSHOT,
+          projects: SHELL_SNAPSHOT.projects.map((project) => ({ ...project, title: "Updated" })),
+        };
+
+        yield* store.saveShell(ENVIRONMENT_ID, SHELL_SNAPSHOT);
+        yield* store.saveShell(ENVIRONMENT_ID, foreground);
+        const background = yield* store.saveShellIfNewer!(ENVIRONMENT_ID, {
+          ...SHELL_SNAPSHOT,
+          snapshotSequence: SHELL_SNAPSHOT.snapshotSequence - 1,
+        });
+
+        expect(background).toBe(false);
+        expect(Option.getOrThrow(yield* store.loadShell(ENVIRONMENT_ID)).projects[0]!.title).toBe(
+          "Updated",
+        );
+      }),
   );
 
   it.live("returns cached threads before their pull request links, which load after", () =>

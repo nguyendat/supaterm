@@ -297,6 +297,7 @@ const config: ExpoConfig = {
   },
   plugins: [
     "expo-asset",
+    "expo-background-task",
     [
       "expo-font",
       {

@@ -39,6 +39,7 @@ import {
 import { openHttpRoute } from "./httpRoute.ts";
 
 export const DEFAULT_MAX_THREADS_PER_ENVIRONMENT = 5;
+const MAX_PRIORITY_THREADS_PER_ENVIRONMENT = 3;
 const THREAD_FETCH_CONCURRENCY = 2;
 
 export interface BackgroundSyncThreadRef {
@@ -60,13 +61,15 @@ export interface BackgroundSyncRequest {
 export type CacheWriteResult =
   | { readonly _tag: "saved"; readonly sequence: number; readonly previousSequence: number | null }
   | { readonly _tag: "unchanged"; readonly sequence: number }
-  | { readonly _tag: "stale"; readonly sequence: number; readonly cachedSequence: number };
+  | { readonly _tag: "stale"; readonly sequence: number; readonly cachedSequence: number }
+  | { readonly _tag: "superseded"; readonly sequence: number };
 
 export type ThreadSyncResult =
   | CacheWriteResult
   /** A run is in progress; the thread cache never holds one, so it was not written. */
   | { readonly _tag: "active"; readonly sequence: number }
   | { readonly _tag: "removed" }
+  | { readonly _tag: "preserved" }
   | { readonly _tag: "unavailable" }
   | { readonly _tag: "not-reached" };
 
@@ -152,6 +155,37 @@ export function isThreadDetailStale(
 const cachedSequenceOf = (cached: Option.Option<{ readonly snapshotSequence: number }>) =>
   Option.getOrNull(Option.map(cached, (snapshot) => snapshot.snapshotSequence));
 
+function mergeEqualSequenceShellSnapshot(
+  cached: OrchestrationV2ShellSnapshot,
+  fetched: OrchestrationV2ShellSnapshot,
+): OrchestrationV2ShellSnapshot {
+  const cachedThreads = new Map(cached.threads.map((thread) => [thread.id, thread] as const));
+  return {
+    ...fetched,
+    threads: fetched.threads.map((thread) => {
+      const prior = cachedThreads.get(thread.id);
+      return thread.pullRequests === undefined && prior?.pullRequests !== undefined
+        ? { ...thread, pullRequests: prior.pullRequests }
+        : thread;
+    }),
+  };
+}
+
+function mergeEqualSequenceThreadSnapshot(
+  cached: OrchestrationV2ThreadDetailSnapshot,
+  fetched: OrchestrationV2ThreadDetailSnapshot,
+): OrchestrationV2ThreadDetailSnapshot {
+  const localOrdinals = [cached.latestLocalTurnOrdinal, fetched.latestLocalTurnOrdinal].filter(
+    (value): value is number => typeof value === "number",
+  );
+  return {
+    ...fetched,
+    historyCursor: cached.historyCursor ?? fetched.historyCursor ?? null,
+    hasMoreHistory: cached.hasMoreHistory === true || fetched.hasMoreHistory === true,
+    latestLocalTurnOrdinal: localOrdinals.length === 0 ? null : Math.max(...localOrdinals),
+  };
+}
+
 const completeShellSnapshot = Effect.fnUntraced(function* (
   fetched: DeferredShellSnapshot,
   cached: OrchestrationV2ShellSnapshot | null,
@@ -227,22 +261,27 @@ export const make = Effect.gen(function* () {
         ),
       );
 
-  // Each snapshot is written in one record with its sequence, and only over an
-  // older one. A write and the report of it form one uninterruptible step, so a
-  // stop waits for the record and never reports a stored snapshot as missing.
+  const cacheWriteResult = (
+    sequence: number,
+    cachedSequence: number | null,
+    saved: boolean,
+  ): CacheWriteResult => {
+    if (saved) return { _tag: "saved", sequence, previousSequence: cachedSequence };
+    if (cachedSequence === sequence) return { _tag: "unchanged", sequence };
+    return { _tag: "superseded", sequence };
+  };
+
   const saveIfNewer = (
     sequence: number,
     cachedSequence: number | null,
-    write: Effect.Effect<void, Persistence.ConnectionPersistenceError>,
+    write: Effect.Effect<boolean, Persistence.ConnectionPersistenceError>,
     record: (result: CacheWriteResult) => void,
   ) => {
-    if (cachedSequence === null || cachedSequence < sequence) {
+    if (cachedSequence === null || cachedSequence <= sequence) {
       return Effect.uninterruptible(
         write.pipe(
-          Effect.andThen(
-            Effect.sync(() =>
-              record({ _tag: "saved", sequence, previousSequence: cachedSequence }),
-            ),
+          Effect.flatMap((saved) =>
+            Effect.sync(() => record(cacheWriteResult(sequence, cachedSequence, saved))),
           ),
         ),
       );
@@ -267,13 +306,18 @@ export const make = Effect.gen(function* () {
       case "unavailable":
         record({ _tag: "unavailable" });
         return;
-      case "missing":
-        yield* Effect.uninterruptible(
-          cache
-            .removeThread(environmentId, threadId)
-            .pipe(Effect.andThen(Effect.sync(() => record({ _tag: "removed" })))),
+      case "missing": {
+        const cached = yield* loadCachedThread(environmentId, threadId);
+        const cachedSequence = cachedSequenceOf(cached);
+        const removed = yield* Effect.uninterruptible(
+          cache.removeThreadIfSequence?.(environmentId, threadId, cachedSequence) ??
+            (cachedSequence === null
+              ? Effect.succeed(false)
+              : cache.removeThread(environmentId, threadId).pipe(Effect.as(true))),
         );
+        record(removed ? { _tag: "removed" } : { _tag: "preserved" });
         return;
+      }
       case "present": {
         const { snapshot } = loaded;
         const history = historyFromHttpSnapshot(loaded.history);
@@ -282,14 +326,23 @@ export const make = Effect.gen(function* () {
           return;
         }
         const cached = yield* loadCachedThread(environmentId, threadId);
-        yield* saveIfNewer(
+        const persisted = snapshotToPersist(
           snapshot.snapshotSequence,
+          snapshot.projection,
+          history,
+          true,
+        );
+        const persistedToSave =
+          cachedSequenceOf(cached) === persisted.snapshotSequence && Option.isSome(cached)
+            ? mergeEqualSequenceThreadSnapshot(cached.value, persisted)
+            : persisted;
+        yield* saveIfNewer(
+          persistedToSave.snapshotSequence,
           cachedSequenceOf(cached),
-          // Mobile always accepts bounded snapshots, so keep the paging evidence.
-          cache.saveThread(
-            environmentId,
-            snapshotToPersist(snapshot.snapshotSequence, snapshot.projection, history, true),
-          ),
+          cache.saveThreadIfNewer?.(environmentId, persistedToSave) ??
+            (cachedSequenceOf(cached) === persistedToSave.snapshotSequence
+              ? Effect.succeed(false)
+              : cache.saveThread(environmentId, persistedToSave).pipe(Effect.as(true))),
           record,
         );
       }
@@ -310,7 +363,7 @@ export const make = Effect.gen(function* () {
     ).pipe(
       Effect.tapError((error) =>
         Effect.sync(() => {
-          progress.status = "unreachable";
+          progress.status = error._tag === "ConnectionTransientError" ? "unreachable" : "failed";
           progress.error = error.message;
         }),
       ),
@@ -319,21 +372,28 @@ export const make = Effect.gen(function* () {
       id: connectionRouteId(opened.route.target),
       kind: connectionRouteKind(opened.route),
     };
-    const cached = yield* cache
-      .loadShell(environmentId)
-      .pipe(
-        Effect.catch((error) =>
-          Effect.logWarning("Could not read the cached shell before a background save.").pipe(
-            Effect.annotateLogs({ environmentId, error: error.message }),
-            Effect.as(Option.none<DeferredShellSnapshot>()),
-          ),
+    const cached = yield* (
+      cache.loadShellWithoutHydration?.(environmentId) ?? cache.loadShell(environmentId)
+    ).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("Could not read the cached shell before a background save.").pipe(
+          Effect.annotateLogs({ environmentId, error: error.message }),
+          Effect.as(Option.none<DeferredShellSnapshot>()),
         ),
-      );
+      ),
+    );
     const shell = yield* completeShellSnapshot(opened.value, Option.getOrNull(cached));
+    const shellToPersist =
+      cachedSequenceOf(cached) === shell.snapshotSequence && Option.isSome(cached)
+        ? mergeEqualSequenceShellSnapshot(cached.value, shell)
+        : shell;
     yield* saveIfNewer(
-      shell.snapshotSequence,
+      shellToPersist.snapshotSequence,
       cachedSequenceOf(cached),
-      cache.saveShell(environmentId, shell),
+      cache.saveShellIfNewer?.(environmentId, shellToPersist) ??
+        (cachedSequenceOf(cached) === shellToPersist.snapshotSequence
+          ? Effect.succeed(false)
+          : cache.saveShell(environmentId, shellToPersist).pipe(Effect.as(true))),
       (result) => {
         progress.shell = result;
       },
@@ -394,15 +454,22 @@ export const make = Effect.gen(function* () {
         { status: "stopped", route: null, shell: null, threads: new Map(), error: null },
       ]),
     );
-    const limit = request.maxThreadsPerEnvironment ?? DEFAULT_MAX_THREADS_PER_ENVIRONMENT;
+    const requestedLimit = request.maxThreadsPerEnvironment ?? DEFAULT_MAX_THREADS_PER_ENVIRONMENT;
+    const limit = Number.isFinite(requestedLimit)
+      ? Math.max(0, Math.floor(requestedLimit))
+      : DEFAULT_MAX_THREADS_PER_ENVIRONMENT;
     const work = Effect.forEach(
       entries,
       (entry) => {
         const environmentId = entry.target.environmentId;
         const environmentProgress = progress.get(environmentId)!;
-        const priority = (request.priorityThreads ?? [])
-          .filter((ref) => ref.environmentId === environmentId)
-          .map((ref) => ref.threadId);
+        const priority = [
+          ...new Set(
+            (request.priorityThreads ?? [])
+              .filter((ref) => ref.environmentId === environmentId)
+              .map((ref) => ref.threadId),
+          ),
+        ].slice(0, MAX_PRIORITY_THREADS_PER_ENVIRONMENT);
         return syncEnvironment(entry, environmentProgress, priority, limit).pipe(
           Effect.scoped,
           Effect.catchCause((cause) =>
@@ -415,7 +482,7 @@ export const make = Effect.gen(function* () {
           ),
         );
       },
-      { concurrency: "unbounded", discard: true },
+      { concurrency: 1, discard: true },
     );
     const stopped =
       request.signal === undefined
