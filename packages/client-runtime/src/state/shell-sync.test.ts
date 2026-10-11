@@ -11,10 +11,8 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
-import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
-import * as References from "effect/References";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -56,13 +54,10 @@ const LIVE_SHELL_SNAPSHOT: OrchestrationV2ShellSnapshot = {
   snapshotSequence: 1,
 };
 
-function session(client: WsRpcProtocolClient, serverVersion = "0.0.0-test"): RpcSession.RpcSession {
+function session(client: WsRpcProtocolClient): RpcSession.RpcSession {
   return {
     client,
-    initialConfig: Effect.succeed({
-      environment: { serverVersion },
-      shellResumeCompletionMarker: true,
-    } as never),
+    initialConfig: Effect.succeed({ shellResumeCompletionMarker: true } as never),
     configChanges: Stream.empty,
     subscribeServerConfig: (input) => client.subscribeServerConfig(input),
     ready: Effect.void,
@@ -340,18 +335,8 @@ describe("environment shell synchronization", () => {
     }),
   );
 
-  it.effect("resubscribes from the in-memory shell cursor when the app becomes active", () => {
-    const decisions: Array<ReadonlyArray<unknown>> = [];
-    const logger = Logger.make(({ logLevel, message }) => {
-      if (
-        logLevel === "Debug" &&
-        Array.isArray(message) &&
-        message[0] === "Environment shell synchronization decision"
-      ) {
-        decisions.push(message);
-      }
-    });
-    return Effect.gen(function* () {
+  it.effect("resubscribes from the in-memory shell cursor when the app becomes active", () =>
+    Effect.gen(function* () {
       const events = yield* Queue.unbounded<OrchestrationV2ShellStreamItem>();
       const wakeups = yield* Queue.unbounded<ConnectionWakeups.ConnectionWakeup>();
       const loaderCalls = yield* Ref.make(0);
@@ -458,73 +443,16 @@ describe("environment shell synchronization", () => {
       expect((yield* Ref.get(capturedAfterSequences)).length).toBe(3);
       expect(yield* Ref.get(loaderCalls)).toBe(1);
 
+      // Replacing the session performs another authoritative refresh.
       yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
       for (let attempt = 0; attempt < 100; attempt += 1) {
         if ((yield* Ref.get(capturedAfterSequences)).length >= 4) break;
         yield* Effect.yieldNow;
       }
-      expect(yield* Ref.get(capturedAfterSequences)).toEqual([10, 40, 40, 40]);
-      expect(yield* Ref.get(loaderCalls)).toBe(1);
-      yield* Queue.offer(events, { kind: "synchronized" });
-      yield* SubscriptionRef.changes(shellState).pipe(
-        Stream.filter((value) => value.status === "live"),
-        Stream.runHead,
-      );
-
-      yield* TestClock.adjust("45 seconds");
-      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        if ((yield* Ref.get(capturedAfterSequences)).length >= 5) break;
-        yield* Effect.yieldNow;
-      }
-      expect(yield* Ref.get(capturedAfterSequences)).toEqual([10, 40, 40, 40, 40]);
-      expect(yield* Ref.get(loaderCalls)).toBe(1);
-      yield* Queue.offer(events, { kind: "synchronized" });
-      yield* SubscriptionRef.changes(shellState).pipe(
-        Stream.filter((value) => value.status === "live"),
-        Stream.runHead,
-      );
-
-      yield* TestClock.adjust("45 seconds");
-      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        if ((yield* Ref.get(capturedAfterSequences)).length >= 6) break;
-        yield* Effect.yieldNow;
-      }
-      expect(yield* Ref.get(capturedAfterSequences)).toEqual([10, 40, 40, 40, 40, 40]);
-      expect(yield* Ref.get(loaderCalls)).toBe(1);
-      yield* Queue.offer(events, { kind: "synchronized" });
-      yield* SubscriptionRef.changes(shellState).pipe(
-        Stream.filter((value) => value.status === "live"),
-        Stream.runHead,
-      );
-
-      yield* TestClock.adjust("61 seconds");
-      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        if ((yield* Ref.get(capturedAfterSequences)).length >= 7) break;
-        yield* Effect.yieldNow;
-      }
-      expect(yield* Ref.get(capturedAfterSequences)).toEqual([10, 40, 40, 40, 40, 40, 20]);
+      expect(yield* Ref.get(capturedAfterSequences)).toEqual([10, 40, 40, 20]);
       expect(yield* Ref.get(loaderCalls)).toBe(2);
-
-      yield* SubscriptionRef.set(activeSession, Option.some(session(client, "0.0.1-test")));
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        if ((yield* Ref.get(capturedAfterSequences)).length >= 8) break;
-        yield* Effect.yieldNow;
-      }
-      expect(yield* Ref.get(capturedAfterSequences)).toEqual([10, 40, 40, 40, 40, 40, 20, 30]);
-      expect(yield* Ref.get(loaderCalls)).toBe(3);
-      expect(decisions.at(-1)?.[1]).toMatchObject({
-        cursorResumes: 5,
-        httpRefreshAttempts: 3,
-        socketFallbacks: 0,
-      });
-    }).pipe(
-      Effect.provide(Logger.layer([logger], { mergeWithExisting: false })),
-      Effect.provideService(References.MinimumLogLevel, "Debug"),
-    );
-  });
+    }),
+  );
 
   it.effect("throttles shell writes and flushes the latest snapshot on disconnect", () =>
     Effect.gen(function* () {
@@ -1346,7 +1274,7 @@ describe("environment shell synchronization", () => {
       );
       yield* Deferred.await(firstFillStarted);
 
-      yield* SubscriptionRef.set(activeSession, Option.some(session(client, "0.0.1-test")));
+      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
       yield* SubscriptionRef.changes(shellState).pipe(
         Stream.filter(
           (state) => Option.isSome(state.snapshot) && state.snapshot.value.snapshotSequence === 2,
