@@ -8,7 +8,7 @@ import type {
   DesktopSnapShotEvent,
 } from "@supacode/contracts";
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
-import { DESKTOP_MICRO_CHANNELS } from "@supacode/contracts/desktopMicro";
+import { DESKTOP_MICRO_CHANNELS } from "@supacode/micro/channels";
 
 import * as IpcChannels from "./ipc/channels.ts";
 

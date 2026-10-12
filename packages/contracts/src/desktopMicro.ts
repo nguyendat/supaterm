@@ -1,13 +1,5 @@
 import * as Schema from "effect/Schema";
 
-export const DESKTOP_MICRO_CHANNELS = {
-  open: "micro:open",
-  close: "micro:close",
-  write: "micro:write",
-  stop: "micro:stop",
-  event: "micro:event",
-} as const;
-
 export interface DesktopMicroDevice {
   readonly id: string;
   readonly productName: string;

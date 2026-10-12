@@ -26,6 +26,7 @@ const workspaceFiles = [
   "packages/client-runtime/package.json",
   "packages/contracts/package.json",
   "packages/mermaid-ascii/package.json",
+  "packages/micro/package.json",
   "packages/shared/package.json",
   "packages/ssh/package.json",
   "packages/tailscale/package.json",

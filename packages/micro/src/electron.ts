@@ -1,6 +1,7 @@
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import * as Schema from "effect/Schema";
-import { DESKTOP_MICRO_CHANNELS, DesktopMicroWriteSchema } from "@supacode/contracts/desktopMicro";
+import { DesktopMicroWriteSchema } from "@supacode/contracts/desktopMicro";
+import { DESKTOP_MICRO_CHANNELS } from "./channels.ts";
 import { MicroAccessError, NativeMicro } from "./native.ts";
 import { hasInputMonitoringPermission } from "./permissions.ts";
 import { macMicroHid, macMicroTopology } from "./topology.ts";

@@ -107,6 +107,7 @@ export default defineConfig({
       sourcemap: true,
       outExtensions: () => ({ js: ".cjs" }),
       entry: ["src/preload.ts"],
+      deps: { alwaysBundle: (id) => id === "@supacode/micro/channels" },
     },
     {
       format: "cjs",

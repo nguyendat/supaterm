@@ -1,6 +1,6 @@
 import * as NodeEvents from "node:events";
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
-import { DESKTOP_MICRO_CHANNELS } from "@supacode/contracts/desktopMicro";
+import { DESKTOP_MICRO_CHANNELS } from "./channels.ts";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { installMicro } from "./electron.ts";
 import { MicroAccessError, NativeMicro } from "./native.ts";

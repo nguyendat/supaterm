@@ -68,7 +68,7 @@
       ],
       // The injected runtime resolves Playwright by string; release tooling runs
       // electron-builder from this workspace, outside its package scripts.
-      "ignoreDependencies": ["playwright-core", "electron-builder"],
+      "ignoreDependencies": ["playwright-core", "electron-builder", "node-hid"],
     },
     "apps/web": {
       // Vitest loads this through the per-file @vitest-environment directive.
@@ -113,6 +113,10 @@
       "entry": ["test/fixtures/*.ts"],
       // Generated upstream protocol definitions are retained as a complete set.
       "ignoreIssues": { "src/_generated/**": ["exports", "types"] },
+    },
+    "packages/micro": {
+      "includeEntryExports": true,
+      "entry": ["src/driver.ts!"],
     },
     "packages/effect-codex-app-server": {
       "includeEntryExports": true,
