@@ -84,6 +84,8 @@ An empty database is a bad test. Seed your worktree's `.supacode` with a copy of
 ## Verifying
 
 - Smallest proof that the change works. `vp test run <files>` for the tests you touched, targeted lint and typecheck for the scope you changed.
+- CI keeps twelve weighted server test shards. A new workspace joins the existing dependency closure; a suite earns a shard only when its measured duration exceeds the shard setup tax. Read the Vitest duration line before adding parallelism.
+- Server browser tests opt into the `.browser.test.ts` suffix so only their shard installs Chromium. Native mobile lint may overlap Homebrew tools with runtime and workspace setup; the join step must preserve failures.
 - Test meaningful logic or observable behavior. Do not render components to static markup to assert props or attributes, or add tests that merely assert callback wiring or mirror the implementation.
 - **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless I ask. CI owns the full suite.
 - Backend behavior changes ship with focused tests for that behavior.
