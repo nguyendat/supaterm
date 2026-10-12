@@ -191,7 +191,7 @@ jobs:
       - name: Setup Mise
         uses: ./.github/actions/setup-mise
       - name: Install workspace dependencies
-        run: mise exec -- vp install
+        run: mise exec -- vp install --filter=supacode... --filter=@supacode/scripts...
       - name: Detect server browser integration tests in this shard
         id: browser_tests
         working-directory: apps/server
