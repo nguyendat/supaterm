@@ -5,7 +5,7 @@ also lists the command IDs and defaults available in your version.
 
 ## Micro controller
 
-Connect a Codex Micro in **Settings → General → Micro controller** on desktop
+Connect a Codex Micro in **Settings → Micro controller** on desktop
 or a browser with WebHID support. Assign each Agent Key to a thread; assignments
 stay fixed when the sidebar order changes and can include remote environments.
 Dark keys indicate unassigned or unavailable threads. Use **Disconnect** to

@@ -7,7 +7,7 @@ import { useEnvironments } from "../../state/environments";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
 export function MicroSettings() {
   const snapshot = useMicro();
@@ -39,116 +39,121 @@ export function MicroSettings() {
   };
   const connected = snapshot.phase === "connected";
   return (
-    <SettingsSection id="micro-controller" title="Micro controller">
-      <SettingsRow
-        title="Codex Micro"
-        description={
-          snapshot.error ??
-          (connected
-            ? `${snapshot.productName ?? "Micro"}${snapshot.firmware ? ` · Firmware ${snapshot.firmware}` : ""}`
-            : "Connect your Work Louder Micro to control Supacode.")
-        }
-        control={
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={snapshot.phase === "unsupported" || snapshot.phase === "disconnecting"}
-            onClick={() => {
-              void (connected || snapshot.phase === "connecting"
-                ? micro.disconnect()
-                : micro.connect());
-            }}
-          >
-            {connected ? "Disconnect" : snapshot.phase === "connecting" ? "Cancel" : "Connect"}
-          </Button>
-        }
-      />
-      {snapshot.phase === "unsupported" ? (
+    <SettingsPageContainer>
+      <SettingsSection id="micro-controller" title="Micro controller">
         <SettingsRow
-          title="Device access unavailable"
-          description="Use the desktop app or a browser with WebHID support."
+          title="Codex Micro"
+          description={
+            snapshot.error ??
+            (connected
+              ? `${snapshot.productName ?? "Micro"}${snapshot.firmware ? ` · Firmware ${snapshot.firmware}` : ""}`
+              : "Connect your Work Louder Micro to control Supacode.")
+          }
+          control={
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={snapshot.phase === "unsupported" || snapshot.phase === "disconnecting"}
+              onClick={() => {
+                void (connected || snapshot.phase === "connecting"
+                  ? micro.disconnect()
+                  : micro.connect());
+              }}
+            >
+              {connected ? "Disconnect" : snapshot.phase === "connecting" ? "Cancel" : "Connect"}
+            </Button>
+          }
         />
-      ) : null}
-      {MICRO_SLOTS.map((slot) => {
-        const assignment = snapshot.config.slots[slot];
-        const value = assignment
-          ? JSON.stringify([assignment.environmentId, assignment.threadId])
-          : "none";
-        const selected = choices.find((choice) => choice.value === value);
-        return (
+        {snapshot.phase === "unsupported" ? (
           <SettingsRow
-            key={slot}
-            title={`Agent Key ${slot + 1}`}
-            description="Keeps its assigned thread when the sidebar order changes."
-            control={
-              <Select
-                value={value}
-                onValueChange={(next) => {
-                  const choice = choices.find((candidate) => candidate.value === next);
-                  if (next !== "none" && !choice) return;
-                  save(() =>
-                    micro.assign(
-                      slot,
-                      choice
-                        ? { environmentId: choice.thread.environmentId, threadId: choice.thread.id }
-                        : null,
-                    ),
-                  );
-                }}
-              >
-                <SelectTrigger size="sm" aria-label={`Assign Agent Key ${slot + 1}`}>
-                  <SelectValue>
-                    {selected?.label ?? (assignment ? "Thread unavailable" : "Unassigned")}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end">
-                  <SelectItem value="none">Unassigned</SelectItem>
-                  {choices.map((choice) => (
-                    <SelectItem key={choice.value} value={choice.value}>
-                      {choice.label}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            }
+            title="Device access unavailable"
+            description="Use the desktop app or a browser with WebHID support."
           />
-        );
-      })}
-      <SettingsRow title="Command keys" description={ACTION_KEY_LABELS.join(" · ")} />
-      <SettingsRow
-        title="Dial and joystick"
-        description="Turn the dial to change reasoning effort. Press it for the effort menu. The joystick opens effort, model, host, or workspace controls."
-      />
-      <SettingsRow
-        title="Microphone key"
-        description="Choose an action for the wide key. Voice recording is not available here yet."
-        control={
-          <Select
-            value={snapshot.config.microphone ?? "none"}
-            onValueChange={(value) => {
-              if (value === "none") save(() => micro.setMicrophone(null));
-              else if (value && Object.hasOwn(MICRO_ACTIONS, value))
-                save(() => micro.setMicrophone(value as MicroMappedAction));
-            }}
-          >
-            <SelectTrigger size="sm" aria-label="Microphone key action">
-              <SelectValue>
-                {snapshot.config.microphone
-                  ? MICRO_ACTIONS[snapshot.config.microphone]
-                  : "Unassigned"}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectPopup align="end">
-              <SelectItem value="none">Unassigned</SelectItem>
-              {Object.entries(MICRO_ACTIONS).map(([id, label]) => (
-                <SelectItem key={id} value={id}>
-                  {label}
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
-        }
-      />
-    </SettingsSection>
+        ) : null}
+        {MICRO_SLOTS.map((slot) => {
+          const assignment = snapshot.config.slots[slot];
+          const value = assignment
+            ? JSON.stringify([assignment.environmentId, assignment.threadId])
+            : "none";
+          const selected = choices.find((choice) => choice.value === value);
+          return (
+            <SettingsRow
+              key={slot}
+              title={`Agent Key ${slot + 1}`}
+              description="Keeps its assigned thread when the sidebar order changes."
+              control={
+                <Select
+                  value={value}
+                  onValueChange={(next) => {
+                    const choice = choices.find((candidate) => candidate.value === next);
+                    if (next !== "none" && !choice) return;
+                    save(() =>
+                      micro.assign(
+                        slot,
+                        choice
+                          ? {
+                              environmentId: choice.thread.environmentId,
+                              threadId: choice.thread.id,
+                            }
+                          : null,
+                      ),
+                    );
+                  }}
+                >
+                  <SelectTrigger size="sm" aria-label={`Assign Agent Key ${slot + 1}`}>
+                    <SelectValue>
+                      {selected?.label ?? (assignment ? "Thread unavailable" : "Unassigned")}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup align="end">
+                    <SelectItem value="none">Unassigned</SelectItem>
+                    {choices.map((choice) => (
+                      <SelectItem key={choice.value} value={choice.value}>
+                        {choice.label}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              }
+            />
+          );
+        })}
+        <SettingsRow title="Command keys" description={ACTION_KEY_LABELS.join(" · ")} />
+        <SettingsRow
+          title="Dial and joystick"
+          description="Turn the dial to change reasoning effort. Press it for the effort menu. The joystick opens effort, model, host, or workspace controls."
+        />
+        <SettingsRow
+          title="Microphone key"
+          description="Choose an action for the wide key. Voice recording is not available here yet."
+          control={
+            <Select
+              value={snapshot.config.microphone ?? "none"}
+              onValueChange={(value) => {
+                if (value === "none") save(() => micro.setMicrophone(null));
+                else if (value && Object.hasOwn(MICRO_ACTIONS, value))
+                  save(() => micro.setMicrophone(value as MicroMappedAction));
+              }}
+            >
+              <SelectTrigger size="sm" aria-label="Microphone key action">
+                <SelectValue>
+                  {snapshot.config.microphone
+                    ? MICRO_ACTIONS[snapshot.config.microphone]
+                    : "Unassigned"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end">
+                <SelectItem value="none">Unassigned</SelectItem>
+                {Object.entries(MICRO_ACTIONS).map(([id, label]) => (
+                  <SelectItem key={id} value={id}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+      </SettingsSection>
+    </SettingsPageContainer>
   );
 }

@@ -1,6 +1,4 @@
 import { SettingsGroup } from "./SettingsGroup";
-import { MicroSettings } from "./MicroSettings";
-import { hasMicroDeviceAccess } from "@supacode/micro/hid";
 import { useScopedSettingsWriteAllowed } from "./useScopedSettings";
 import { Spinner } from "~/components/ui/spinner";
 import { NotificationSettings } from "./NotificationSettings";
@@ -2141,7 +2139,6 @@ export function GeneralSettingsPanel() {
   return (
     <SettingsPageContainer>
       <ProjectDefaultsSettings category="general" />
-      {isElectron || hasMicroDeviceAccess() ? <MicroSettings /> : null}
       <SettingsSection id="organization" title="Organization">
         <SettingsRow
           {...searchableSetting("project-grouping")}

@@ -17,6 +17,7 @@ export type SettingsPath =
   | "/settings/general"
   | "/settings/appearance"
   | "/settings/keybindings"
+  | "/settings/micro"
   | "/settings/snap-shot"
   | "/settings/providers"
   | "/settings/integrations"
@@ -84,6 +85,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/general": "General",
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
+  "/settings/micro": "Micro controller",
   "/settings/snap-shot": "SnapShots",
   "/settings/providers": "Providers",
   "/settings/integrations": "Integrations",
@@ -537,7 +539,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "micro-controller",
     title: "Micro controller",
-    to: "/settings/general",
+    to: "/settings/micro",
     searchTerms: ["work louder keyboard agent keys fast approve reject fork send"],
     desktopOnly: !hasMicroDeviceAccess(),
   },
@@ -909,6 +911,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/general": null,
   "/settings/appearance": null,
   "/settings/snap-shot": null,
+  "/settings/micro": null,
   // Keybindings fan out to the selection; Providers shows the representative
   // environment at any selection. Neither needs a particular scope to render.
   "/settings/keybindings": null,

@@ -36,7 +36,7 @@ export function MicroCoordinator() {
       );
     if (ref)
       void navigate({ to: "/$environmentId/$threadId", params: buildThreadRouteParams(ref) });
-    else void navigate({ to: "/settings/general", hash: "micro-controller" });
+    else void navigate({ to: "/settings/micro" });
   });
   useEffect(() => {
     const micro = getMicroController();
