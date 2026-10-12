@@ -1,3 +1,17 @@
+import {
+  PushState,
+  PushRegistration,
+  PushDeviceInput,
+  PushRegisterInput,
+  PushConfirmInput,
+  PushPreferencesInput,
+  PushRevokeInput,
+  PushPresenceInput,
+  PushResolveInput,
+  PushResolvedNotification,
+  PushNotificationError,
+} from "./push.ts";
+
 import { OrchestrationSkillsStatus, OrchestrationSkillsError } from "./orchestrationSkills.ts";
 import {
   OrchestrationV2SearchThreadError,
@@ -569,6 +583,13 @@ export const WS_METHODS = {
   subscribeBackgroundPolicy: "subscribeBackgroundPolicy",
   subscribeRelayStatus: "subscribeRelayStatus",
   prepareRelay: "relay.prepare",
+  pushState: "push.state",
+  pushRegister: "push.register",
+  pushConfirm: "push.confirm",
+  pushPreferences: "push.preferences",
+  pushRevoke: "push.revoke",
+  pushPresence: "push.presence",
+  pushResolve: "push.resolve",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
 } as const;
 
@@ -1831,6 +1852,42 @@ const WsPrepareRelayRpc = Rpc.make(WS_METHODS.prepareRelay, {
   error: RelayPreparationError,
 });
 
+const WsPushStateRpc = Rpc.make(WS_METHODS.pushState, {
+  payload: PushDeviceInput,
+  success: PushState,
+  error: PushNotificationError,
+});
+const WsPushRegisterRpc = Rpc.make(WS_METHODS.pushRegister, {
+  payload: PushRegisterInput,
+  success: PushRegistration,
+  error: PushNotificationError,
+});
+const WsPushConfirmRpc = Rpc.make(WS_METHODS.pushConfirm, {
+  payload: PushConfirmInput,
+  success: PushRegistration,
+  error: PushNotificationError,
+});
+const WsPushPreferencesRpc = Rpc.make(WS_METHODS.pushPreferences, {
+  payload: PushPreferencesInput,
+  success: PushRegistration,
+  error: PushNotificationError,
+});
+const WsPushRevokeRpc = Rpc.make(WS_METHODS.pushRevoke, {
+  payload: PushRevokeInput,
+  success: Schema.Void,
+  error: PushNotificationError,
+});
+const WsPushPresenceRpc = Rpc.make(WS_METHODS.pushPresence, {
+  payload: PushPresenceInput,
+  success: Schema.Void,
+  error: PushNotificationError,
+});
+const WsPushResolveRpc = Rpc.make(WS_METHODS.pushResolve, {
+  payload: PushResolveInput,
+  success: PushResolvedNotification,
+  error: PushNotificationError,
+});
+
 const WsSubscribeResourceTelemetryRpc = Rpc.make(WS_METHODS.subscribeResourceTelemetry, {
   payload: Schema.Struct({}),
   success: ResourceTelemetrySnapshot,
@@ -2025,6 +2082,13 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeBackgroundPolicyRpc,
   WsSubscribeRelayStatusRpc,
   WsPrepareRelayRpc,
+  WsPushStateRpc,
+  WsPushRegisterRpc,
+  WsPushConfirmRpc,
+  WsPushPreferencesRpc,
+  WsPushRevokeRpc,
+  WsPushPresenceRpc,
+  WsPushResolveRpc,
   WsSubscribeResourceTelemetryRpc,
   WsOrchestrationV2DispatchCommandRpc,
   WsOrchestrationV2GetWorkflowScriptRpc,

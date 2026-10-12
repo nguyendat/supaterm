@@ -3,6 +3,14 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./threadNotificationAttention": {
+      "types": "./src/threadNotificationAttention.ts",
+      "import": "./src/threadNotificationAttention.ts"
+    },
+    "./pushRequest": {
+      "types": "./src/pushRequest.ts",
+      "import": "./src/pushRequest.ts"
+    },
     "./githubMarkdownLinks": {
       "types": "./src/githubMarkdownLinks.ts",
       "import": "./src/githubMarkdownLinks.ts"

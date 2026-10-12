@@ -70,6 +70,10 @@ import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as PushNotifications from "./notifications/PushNotifications.ts";
+import * as PushGateway from "./notifications/PushGateway.ts";
+import * as PushOutbox from "./notifications/PushOutbox.ts";
+import * as PushDeliveryWorker from "./notifications/PushDeliveryWorker.ts";
 import * as ProjectEnrichmentService from "./project/ProjectEnrichmentService.ts";
 import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
 import * as AntigravityInstallation from "./provider/AntigravityInstallation.ts";
@@ -414,6 +418,13 @@ const layerRelayAccess = RelayAccess.layer.pipe(
   Layer.provide(RelayIdentity.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provide(layerServerSettings),
 );
+
+const layerPush = Layer.mergeAll(PushNotifications.layer, PushDeliveryWorker.layer).pipe(
+  Layer.provideMerge(PushOutbox.layer.pipe(Layer.provide(ProjectionStoreV2.layer))),
+  Layer.provide(PushGateway.layer.pipe(Layer.provide(ServerSecretStore.layer))),
+  Layer.provide(ProjectionStoreV2.layer),
+  Layer.provide(layerServerSettings),
+);
 const layerServerEnvironment = Layer.effect(
   ServerEnvironment.ServerEnvironment,
   Effect.gen(function* () {
@@ -536,6 +547,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.effectDiscard(ProjectSettingsOverrideSweep.sweep),
 ).pipe(
   // Core Services
+  Layer.provideMerge(layerPush),
   Layer.provideMerge(layerOrchestrationApplication),
   Layer.provideMerge(RuntimeLayer.layerEventInfrastructure),
   Layer.provideMerge(Layer.merge(ProjectStore.layer, ThreadSearch.layer)),

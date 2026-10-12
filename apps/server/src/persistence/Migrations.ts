@@ -15,6 +15,7 @@ import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
 
 // Import all migrations statically
 import Migration0001 from "./Migrations/001_OrchestrationEvents.ts";
+import Migration0061 from "./Migrations/061_PushNotifications.ts";
 import Migration0002 from "./Migrations/002_OrchestrationCommandReceipts.ts";
 import Migration0003 from "./Migrations/003_CheckpointDiffBlobs.ts";
 import Migration0004 from "./Migrations/004_ProviderSessionRuntime.ts";
@@ -148,6 +149,7 @@ export const migrationEntries = [
   [58, "McpAppModelContext", Migration0058],
   [59, "ThreadSnapshotWindowIndexes", Migration0059],
   [60, "PullRequestReviewGuides", Migration0060],
+  [61, "PushNotifications", Migration0061],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

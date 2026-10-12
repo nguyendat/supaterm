@@ -111,6 +111,8 @@ import {
 } from "./features/settings/ScheduledTaskPickerScreens";
 import { ScheduledTaskEditorProvider } from "./features/settings/scheduled-task-editor";
 import { SettingsKeyboardRouteScreen } from "./features/settings/SettingsKeyboardRouteScreen";
+import { SettingsNotificationsRouteScreen } from "./features/settings/SettingsNotificationsRouteScreen";
+import { PushNotificationCoordinator } from "./features/notifications/PushNotificationCoordinator";
 import { SettingsLegalRouteScreen } from "./features/settings/SettingsLegalRouteScreen";
 import { SettingsMicrophoneRouteScreen } from "./features/settings/SettingsMicrophoneRouteScreen";
 import {
@@ -319,6 +321,11 @@ const SettingsContentStack = createV5SheetStackNavigator({
       options: {
         title: "Keyboard",
       },
+    }),
+    SettingsNotifications: createNativeStackScreen({
+      screen: SettingsNotificationsRouteScreen,
+      linking: "notifications",
+      options: { title: "Notifications" },
     }),
     SettingsMicrophone: createNativeStackScreen({
       screen: SettingsMicrophoneRouteScreen,
@@ -637,6 +644,7 @@ function RootStackLayout(props: {
     <HardwareKeyboardCommandProvider pathname={pathname}>
       <RunningThreadKeepAlive />
       <ThreadOutboxDrainWorker />
+      <PushNotificationCoordinator pathname={pathname} />
       <ShowcaseCaptureCoordinator pathname={pathname} />
       <ExistingThreadSettingsRouteProvider>
         <AndroidWorkspaceTabsProvider>

@@ -267,6 +267,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["notification sound alert completion input approval desktop"],
   },
   {
+    id: "push-gateway",
+    title: "Push gateway",
+    to: "/settings/general",
+    searchTerms: ["ios iphone ipad push notifications gateway self hosted"],
+  },
+  {
     id: "in-app-notifications",
     title: "In-app notifications",
     to: "/settings/general",

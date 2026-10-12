@@ -1,4 +1,5 @@
 import { SshDeviceHostConfigs } from "./device.ts";
+import { PushGatewayUrl } from "./push.ts";
 import {
   AuthOrchestrationOperateScope,
   AuthSettingsWriteScope,
@@ -1105,6 +1106,9 @@ export const StorageCleanupSettings = Schema.Struct({
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
 export const ServerSettings = Schema.Struct({
+  pushGatewayUrl: Schema.NullOr(PushGatewayUrl).pipe(
+    Schema.withDecodingDefault(Effect.succeed("https://push.supacode.sh")),
+  ),
   publicRelayEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   publicRelayUrl: Schema.String.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PUBLIC_RELAY_URL)),
@@ -1481,6 +1485,7 @@ const ModelSelectionPatch = Schema.Struct({
 export const ServerSettingsPatch = Schema.Struct({
   publicRelayEnabled: Schema.optionalKey(Schema.Boolean),
   publicRelayUrl: Schema.optionalKey(RelayServerUrl),
+  pushGatewayUrl: Schema.optionalKey(Schema.NullOr(PushGatewayUrl)),
   setModelFavorites: Schema.optionalKey(
     Schema.Array(Schema.Struct({ ...ModelFavorite.fields, favorite: Schema.Boolean })),
   ),

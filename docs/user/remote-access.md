@@ -343,6 +343,25 @@ the workspace. These scopes control direct file access from the client.
 Treat pairing URLs and pairing codes as passwords. Do not include them in
 screenshots, logs, or bug reports.
 
+## iOS notifications
+
+In the iOS app, open **Settings → Notifications**, allow iOS notifications, and
+switch on each environment you want alerts from. Choose which events should
+notify you: approvals, input, completion, failures, or usage limits. Each device
+has its own preferences.
+
+Alerts say “Supacode has an update.” Tap one to reconnect to its environment and
+open the thread after it syncs. The alert contains no conversation preview. The
+environment must be running to submit an alert; notifications are best effort.
+
+Switch an environment's notifications off to revoke this device's registration.
+Removing the environment also revokes its notifications; if both the environment
+and notification service are unreachable, reconnect before removing it.
+
+The environment needs a configured notification gateway. Its owner can set
+**Settings → General → Push gateway** or leave it empty to disable push delivery.
+Forks with their own iOS bundle ID need their own notification service.
+
 ## Using the Desktop App as a Remote Only
 
 If a computer should only drive work running elsewhere, turn off its local environment. In the

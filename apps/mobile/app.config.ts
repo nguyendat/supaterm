@@ -237,6 +237,9 @@ const config: ExpoConfig = {
     // does not fall back to a personal team (which cannot sign app groups).
     appleTeamId: "9ZLSJ2GN2B",
     entitlements: {
+      ...(!isIosPersonalTeamBuild
+        ? { "aps-environment": APP_VARIANT === "development" ? "development" : "production" }
+        : {}),
       "keychain-access-groups": [`$(AppIdentifierPrefix)${variant.iosBundleIdentifier}`],
     },
     infoPlist: {
@@ -415,6 +418,14 @@ const config: ExpoConfig = {
     // pedometer so iOS needs no motion purpose string.
     ["expo-sensors", { motionPermission: false }],
     ...(!isIosPersonalTeamBuild ? [widgetsPlugin] : []),
+    ...(!isIosPersonalTeamBuild
+      ? [
+          [
+            "expo-notifications",
+            { mode: APP_VARIANT === "development" ? "development" : "production" },
+          ] as NonNullable<ExpoConfig["plugins"]>[number],
+        ]
+      : []),
     "./plugins/withAndroidCleartextTraffic.cjs",
     "./plugins/withAndroidGradleHeap.cjs",
     "./plugins/withAndroidInputBackground.cjs",

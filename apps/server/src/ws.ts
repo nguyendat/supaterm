@@ -1,4 +1,5 @@
 import { isRelayedRequest } from "./relay/RelayIngress.ts";
+import * as PushNotifications from "./notifications/PushNotifications.ts";
 import * as RelayAccess from "./relay/RelayAccess.ts";
 import * as OrchestrationSkills from "./provider/OrchestrationSkills.ts";
 import { OrchestrationDispatchCommandError } from "@supacode/contracts";
@@ -1217,6 +1218,7 @@ const layerWsRpc = (
   ServerWsRpcGroup.toLayer(
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
+      const pushNotifications = yield* PushNotifications.PushNotifications;
       const sql = yield* SqlClient.SqlClient;
       const threadManagement = yield* ThreadManagementService.ThreadManagementService;
       const intakeContext = yield* Effect.context<
@@ -3113,6 +3115,15 @@ const layerWsRpc = (
           ),
         [WS_METHODS.subscribeRelayStatus]: (_input) => relayAccess.status,
         [WS_METHODS.prepareRelay]: (_input) => relayAccess.prepare,
+        [WS_METHODS.pushState]: (input) =>
+          pushNotifications.state(currentSessionId, input.deviceId),
+        [WS_METHODS.pushRegister]: (input) => pushNotifications.register(currentSessionId, input),
+        [WS_METHODS.pushConfirm]: (input) => pushNotifications.confirm(currentSessionId, input),
+        [WS_METHODS.pushPreferences]: (input) =>
+          pushNotifications.preferences(currentSessionId, input),
+        [WS_METHODS.pushRevoke]: (input) => pushNotifications.revoke(currentSessionId, input),
+        [WS_METHODS.pushPresence]: (input) => pushNotifications.presence(currentSessionId, input),
+        [WS_METHODS.pushResolve]: (input) => pushNotifications.resolve(currentSessionId, input),
         [WS_METHODS.subscribeResourceTelemetry]: (_input) =>
           Stream.unwrap(
             Effect.map(resourceTelemetry.subscribe, ({ latest, changes }) =>

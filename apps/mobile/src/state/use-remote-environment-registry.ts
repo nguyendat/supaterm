@@ -168,7 +168,14 @@ export function useRemoteConnections() {
             text: "Remove",
             style: "destructive",
             onPress: () => {
-              void controller.removeEnvironment(environmentId);
+              void controller.removeEnvironment(environmentId).catch((error) => {
+                Alert.alert(
+                  "Could not remove environment",
+                  error instanceof Error
+                    ? error.message
+                    : "Disable notifications for this environment and try again.",
+                );
+              });
             },
           },
         ],

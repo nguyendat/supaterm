@@ -1,6 +1,7 @@
 import type { EnvironmentId } from "@supacode/contracts";
 import { useCallback } from "react";
 
+import { removePushRegistration } from "../notifications/pushRegistration";
 import { environmentCatalog } from "../../connection/catalog";
 import {
   connectPairingUrl as connectPairingUrlAtom,
@@ -31,7 +32,10 @@ export function useConnectionController() {
     [connectPairingUrlMutation],
   );
   const removeEnvironment = useCallback(
-    (environmentId: EnvironmentId) => removeEnvironmentMutation(environmentId),
+    async (environmentId: EnvironmentId) => {
+      await removePushRegistration(environmentId);
+      return removeEnvironmentMutation(environmentId);
+    },
     [removeEnvironmentMutation],
   );
   const retryEnvironment = useCallback(

@@ -88,3 +88,31 @@ auth and platform-managed discovery are skipped and only saved environments (pai
 This is possible because the desktop renderer is not served by the backend: the `supacode://` scheme
 serves the bundled client from disk (Vite in development) and API traffic always goes to the
 environment's own URL.
+
+## Push stays outside the relay tunnel
+
+An iOS tunnel is suspended in the background. Push therefore uses a separate
+APNs gateway, executable, database, and HTTPS origin. The live relay does not
+store push recipients or carry notification traffic.
+
+The host commits notification intents and per-device delivery rows with the
+orchestration event and projection. Its delivery worker runs in a separate lane
+so a gateway outage cannot block provider effects. Retries stop at expiry, and
+restart recovery uses durable leases. The gateway owns APNs credentials, token
+routing, immediate revocation, and bounded delivery receipts. It has no content
+queue: unsent work waits for the host to return.
+
+Enrollment binds a host-signed request to an APNs possession challenge. The
+challenge travels only through APNs and returns through the authenticated host
+session before delivery becomes eligible. Registrations belong to that session;
+revoking the session stops host delivery. Re-pairing transfers the existing
+recipient only with proof of the device's stored revocation secret, and advances
+its generation to fence delayed requests from the previous session. Device
+revocation also reaches the gateway directly, while local intent is reconciled
+with the host on reconnect.
+
+The first release carries a fixed generic alert and opaque identifiers. APNs and
+the gateway see delivery metadata, but no conversation content. A notification
+is a hint: the app resolves it against the host and waits for authoritative state
+before navigating. Preview encryption needs a separate key lifecycle and a native
+notification extension; tunnel keys must never be reused for it.
