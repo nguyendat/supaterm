@@ -132,6 +132,7 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 - `packages/contracts` - Effect/Schema contracts plus small derived helpers. No heavy runtime logic.
 - `packages/shared` - shared runtime utils, subpath exports, no barrel.
 - `packages/client-runtime` - client code shared by web and mobile.
+- `apps/relay` - the Go end-to-end encrypted relay behind `wss://relay.supacode.sh`. AGPL-3.0-only, unlike the rest of the repo. Run `make test` there; its handshake counterpart is `packages/shared/src/relay/protocol.ts`.
 
 ## Taste
 

@@ -8,13 +8,13 @@ The measurements below describe local experiments against the relay source at [b
 
 Measurements on 2026-10-10 used Go 1.27.1 on a Mac17,16 running darwin/arm64 with 18 logical CPUs. Each initial campaign requested 30 seconds with two workers. The memory experiments shared this machine during part of the campaigns, so execution counts are workload observations, not portable throughput estimates.
 
-| Target | Reported executions | New interesting inputs | Result | Assessment |
-| --- | ---: | ---: | --- | --- |
-| [Control queue](../internal/relay/queue_fuzz_test.go) | 1,407,992 | 97 | Passed | Useful for FIFO order, terminal behavior, and bytes held by writes in flight |
-| [Admission gate](../internal/admission/admission_fuzz_test.go) | 1,421,011 | 131 | Passed | Useful for generated acquisition and release sequences against a slot model |
-| [Client IP](../internal/admission/admission_fuzz_test.go) | 1,111,622 | 124 | Passed | Useful for proxy trust and repeated-header invariants |
-| [Base64](../internal/relay/control_fuzz_test.go) | 289,887 | 34 | Passed | Lower incremental value because the relay wrapper has little custom logic |
-| [Pair lifecycle](../internal/relay/lifecycle_fuzz_test.go) | 5,360 at the last progress report | 22 at that report | Host address error | Useful scenarios, but sustained real-socket churn adds operating-system limits |
+| Target                                                         |               Reported executions | New interesting inputs | Result             | Assessment                                                                     |
+| -------------------------------------------------------------- | --------------------------------: | ---------------------: | ------------------ | ------------------------------------------------------------------------------ |
+| [Control queue](../internal/relay/queue_fuzz_test.go)          |                         1,407,992 |                     97 | Passed             | Useful for FIFO order, terminal behavior, and bytes held by writes in flight   |
+| [Admission gate](../internal/admission/admission_fuzz_test.go) |                         1,421,011 |                    131 | Passed             | Useful for generated acquisition and release sequences against a slot model    |
+| [Client IP](../internal/admission/admission_fuzz_test.go)      |                         1,111,622 |                    124 | Passed             | Useful for proxy trust and repeated-header invariants                          |
+| [Base64](../internal/relay/control_fuzz_test.go)               |                           289,887 |                     34 | Passed             | Lower incremental value because the relay wrapper has little custom logic      |
+| [Pair lifecycle](../internal/relay/lifecycle_fuzz_test.go)     | 5,360 at the last progress report |      22 at that report | Host address error | Useful scenarios, but sustained real-socket churn adds operating-system limits |
 
 The socket campaign ended with `connect: can't assign requested address`. Its minimized input contained `[]byte("0")` for both arguments. Ten direct replays passed. A subsequent single-worker campaign limited to 1,000 executions passed in 13.6 seconds. Sustained connection churn exhausting host address resources is the supported explanation; the failure did not identify an input-specific relay defect.
 
@@ -30,12 +30,12 @@ The [memory harness](../internal/relay/memory_spike_test.go) starts a separate t
 
 Each run warms up with 24 cycles, then performs six batches of 1,024 cycles. Three ordinary runs and one race-enabled run passed. All sampled host, pair, socket, control, and admission counts were zero after cleanup. Every run retained its baseline count of five goroutines.
 
-| Run | Measured cycles | Final post-GC heap growth | Final heap-object growth | Test time |
-| --- | ---: | ---: | ---: | ---: |
-| Ordinary 1 | 6,144 | 288,416 bytes | 1,006 | 8.13 s |
-| Ordinary 2 | 6,144 | 258,928 bytes | 907 | 8.14 s |
-| Ordinary 3 | 6,144 | 307,896 bytes | 1,101 | 8.19 s |
-| Race detector | 6,144 | 324,712 bytes | 1,223 | 19.48 s |
+| Run           | Measured cycles | Final post-GC heap growth | Final heap-object growth | Test time |
+| ------------- | --------------: | ------------------------: | -----------------------: | --------: |
+| Ordinary 1    |           6,144 |             288,416 bytes |                    1,006 |    8.13 s |
+| Ordinary 2    |           6,144 |             258,928 bytes |                      907 |    8.14 s |
+| Ordinary 3    |           6,144 |             307,896 bytes |                    1,101 |    8.19 s |
+| Race detector |           6,144 |             324,712 bytes |                    1,223 |   19.48 s |
 
 The test permits up to 2 MiB of post-GC growth and four additional goroutines. These are coarse regression budgets, not a proof that all leaks are absent. Small retained allocations, other workloads, and longer runs can exceed what this experiment establishes. Serial churn also leaves concurrent peak-memory behavior to the existing streaming and stalled-reader tests.
 
@@ -49,15 +49,15 @@ Seven separate temporary source copies contained deliberate regressions. The cor
 
 The five logical regressions were checked by replaying fixed fuzz seeds. The heap and goroutine checks used six batches of 96 cycles in their isolated processes, following the same warmup and cleanup rules as ordinary memory runs.
 
-| Temporary regression | Changed production function | Detecting check |
-| --- | --- | --- |
-| Omit the byte decrement when a write finishes | `queue.release` | Queue model disagreed with retained bytes |
-| Omit the global slot decrement | `Gate.Release` | Gate statistics disagreed with its ownership model |
-| Honor forwarded headers from an untrusted peer | `ClientIP` | Proxy trust assertion failed |
-| Remove canonical re-encoding validation | `decodeB64` | Embedded-newline and canonical-encoding assertions failed |
-| Keep the client slot after final pair cleanup | `pair.releaseSlot` | Lifecycle idle check timed out |
-| Retain a 64 KiB buffer per completed pair | `pair.releaseSlot` | Memory churn exceeded its heap budget |
-| Start a goroutine that never exits per completed pair | `pair.releaseSlot` | Memory churn exceeded its goroutine budget |
+| Temporary regression                                  | Changed production function | Detecting check                                           |
+| ----------------------------------------------------- | --------------------------- | --------------------------------------------------------- |
+| Omit the byte decrement when a write finishes         | `queue.release`             | Queue model disagreed with retained bytes                 |
+| Omit the global slot decrement                        | `Gate.Release`              | Gate statistics disagreed with its ownership model        |
+| Honor forwarded headers from an untrusted peer        | `ClientIP`                  | Proxy trust assertion failed                              |
+| Remove canonical re-encoding validation               | `decodeB64`                 | Embedded-newline and canonical-encoding assertions failed |
+| Keep the client slot after final pair cleanup         | `pair.releaseSlot`          | Lifecycle idle check timed out                            |
+| Retain a 64 KiB buffer per completed pair             | `pair.releaseSlot`          | Memory churn exceeded its heap budget                     |
+| Start a goroutine that never exits per completed pair | `pair.releaseSlot`          | Memory churn exceeded its goroutine budget                |
 
 The temporary copies stayed outside the repository. Production code and CI configuration are unchanged by these experiments.
 

@@ -37,25 +37,24 @@ nodes ── authenticated directory stream ──▶ router private :9090 (/hea
 
 **Logs.** Connection records use shared trace IDs and hashed endpoint and pair tags, so requests, directory changes, retries, byte flow, and closures can be matched across the router and nodes. See [Diagnostics](diagnostics.md) for filtering commands. Neither binary logs URLs, keys, raw endpoint or connection IDs, tokens, nonces, or payloads. The router also passes everything it logs (including `net/http` and `httputil` messages) through a redactor that removes query strings and 64-hex runs.
 
-
 ## Router configuration
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `ROUTER_ADDR` | `127.0.0.1:8080` | Public listener for protocol paths and `/metrics` |
-| `ROUTER_PRIVATE_ADDR` | `127.0.0.1:9090` | `/healthz` (200 once at least one node is ready, 503 while draining), `/metrics`, `/v1/directory` |
-| `ROUTER_PRIVATE_ALLOWED_PEERS` | empty | CIDRs allowed to connect to the private listener. Others are closed before any HTTP is read |
-| `ROUTER_DIRECTORY_TOKEN` / `ROUTER_DIRECTORY_TOKEN_FILE` | required | Shared directory secret, at least 16 characters |
-| `ROUTER_TRUSTED_PROXIES` | empty | Load balancers allowed to supply `X-Forwarded-For` |
-| `ROUTER_ADMISSION_RATE` | 100 | Upgrade attempts per second per client IP (burst equals the rate). 429 when exceeded |
-| `ROUTER_MAX_CONNS` | 16384 | Concurrent proxied connections. 503 when exceeded |
-| `ROUTER_MAX_CONNS_PER_IP` | 512 | Concurrent proxied connections per client IP. 429 when exceeded |
-| `ROUTER_DIRECTORY_HEARTBEAT_MS` | 1000 | Directory ping interval. A node silent for 2 × this interval is purged |
-| `ROUTER_REFRESH_TIMEOUT_MS` | 500 | Longest wait of one refresh barrier round |
-| `ROUTER_ACCEPT_GRACE_MS` | 30000 | How long a departed node stays routable for accepts |
-| `ROUTER_UPSTREAM_DIAL_TIMEOUT_MS` | 2000 | Node dial timeout |
-| `ROUTER_UPSTREAM_HEADER_TIMEOUT_MS` | 3000 | Wait for the node's upgrade response |
-| `ROUTER_DRAIN_TIMEOUT_MS` | 5000 | On SIGTERM, health reports 503 and new controls and connects get 503. Accepts are still allowed, and existing sockets are cut after this long |
+| Variable                                                 | Default          | Meaning                                                                                                                                       |
+| -------------------------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ROUTER_ADDR`                                            | `127.0.0.1:8080` | Public listener for protocol paths and `/metrics`                                                                                             |
+| `ROUTER_PRIVATE_ADDR`                                    | `127.0.0.1:9090` | `/healthz` (200 once at least one node is ready, 503 while draining), `/metrics`, `/v1/directory`                                             |
+| `ROUTER_PRIVATE_ALLOWED_PEERS`                           | empty            | CIDRs allowed to connect to the private listener. Others are closed before any HTTP is read                                                   |
+| `ROUTER_DIRECTORY_TOKEN` / `ROUTER_DIRECTORY_TOKEN_FILE` | required         | Shared directory secret, at least 16 characters                                                                                               |
+| `ROUTER_TRUSTED_PROXIES`                                 | empty            | Load balancers allowed to supply `X-Forwarded-For`                                                                                            |
+| `ROUTER_ADMISSION_RATE`                                  | 100              | Upgrade attempts per second per client IP (burst equals the rate). 429 when exceeded                                                          |
+| `ROUTER_MAX_CONNS`                                       | 16384            | Concurrent proxied connections. 503 when exceeded                                                                                             |
+| `ROUTER_MAX_CONNS_PER_IP`                                | 512              | Concurrent proxied connections per client IP. 429 when exceeded                                                                               |
+| `ROUTER_DIRECTORY_HEARTBEAT_MS`                          | 1000             | Directory ping interval. A node silent for 2 × this interval is purged                                                                        |
+| `ROUTER_REFRESH_TIMEOUT_MS`                              | 500              | Longest wait of one refresh barrier round                                                                                                     |
+| `ROUTER_ACCEPT_GRACE_MS`                                 | 30000            | How long a departed node stays routable for accepts                                                                                           |
+| `ROUTER_UPSTREAM_DIAL_TIMEOUT_MS`                        | 2000             | Node dial timeout                                                                                                                             |
+| `ROUTER_UPSTREAM_HEADER_TIMEOUT_MS`                      | 3000             | Wait for the node's upgrade response                                                                                                          |
+| `ROUTER_DRAIN_TIMEOUT_MS`                                | 5000             | On SIGTERM, health reports 503 and new controls and connects get 503. Accepts are still allowed, and existing sockets are cut after this long |
 
 `relay-router healthcheck` and `relay-router metrics` work like the relay subcommands.
 
@@ -67,15 +66,14 @@ Public metrics use a separate limiter with the `ROUTER_ADMISSION_RATE` rate and 
 
 Detailed node metrics remain private in the production deployment. Their `topHosts` entries contain endpoint prefixes, diagnostic tags, and per-host traffic counts. See [node metrics](protocol.md#http).
 
-
 ## Production on exe.dev
 
 `wss://relay.supacode.sh` runs as four VMs:
 
-| VM | Role | Listeners |
-| --- | --- | --- |
-| `supacode-relay` | router, the VM's public HTTPS port | `127.0.0.1:8080` public, `127.0.0.1:9090` private |
-| `supacode-relay-node-a`, `-b`, `-c` | relay nodes, all ports private | `127.0.0.1:8080` relay, `127.0.0.1:9090` health and metrics |
+| VM                                  | Role                               | Listeners                                                   |
+| ----------------------------------- | ---------------------------------- | ----------------------------------------------------------- |
+| `supacode-relay`                    | router, the VM's public HTTPS port | `127.0.0.1:8080` public, `127.0.0.1:9090` private           |
+| `supacode-relay-node-a`, `-b`, `-c` | relay nodes, all ports private     | `127.0.0.1:8080` relay, `127.0.0.1:9090` health and metrics |
 
 Cloudflare has a DNS-only CNAME from `relay.supacode.sh` to `supacode-relay.exe.xyz`. The domain is registered with `ssh exe.dev domain add supacode-relay relay.supacode.sh`, and exe.dev manages its TLS certificate. Keep Cloudflare proxying off for this record, as required by [exe.dev's custom-domain setup](https://exe.dev/docs/cnames). SSH deployment continues to use the VM's `supacode-relay.exe.xyz` address.
 
@@ -121,19 +119,19 @@ Platform note: on OrbStack, a container on `public` can reach addresses on the `
 
 `make e2e-docker` builds the images, starts the stack, and drives it from the host through the published router port, `docker compose` (kill, pause, network disconnect, restart, scale), and a probe container on the public network. Test hosts reconnect with jittered backoff (50 ms doubling to 500 ms), detect silent loss with a 250 ms ping and a 1 s deadline, and stop reconnecting on 4001. Every scenario checks payload type and bytes on each echo, which is tagged with the serving host. That catches corruption, duplication, reordering, and cross-delivery.
 
-| Test | What it proves |
-| --- | --- |
-| `TestPublicSurface` | Public `GET /metrics` returns 200 and `POST /metrics` returns 405. `/`, `/healthz`, `/v1/directory` (even with the token and upgrade headers), and path tricks return 404. From the public network, the router's private listener and every node listener are unreachable |
-| `TestPairingAcrossThreeNodes` | 12 hosts placed 4/4/4. 36 concurrent clients × 60 echoes, plus a 1000-message windowed stream per host with mixed text, binary, and sizes up to 4 KiB. No integrity failures and no failed accepts |
-| `TestDuplicateIdentityNewestWins` | The second registration of a key routes to the same node, the old one gets 4001, and traffic goes only to the newest |
-| `TestNodeGracefulDrain` | SIGTERM on a node. Its hosts re-register elsewhere, its active pairs keep exchanging, a delayed accept on the draining node succeeds, and hosts on other nodes are not disturbed |
-| `TestNodeSIGKILL` | Hosts on the killed node re-register, the router purges it, everything is reachable, and other hosts are not disturbed |
-| `TestNodeSilentPause` | `docker pause`, which keeps TCP open but silent. Hosts move after missed heartbeats, the router purges the node after 2 directory heartbeats, and after unpause the node rejoins with no stale routing |
-| `TestNodeNetworkLoss` | `docker network disconnect` with the production 15 s relay heartbeat. Hosts move while stale registrations survive on the partitioned node. After healing, the router evicts every stale registration and none is ever routed |
-| `TestMembershipChange` | Adds `node-d` under continuous load (6 workers), steers new hosts to it, and then drains it. Existing hosts never re-register, and there are no failed operations or accepts |
-| `TestRouterRestart` | Graceful restart and SIGKILL of the router. All hosts come back and the directory is rebuilt from node snapshots |
-| `TestRateLimitingThroughProxy` | With node rate 5, a client spoofing `X-Forwarded-For`, `X-Real-IP`, and `Forwarded` as the probe's address is limited, while the probe itself is still admitted. So nodes key on the real client IP propagated by the router. The same check runs with router rate 5 |
-| Log hygiene (after all tests) | Every endpoint id, public key, nonce, connection id, and token used in the run is absent from all container logs, and so are `panic:` and `DATA RACE` |
+| Test                              | What it proves                                                                                                                                                                                                                                                            |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TestPublicSurface`               | Public `GET /metrics` returns 200 and `POST /metrics` returns 405. `/`, `/healthz`, `/v1/directory` (even with the token and upgrade headers), and path tricks return 404. From the public network, the router's private listener and every node listener are unreachable |
+| `TestPairingAcrossThreeNodes`     | 12 hosts placed 4/4/4. 36 concurrent clients × 60 echoes, plus a 1000-message windowed stream per host with mixed text, binary, and sizes up to 4 KiB. No integrity failures and no failed accepts                                                                        |
+| `TestDuplicateIdentityNewestWins` | The second registration of a key routes to the same node, the old one gets 4001, and traffic goes only to the newest                                                                                                                                                      |
+| `TestNodeGracefulDrain`           | SIGTERM on a node. Its hosts re-register elsewhere, its active pairs keep exchanging, a delayed accept on the draining node succeeds, and hosts on other nodes are not disturbed                                                                                          |
+| `TestNodeSIGKILL`                 | Hosts on the killed node re-register, the router purges it, everything is reachable, and other hosts are not disturbed                                                                                                                                                    |
+| `TestNodeSilentPause`             | `docker pause`, which keeps TCP open but silent. Hosts move after missed heartbeats, the router purges the node after 2 directory heartbeats, and after unpause the node rejoins with no stale routing                                                                    |
+| `TestNodeNetworkLoss`             | `docker network disconnect` with the production 15 s relay heartbeat. Hosts move while stale registrations survive on the partitioned node. After healing, the router evicts every stale registration and none is ever routed                                             |
+| `TestMembershipChange`            | Adds `node-d` under continuous load (6 workers), steers new hosts to it, and then drains it. Existing hosts never re-register, and there are no failed operations or accepts                                                                                              |
+| `TestRouterRestart`               | Graceful restart and SIGKILL of the router. All hosts come back and the directory is rebuilt from node snapshots                                                                                                                                                          |
+| `TestRateLimitingThroughProxy`    | With node rate 5, a client spoofing `X-Forwarded-For`, `X-Real-IP`, and `Forwarded` as the probe's address is limited, while the probe itself is still admitted. So nodes key on the real client IP propagated by the router. The same check runs with router rate 5      |
+| Log hygiene (after all tests)     | Every endpoint id, public key, nonce, connection id, and token used in the run is absent from all container logs, and so are `panic:` and `DATA RACE`                                                                                                                     |
 
 The run writes `report.json` (to `$E2E_OUT` or a temp directory) with timings. Set `E2E_KEEP=1` to keep the stack, `E2E_SKIP_BUILD=1` to reuse images, and `E2E_ROUTER_PORT` to move the published port.
 
@@ -143,25 +141,25 @@ Both paths serve the same node. In the direct path, hosts and clients dial the n
 
 Loopback on a shared Mac (`make bench-paths`, release build). The machine was busy, so compare the direct and routed columns with each other rather than reading them as absolute numbers. Node CPU is shown as direct / routed.
 
-| Payload | Clients | Direct p50 / p99 | Direct msg/s | Routed p50 / p99 | Routed msg/s | Node CPU | Router CPU / RSS |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 64 B | 1 | 150 / 275 µs | 24.0k | 255 / 428 µs | 14.6k | 125% / 80% | 88% / 15 MiB |
-| 64 B | 32 | 3.78 / 4.43 ms | 33.8k | 7.36 / 8.17 ms | 17.5k | 333% / 171% | 269% / 26 MiB |
-| 1 KiB | 1 | 135 / 284 µs | 25.5k | 289 / 504 µs | 12.8k | 127% / 83% | 87% / 26 MiB |
-| 1 KiB | 32 | 3.74 / 4.71 ms | 34.1k | 7.40 / 8.48 ms | 17.4k | 366% / 190% | 272% / 28 MiB |
-| 64 KiB | 1 | 0.92 / 1.53 ms | 3.9k (245 MiB/s) | 1.49 / 2.28 ms | 2.5k (158 MiB/s) | 252% / 156% | 127% / 28 MiB |
-| 64 KiB | 32 | 30.5 / 45.2 ms | 4.1k (255 MiB/s) | 57.2 / 62.6 ms | 2.3k (141 MiB/s) | 353% / 199% | 176% / 29 MiB |
+| Payload | Clients | Direct p50 / p99 | Direct msg/s     | Routed p50 / p99 | Routed msg/s     | Node CPU    | Router CPU / RSS |
+| ------- | ------- | ---------------- | ---------------- | ---------------- | ---------------- | ----------- | ---------------- |
+| 64 B    | 1       | 150 / 275 µs     | 24.0k            | 255 / 428 µs     | 14.6k            | 125% / 80%  | 88% / 15 MiB     |
+| 64 B    | 32      | 3.78 / 4.43 ms   | 33.8k            | 7.36 / 8.17 ms   | 17.5k            | 333% / 171% | 269% / 26 MiB    |
+| 1 KiB   | 1       | 135 / 284 µs     | 25.5k            | 289 / 504 µs     | 12.8k            | 127% / 83%  | 87% / 26 MiB     |
+| 1 KiB   | 32      | 3.74 / 4.71 ms   | 34.1k            | 7.40 / 8.48 ms   | 17.4k            | 366% / 190% | 272% / 28 MiB    |
+| 64 KiB  | 1       | 0.92 / 1.53 ms   | 3.9k (245 MiB/s) | 1.49 / 2.28 ms   | 2.5k (158 MiB/s) | 252% / 156% | 127% / 28 MiB    |
+| 64 KiB  | 32      | 30.5 / 45.2 ms   | 4.1k (255 MiB/s) | 57.2 / 62.6 ms   | 2.3k (141 MiB/s) | 353% / 199% | 176% / 29 MiB    |
 
 Docker (`make bench-docker`), using OrbStack 29.4.0 (linux/arm64 VM) on the same Mac. The stack is the router plus `node-a`. The driver runs in a container attached to both networks. CPU and memory come from `docker stats`, sampled about every 1.5 s across each whole phase, including host setup.
 
-| Payload | Clients | Direct p50 / p99 | Direct msg/s | Routed p50 / p99 | Routed msg/s |
-| --- | --- | --- | --- | --- | --- |
-| 64 B | 1 | 70 / 172 µs | 46.1k | 124 / 300 µs | 27.9k |
-| 64 B | 32 | 0.34 / 5.99 ms | 165k | 0.99 / 5.90 ms | 102k |
-| 1 KiB | 1 | 78 µs / 1.16 ms | 32.7k | 144 µs / 1.05 ms | 21.2k |
-| 1 KiB | 32 | 0.70 / 8.43 ms | 72.6k | 1.81 / 8.16 ms | 49.6k |
-| 64 KiB | 1 | 2.38 / 7.65 ms | 1.37k (86 MiB/s) | 2.33 / 8.19 ms | 1.34k (84 MiB/s) |
-| 64 KiB | 32 | 17.6 / 69.1 ms | 5.68k (355 MiB/s) | 18.3 / 62.4 ms | 5.70k (356 MiB/s) |
+| Payload | Clients | Direct p50 / p99 | Direct msg/s      | Routed p50 / p99 | Routed msg/s      |
+| ------- | ------- | ---------------- | ----------------- | ---------------- | ----------------- |
+| 64 B    | 1       | 70 / 172 µs      | 46.1k             | 124 / 300 µs     | 27.9k             |
+| 64 B    | 32      | 0.34 / 5.99 ms   | 165k              | 0.99 / 5.90 ms   | 102k              |
+| 1 KiB   | 1       | 78 µs / 1.16 ms  | 32.7k             | 144 µs / 1.05 ms | 21.2k             |
+| 1 KiB   | 32      | 0.70 / 8.43 ms   | 72.6k             | 1.81 / 8.16 ms   | 49.6k             |
+| 64 KiB  | 1       | 2.38 / 7.65 ms   | 1.37k (86 MiB/s)  | 2.33 / 8.19 ms   | 1.34k (84 MiB/s)  |
+| 64 KiB  | 32      | 17.6 / 69.1 ms   | 5.68k (355 MiB/s) | 18.3 / 62.4 ms   | 5.70k (356 MiB/s) |
 
 Phase resources:
 
@@ -184,14 +182,14 @@ These are observed rates, not a documented provider quota or a maximum productio
 
 The relay on node-a forwards substantially faster when the transport stays on loopback. All cases use 64 KiB payloads, one client per driver, and four messages in flight. The first three rows use one four-second window; the remaining rows use two five-second repetitions.
 
-| Arrangement | Echo payload throughput | Median RTT | Source VM upload during measurement |
-| --- | --- | --- | --- |
-| Live node-a, both endpoints on its loopback | 253.1 MiB/s | 0.67 ms | No integration traffic |
-| Both endpoints on router VM, node-a integration, 4 KiB writer | 6.8 MiB/s | 35.6 ms | Separate wire capture unavailable |
-| Same path, 64 KiB writer | 7.1 MiB/s | 35.4 ms | Separate wire capture unavailable |
-| One destination, both endpoints on router VM | 6.9-7.0 MiB/s | 35.5-35.7 ms | 14.3-14.4 MiB/s |
-| Two simultaneous destinations, node-a and node-b | 7.1-7.3 MiB/s total | 69.4-71.0 ms per driver | 14.5-14.6 MiB/s total |
-| Client on router VM, echo host on node-a loopback | 13.9-14.0 MiB/s | 17.7-17.8 ms | 14.4 MiB/s |
+| Arrangement                                                   | Echo payload throughput | Median RTT              | Source VM upload during measurement |
+| ------------------------------------------------------------- | ----------------------- | ----------------------- | ----------------------------------- |
+| Live node-a, both endpoints on its loopback                   | 253.1 MiB/s             | 0.67 ms                 | No integration traffic              |
+| Both endpoints on router VM, node-a integration, 4 KiB writer | 6.8 MiB/s               | 35.6 ms                 | Separate wire capture unavailable   |
+| Same path, 64 KiB writer                                      | 7.1 MiB/s               | 35.4 ms                 | Separate wire capture unavailable   |
+| One destination, both endpoints on router VM                  | 6.9-7.0 MiB/s           | 35.5-35.7 ms            | 14.3-14.4 MiB/s                     |
+| Two simultaneous destinations, node-a and node-b              | 7.1-7.3 MiB/s total     | 69.4-71.0 ms per driver | 14.5-14.6 MiB/s total               |
+| Client on router VM, echo host on node-a loopback             | 13.9-14.0 MiB/s         | 17.7-17.8 ms            | 14.4 MiB/s                          |
 
 Two destinations share the same aggregate throughput instead of doubling it. Moving the echo host onto the node halves outbound traffic through the source VM and doubles received payload throughput. This locates the shared constraint on the source transport rather than an individual relay node's forwarding capacity.
 
@@ -224,21 +222,21 @@ Both the client and echo host run on the same external Mac for every case. All m
 Each variant uses four echo hosts, a three-second warmup, an eight-second measurement window, and three repetitions. The variants alternate order between repetitions. Table values are medians of the three run-level measurements, including each run's p99. Pair setup is paced at 40 per second.
 
 | Payload | Clients | Messages in flight per client | Live RTT p50 / p99 | Colocated RTT p50 / p99 | Live echo rate | Colocated echo rate |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 KiB | 1 | 4 | 19.69 / 29.69 ms | 13.10 / 18.21 ms | 199 msg/s | 302 msg/s |
-| 1 KiB | 8 | 4 | 18.74 / 48.48 ms | 11.70 / 18.31 ms | 1,419 msg/s | 2,661 msg/s |
-| 1 KiB | 32 | 4 | 75.98 / 100.11 ms | 16.58 / 37.54 ms | 1,914 msg/s | 7,284 msg/s |
-| 64 KiB | 1 | 4 | 53.02 / 86.53 ms | 19.67 / 31.29 ms | 4.6 MiB/s | 12.3 MiB/s |
-| 64 KiB | 8 | 1 | 96.40 / 152.65 ms | 33.85 / 57.57 ms | 5.2 MiB/s | 14.4 MiB/s |
+| ------- | ------- | ----------------------------- | ------------------ | ----------------------- | -------------- | ------------------- |
+| 1 KiB   | 1       | 4                             | 19.69 / 29.69 ms   | 13.10 / 18.21 ms        | 199 msg/s      | 302 msg/s           |
+| 1 KiB   | 8       | 4                             | 18.74 / 48.48 ms   | 11.70 / 18.31 ms        | 1,419 msg/s    | 2,661 msg/s         |
+| 1 KiB   | 32      | 4                             | 75.98 / 100.11 ms  | 16.58 / 37.54 ms        | 1,914 msg/s    | 7,284 msg/s         |
+| 64 KiB  | 1       | 4                             | 53.02 / 86.53 ms   | 19.67 / 31.29 ms        | 4.6 MiB/s      | 12.3 MiB/s          |
+| 64 KiB  | 8       | 1                             | 96.40 / 152.65 ms  | 33.85 / 57.57 ms        | 5.2 MiB/s      | 14.4 MiB/s          |
 
 Scheduling conditions differ between the live and temporary VMs. With 32 small-message clients, the live router reports 27.7-30.6% CPU steal; the temporary VM reports 3.9-5.5%. The live comparison therefore combines the deployment arrangement with scheduling differences.
 
 The additional control holds the VM and public endpoint fixed. Two identical node binaries register with its router: one advertises loopback, and the other advertises an HTTPS peer integration targeting that same VM. Registration pins each workload to the intended node.
 
 | Payload | Clients | Messages in flight per client | Integration RTT p50 / p99 | Loopback RTT p50 / p99 | Integration echo rate | Loopback echo rate |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 KiB | 32 | 4 | 43.53 / 80.85 ms | 16.56 / 35.79 ms | 2,623 msg/s | 7,226 msg/s |
-| 64 KiB | 8 | 1 | 83.91 / 117.10 ms | 33.67 / 51.75 ms | 6.1 MiB/s | 14.6 MiB/s |
+| ------- | ------- | ----------------------------- | ------------------------- | ---------------------- | --------------------- | ------------------ |
+| 1 KiB   | 32      | 4                             | 43.53 / 80.85 ms          | 16.56 / 35.79 ms       | 2,623 msg/s           | 7,226 msg/s        |
+| 64 KiB  | 8       | 1                             | 83.91 / 117.10 ms         | 33.67 / 51.75 ms       | 6.1 MiB/s             | 14.6 MiB/s         |
 
 This control supports removing the HTTPS integration from the backend path without requiring a different VM placement. It does not reproduce every cross-VM latency component, and reported CPU steal still varies between the two paths. The combined router and node CPU averages stay below 53% of one core in the colocated windows.
 

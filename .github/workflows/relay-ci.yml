@@ -1,15 +1,22 @@
-name: CI
+name: Relay CI
 
 on:
   pull_request:
+    paths:
+      - apps/relay/**
+      - .github/workflows/relay-ci.yml
   workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: relay-ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: apps/relay
 
 jobs:
   test:
@@ -19,6 +26,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: stable
+          cache-dependency-path: apps/relay/go.sum
       - run: make test
 
   audit:
@@ -29,4 +37,5 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: stable
+          cache-dependency-path: apps/relay/go.sum
       - run: make audit

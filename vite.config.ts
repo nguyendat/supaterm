@@ -96,6 +96,10 @@ export default defineConfig({
       "apps/mobile/android/**",
       "apps/mobile/ios/**",
       "apps/mobile/uniwind-types.d.ts",
+      // Relay: Go html/template syntax, vendored htmx, and generated benchmark results.
+      "apps/relay/internal/dashboard/templates/**",
+      "apps/relay/internal/dashboard/static/htmx-*.min.js",
+      "apps/relay/docs/*-results.json",
       "*.icon/**",
     ],
     sortPackageJson: {},
@@ -120,6 +124,7 @@ export default defineConfig({
       "apps/mobile/android/**",
       "apps/mobile/ios/**",
       "apps/mobile/uniwind-types.d.ts",
+      "apps/relay/internal/dashboard/static/htmx-*.min.js",
       "oxlint-plugin-supacode/**",
     ],
     plugins: ["eslint", "oxc", "react", "unicorn", "typescript"],

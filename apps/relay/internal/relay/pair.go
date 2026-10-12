@@ -9,8 +9,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/supabitapp/supacode-relay/internal/admission"
-	"github.com/supabitapp/supacode-relay/internal/diagnostics"
+	"github.com/supabitapp/supacode-next/apps/relay/internal/admission"
+	"github.com/supabitapp/supacode-next/apps/relay/internal/diagnostics"
 )
 
 type pairState int

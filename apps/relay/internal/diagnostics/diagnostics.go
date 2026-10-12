@@ -16,7 +16,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/supabitapp/supacode-relay/internal/admission"
+	"github.com/supabitapp/supacode-next/apps/relay/internal/admission"
 )
 
 const Header = "X-Supacode-Relay-Trace"

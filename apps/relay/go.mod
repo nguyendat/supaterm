@@ -1,4 +1,4 @@
-module github.com/supabitapp/supacode-relay
+module github.com/supabitapp/supacode-next/apps/relay
 
 go 1.25.0
 

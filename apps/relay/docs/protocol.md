@@ -28,15 +28,15 @@ Treat `connectionId` as opaque. The relay generates a random unpadded Base64URL 
 
 ## Close codes
 
-| Code | Reason |
-| --- | --- |
-| peer's code | Forwarded from the other side |
-| 1001 | Peer disconnected or timed out, host went offline, relay is shutting down, or relay is draining |
-| 1008 | Authentication failed or unexpected control message |
-| 1009 | Message larger than `RELAY_MAX_MESSAGE_BYTES` |
-| 1011 | Upgrade failed |
-| 1013 | Pair timeout, delivery timeout, or control queue full |
-| 4001 | Registration superseded by a newer one for the same endpoint |
+| Code        | Reason                                                                                          |
+| ----------- | ----------------------------------------------------------------------------------------------- |
+| peer's code | Forwarded from the other side                                                                   |
+| 1001        | Peer disconnected or timed out, host went offline, relay is shutting down, or relay is draining |
+| 1008        | Authentication failed or unexpected control message                                             |
+| 1009        | Message larger than `RELAY_MAX_MESSAGE_BYTES`                                                   |
+| 1011        | Upgrade failed                                                                                  |
+| 1013        | Pair timeout, delivery timeout, or control queue full                                           |
+| 4001        | Registration superseded by a newer one for the same endpoint                                    |
 
 ## HTTP
 

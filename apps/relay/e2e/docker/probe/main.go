@@ -15,7 +15,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/supabitapp/supacode-relay/internal/endpoint"
+	"github.com/supabitapp/supacode-next/apps/relay/internal/endpoint"
 )
 
 func main() {

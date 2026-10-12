@@ -1,6 +1,6 @@
 # Supacode relay
 
-An end-to-end encrypted relay for [Supacode](https://github.com/supabitapp/supacode-next). It connects clients to hosts that have no open ports, and it only ever sees ciphertext.
+An end-to-end encrypted relay for [Supacode](../../README.md). It connects clients to hosts that have no open ports, and it only ever sees ciphertext.
 
 ```mermaid
 flowchart LR
@@ -17,7 +17,7 @@ Supacode encrypts traffic inside the client and the host, so the relay forwards 
 - Every frame is sealed with ChaCha20-Poly1305 and numbered. A modified, replayed, or reordered frame is rejected.
 - The relay still sees connection metadata: IP addresses, the host's endpoint ID, timing, and byte counts.
 
-The handshake and cipher live in Supacode's [`packages/shared/src/relay/protocol.ts`](https://github.com/supabitapp/supacode-next/blob/main/packages/shared/src/relay/protocol.ts).
+The handshake and cipher live in Supacode's [`packages/shared/src/relay/protocol.ts`](../../packages/shared/src/relay/protocol.ts).
 
 ## Use
 
