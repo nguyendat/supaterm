@@ -8,6 +8,7 @@ import type {
   DesktopSnapShotEvent,
 } from "@supacode/contracts";
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
+import { DESKTOP_MICRO_CHANNELS } from "@supacode/contracts/desktopMicro";
 
 import * as IpcChannels from "./ipc/channels.ts";
 
@@ -61,6 +62,19 @@ function unwrapEnsureSshEnvironmentResult(result: unknown) {
 }
 
 contextBridge.exposeInMainWorld("desktopBridge", {
+  micro: {
+    open: () => ipcRenderer.invoke(DESKTOP_MICRO_CHANNELS.open),
+    close: (id) => ipcRenderer.invoke(DESKTOP_MICRO_CHANNELS.close, id),
+    write: (id, data) => ipcRenderer.invoke(DESKTOP_MICRO_CHANNELS.write, { id, data }),
+    onEvent: (listener) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        event: import("@supacode/contracts/desktopMicro").DesktopMicroEvent,
+      ) => listener(event);
+      ipcRenderer.on(DESKTOP_MICRO_CHANNELS.event, handler);
+      return () => ipcRenderer.removeListener(DESKTOP_MICRO_CHANNELS.event, handler);
+    },
+  },
   getAppBranding: () => {
     const result = ipcRenderer.sendSync(IpcChannels.GET_APP_BRANDING_CHANNEL);
     if (typeof result !== "object" || result === null) {

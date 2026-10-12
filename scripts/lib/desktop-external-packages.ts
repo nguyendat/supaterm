@@ -16,6 +16,7 @@ export const DESKTOP_RUNTIME_EXTERNAL_PREFIXES = [
   "@napi-rs/keyring",
   "@crowecawcaw/xa11y",
   "ffi-rs",
+  "node-hid",
   "@yuuang/",
   // Desktop injection reads coreBundle.js; the server browser loads the full runtime.
   "playwright-core",

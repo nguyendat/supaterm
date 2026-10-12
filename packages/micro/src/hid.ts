@@ -2,6 +2,7 @@ export interface MicroHidDevice {
   readonly vendorId: number;
   readonly productId: number;
   readonly productName: string;
+  readonly transport?: "USB" | "Bluetooth" | null;
   readonly opened: boolean;
   open(): Promise<void>;
   close(): Promise<void>;

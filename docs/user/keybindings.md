@@ -6,6 +6,8 @@ also lists the command IDs and defaults available in your version.
 ## Micro controller
 
 Connect a Codex Micro in **Settings → Micro controller** in the desktop app.
+Use USB, or pair it in your system’s Bluetooth settings before connecting. On macOS,
+grant Supacode Input Monitoring access and restart the app after changing permission.
 Assign each Agent Key to a thread; assignments
 stay fixed when the sidebar order changes and can include remote environments.
 Select a key in the layout to assign its thread or action. **Reset layout**

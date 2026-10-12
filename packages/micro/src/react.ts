@@ -1,7 +1,8 @@
 import { useEffect, useEffectEvent, useSyncExternalStore } from "react";
 import { MicroController } from "./controller.ts";
 import type { MicroAction } from "./input.ts";
-import type { MicroHid } from "./hid.ts";
+import type { DesktopBridge } from "@supacode/contracts";
+import { DesktopMicroHid } from "./desktopHid.ts";
 
 let controller: MicroController | undefined;
 
@@ -11,10 +12,11 @@ export function getMicroController(): MicroController {
     try {
       storage = typeof window === "undefined" ? null : window.localStorage;
     } catch {}
-    controller = new MicroController(
-      typeof navigator !== "undefined" && "hid" in navigator ? (navigator.hid as MicroHid) : null,
-      storage,
-    );
+    const bridge =
+      typeof window === "undefined"
+        ? undefined
+        : (window as Window & { desktopBridge?: DesktopBridge }).desktopBridge?.micro;
+    controller = new MicroController(bridge ? new DesktopMicroHid(bridge) : null, storage);
   }
   return controller;
 }

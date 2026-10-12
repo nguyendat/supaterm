@@ -1,6 +1,7 @@
 import { getMicroController, useMicro } from "@supacode/micro/react";
 import { MICRO_ACTIONS, type MicroMappedAction } from "@supacode/micro/input";
 import { useState } from "react";
+import { usePermissionStatus } from "../permissions/usePermissionStatus";
 import { InlineConfirmButton } from "../InlineConfirm";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -21,6 +22,15 @@ const CONNECTION_LABELS = {
 export function MicroSettings() {
   const snapshot = useMicro();
   const micro = getMicroController();
+  const needsInputMonitoring = window.desktopBridge?.getClientPlatform?.() === "darwin";
+  const permission = usePermissionStatus(
+    async () => ({
+      inputMonitoring:
+        (await window.desktopBridge?.checkSystemPermission?.("input-monitoring")) ?? false,
+    }),
+    { inputMonitoring: false },
+    needsInputMonitoring,
+  );
   const [editing, setEditing] = useState<MicroEditTarget | null>(null);
   const save = (operation: () => void) => {
     try {
@@ -51,8 +61,9 @@ export function MicroSettings() {
             snapshot.error ??
             (connected
               ? (snapshot.productName ?? "Micro") +
+                (snapshot.transport ? " · " + snapshot.transport : "") +
                 (snapshot.firmware ? " · Firmware " + snapshot.firmware : "")
-              : "Connect your Work Louder Micro to control Supacode.")
+              : "Connect with USB or pair your Micro in system Bluetooth settings, then press Connect.")
           }
           control={
             <div className="flex items-center gap-3">
@@ -74,6 +85,37 @@ export function MicroSettings() {
             </div>
           }
         />
+        {needsInputMonitoring ? (
+          <SettingsRow
+            title="Input Monitoring"
+            description={
+              permission.error ??
+              "Required to read Micro keys on macOS. Restart Supacode after granting access."
+            }
+            control={
+              permission.status.inputMonitoring ? (
+                <span className="text-sm text-muted-foreground">Granted</span>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    void window.desktopBridge
+                      ?.openSystemSettings?.("input-monitoring")
+                      .catch(() => {
+                        toastManager.add({
+                          type: "error",
+                          title: "Could not open System Settings",
+                        });
+                      });
+                  }}
+                >
+                  Open System Settings
+                </Button>
+              )
+            }
+          />
+        ) : null}
         {snapshot.phase === "unsupported" ? (
           <SettingsRow
             title="Device access unavailable"

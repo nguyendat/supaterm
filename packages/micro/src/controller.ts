@@ -1,4 +1,4 @@
-// @effect-diagnostics globalTimers:off -- The WebHID handshake deadline belongs to the browser connection lifecycle.
+// @effect-diagnostics globalTimers:off -- The hardware handshake deadline belongs to the renderer connection lifecycle.
 
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -53,6 +53,7 @@ export type MicroSnapshot = {
     | "disconnecting"
     | "error";
   readonly productName: string | null;
+  readonly transport: "USB" | "Bluetooth" | null;
   readonly firmware: string | null;
   readonly error: string | null;
   readonly config: MicroConfig;
@@ -98,6 +99,7 @@ export class MicroController {
     this.snapshot = {
       phase: hid ? "disconnected" : "unsupported",
       productName: null,
+      transport: null,
       firmware: null,
       error: null,
       config,
@@ -195,6 +197,7 @@ export class MicroController {
       this.publish({
         phase: "connected",
         productName: device.productName,
+        transport: device.transport ?? null,
         firmware: status.value.version ?? null,
         error: null,
       });
@@ -225,6 +228,7 @@ export class MicroController {
       this.publish({
         phase: this.hid ? "disconnected" : "unsupported",
         productName: null,
+        transport: null,
         firmware: null,
       });
   };

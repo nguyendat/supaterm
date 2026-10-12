@@ -40,6 +40,7 @@ import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as Electron from "electron";
 import * as MacPermissions from "../../permissions/MacPermissions.ts";
 import { safariPermissionCheck } from "../../preview/BrowserImport/SafariPermission.ts";
+import { hasInputMonitoringPermission } from "@supacode/micro/permissions";
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
 import {
@@ -342,7 +343,8 @@ export const openSystemSettings = DesktopIpc.makeIpcMethod({
     const opened = yield* shell.openSystemSettings(pane);
     if (opened && environment.isPackaged) {
       const permissions = yield* MacPermissions.MacPermissions;
-      const isGranted = yield* safariPermissionCheck;
+      const isGranted =
+        pane === "input-monitoring" ? hasInputMonitoringPermission : yield* safariPermissionCheck;
       yield* permissions.showHelper(pane, owner, isGranted);
     }
     return opened;
@@ -443,10 +445,11 @@ export const checkSystemPermission = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.CHECK_SYSTEM_PERMISSION_CHANNEL,
   payload: SystemSettingsPaneSchema,
   result: Schema.Boolean,
-  handler: Effect.fn("desktop.ipc.window.checkSystemPermission")(function* () {
+  handler: Effect.fn("desktop.ipc.window.checkSystemPermission")(function* (pane) {
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     if (environment.platform !== "darwin") return false;
-    const check = yield* safariPermissionCheck;
+    const check =
+      pane === "input-monitoring" ? hasInputMonitoringPermission : yield* safariPermissionCheck;
     return yield* Effect.promise(check);
   }),
 });
