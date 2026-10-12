@@ -87,6 +87,10 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import { resolveAttachmentPath, resolveAttachmentPathById } from "../../attachmentStore.ts";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
+import {
+  resolveCodexReasoningSummary,
+  sanitizeCodexConfigReadFrame,
+} from "../../provider/CodexReasoningSummary.ts";
 import { ServerConfig } from "../../config.ts";
 import { expandHomePath } from "@supacode/provider-core/server/pathExpansion";
 import {
@@ -706,6 +710,7 @@ export function buildCodexTurnStartParams(input: {
   readonly deviceToolsAvailable?: boolean;
   /** ChatGPT token sharing does not accept service tiers. */
   readonly omitServiceTier?: boolean;
+  readonly reasoningSummary?: CodexSchema.V2TurnStartParams__ReasoningSummary;
 
   readonly appContext?: ProviderAdapter.ProviderAdapterV2TurnInput["appContext"];
 }) {
@@ -774,9 +779,7 @@ export function buildCodexTurnStartParams(input: {
       ...(additionalContext ? { additionalContext } : {}),
       cwd: input.runtimePolicy.cwd,
       model: input.modelSelection.model,
-      // Model catalogues can default summaries to "none". Request them on every
-      // turn, including resumed threads, for Supacode's reasoning timeline.
-      summary: "detailed",
+      summary: input.reasoningSummary ?? "auto",
       // Always explicit: omitting this on resume leaves Codex's previous
       // reviewer sticky after switching away from Auto mode.
       approvalsReviewer: runtimeModeDefaults.approvalsReviewer,
@@ -1376,8 +1379,22 @@ export function makeCodexAppServerProtocolLogger(input: {
     return undefined;
   }
 
+  const configReadIds = new Set<unknown>();
   return (event) => {
     if (!shouldPersistProviderEvent("native", event)) return Effect.void;
+    const frame = event.payload;
+    let sanitizedEvent = event;
+    if (event.stage === "decoded" && typeof frame === "object" && frame !== null && "id" in frame) {
+      if (event.direction === "outgoing" && "method" in frame && frame.method === "config/read") {
+        configReadIds.add(frame.id);
+      } else if (
+        event.direction === "incoming" &&
+        !("method" in frame) &&
+        configReadIds.delete(frame.id)
+      ) {
+        sanitizedEvent = { ...event, payload: sanitizeCodexConfigReadFrame(frame) };
+      }
+    }
     return nativeEventLogger
       .write(
         {
@@ -1385,7 +1402,7 @@ export function makeCodexAppServerProtocolLogger(input: {
           protocol: "codex.app-server",
           kind: "protocol",
           providerSessionId: input.providerSessionId,
-          event: redactCodexProtocolValue(boundProviderEventForLogging(event)),
+          event: redactCodexProtocolValue(boundProviderEventForLogging(sanitizedEvent)),
         },
         input.threadId,
       )
@@ -6069,6 +6086,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               browserToolsAvailable: mcpSession?.browserToolsAvailable ?? true,
               deviceToolsAvailable: mcpSession?.capabilities?.has("device") ?? false,
               omitServiceTier: adapterOptions.resolveRuntime !== undefined,
+              reasoningSummary: yield* resolveCodexReasoningSummary(
+                client.raw,
+                turnInput.runtimePolicy.cwd,
+              ),
               ...(turnInput.appContext === undefined ? {} : { appContext: turnInput.appContext }),
             });
             yield* Ref.update(pendingRootTurns, (current) => {

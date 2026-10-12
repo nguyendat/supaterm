@@ -63,7 +63,11 @@ import * as ProviderReplayHarness from "../testkit/ProviderReplayHarness.ts";
 import * as ProviderAdapter from "@supacode/provider-core/server/ProviderAdapter";
 import type * as ProviderContinuationRequests from "@supacode/provider-core/server/ProviderContinuationRequests";
 import * as CodexAdapterV2 from "./CodexAdapterV2.ts";
-import { makeReplayServerConfig, withCodexReplayChildMetadata } from "./CodexAdapterV2.testkit.ts";
+import {
+  makeReplayServerConfig,
+  withCodexReplayChildMetadata,
+  withCodexReplayConfigReads,
+} from "./CodexAdapterV2.testkit.ts";
 import * as CodexAdapterV2Testkit from "./CodexAdapterV2.testkit.ts";
 
 const encodeUnknownJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
@@ -1041,6 +1045,71 @@ describe("CodexAdapterV2 dynamic tool projection", () => {
 });
 
 describe("CodexAdapterV2 native protocol logging", () => {
+  it.effect("keeps config credentials and validation errors out of native logs", () =>
+    Effect.gen(function* () {
+      const writes: Array<unknown> = [];
+      const protocolLogger = CodexAdapterV2.makeCodexAppServerProtocolLogger({
+        nativeEventLogger: {
+          filePath: "/tmp/events.log",
+          write: (event) =>
+            Effect.sync(() => {
+              writes.push(event);
+            }),
+          close: () => Effect.void,
+        },
+        threadId: ThreadId.make("thread-1"),
+        providerSessionId: ProviderSessionId.make("provider-session-1"),
+      });
+      assert.exists(protocolLogger);
+      if (protocolLogger === undefined) return;
+      for (const id of [2, 3]) {
+        yield* protocolLogger({
+          direction: "outgoing",
+          stage: "decoded",
+          payload: { id, method: "config/read", params: { cwd: "/workspace" } },
+        });
+      }
+      yield* protocolLogger({
+        direction: "incoming",
+        stage: "decoded",
+        payload: {
+          id: 2,
+          result: {
+            config: {
+              model_reasoning_summary: "concise",
+              mcp_servers: {
+                probe: {
+                  env: { CUSTOM_CREDENTIAL: "env-sentinel", AWS_ACCESS_KEY_ID: "access-sentinel" },
+                  http_headers: { "X-Custom-Credential": "header-sentinel" },
+                },
+              },
+            },
+            origins: { model_reasoning_summary: { name: { type: "user" } } },
+            layers: [{ config: { arbitrary: "layer-sentinel" } }],
+          },
+        },
+      });
+      yield* protocolLogger({
+        direction: "incoming",
+        stage: "decoded",
+        payload: { id: 3, error: { code: -32603, message: "invalid config: error-sentinel" } },
+      });
+      yield* protocolLogger({
+        direction: "incoming",
+        stage: "decoded",
+        payload: { id: 4, result: { unrelated: "retained" } },
+      });
+      assert.notInclude(encodeUnknownJson(writes), "sentinel");
+      assert.nestedPropertyVal(
+        writes[2],
+        "event.payload.result.config.model_reasoning_summary",
+        "concise",
+      );
+      assert.nestedPropertyVal(writes[3], "event.payload.error.code", -32603);
+      assert.nestedPropertyVal(writes[4], "event.payload.result.unrelated", "retained");
+    }),
+  );
+
   it.effect("logs decoded app-server frames once with credentials redacted", () =>
     Effect.gen(function* () {
       const writes: Array<{
@@ -1581,6 +1650,7 @@ function codexReplayPreamble(input: {
   readonly prompt: string;
   /** Text the adapter should send, when it differs from what the user typed. */
   readonly sentPrompt?: string;
+  readonly reasoningSummary?: "auto" | "concise" | "detailed" | "none";
 }): Array<CodexReplay.CodexAppServerReplayEntry> {
   return [
     {
@@ -1677,7 +1747,7 @@ function codexReplayPreamble(input: {
           approvalPolicy: "never",
           approvalsReviewer: "user",
           sandboxPolicy: { type: "dangerFullAccess" },
-          summary: "detailed",
+          summary: input.reasoningSummary ?? "auto",
         },
       },
     },
@@ -1937,6 +2007,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       Effect.void,
     onRequest: (method: string, params: unknown) => Effect.Effect<void> = () => Effect.void,
     readChildMetadata?: Parameters<typeof withCodexReplayChildMetadata>[2],
+    configReadResponses: ReadonlyArray<unknown> = [],
   ) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -1946,7 +2017,9 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         [];
       const clientFactory: CodexAdapterV2.CodexAppServerClientFactoryShape = {
         open: (openInput) =>
-          Layer.build(CodexReplay.layerReplay(transcript)).pipe(
+          Layer.build(
+            CodexReplay.layerReplay(withCodexReplayConfigReads(transcript, configReadResponses)),
+          ).pipe(
             Effect.mapError(
               (cause) =>
                 new ProviderAdapter.ProviderAdapterOpenSessionError({
@@ -2053,6 +2126,102 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         firstTerminal: Deferred.await(firstTerminal),
       };
     });
+
+  it.effect("honors a changed summary preference on the next turn of the same thread", () =>
+    Effect.gen(function* () {
+      const nativeThreadId = "summary-config-thread";
+      const firstTurnId = "summary-config-first";
+      const secondTurnId = "summary-config-second";
+      const firstPrompt = "first summary preference";
+      const secondPrompt = "changed summary preference";
+      const secondPreamble = codexReplayPreamble({
+        nativeThreadId,
+        nativeTurnId: secondTurnId,
+        prompt: secondPrompt,
+        reasoningSummary: "concise",
+      });
+      const completed = (id: string): CodexReplay.CodexAppServerReplayEntry => ({
+        type: "emit_inbound",
+        label: "turn/completed",
+        frame: {
+          method: "turn/completed",
+          params: {
+            threadId: nativeThreadId,
+            turn: makeCodexReplayTurn({ id, status: "completed" }),
+          },
+        },
+      });
+      const transcript = makeCodexReplayTranscript({
+        scenario: "summary-config-refresh",
+        entries: [
+          ...codexReplayPreamble({
+            nativeThreadId,
+            nativeTurnId: firstTurnId,
+            prompt: firstPrompt,
+            reasoningSummary: "none",
+          }),
+          completed(firstTurnId),
+          ...secondPreamble.slice(5, 7).map((entry) => withReplayRequestId(entry, 4)),
+          ...secondPreamble.slice(7),
+          completed(secondTurnId),
+        ],
+      });
+      const secondTerminal = yield* Deferred.make<void>();
+      let terminalCount = 0;
+      const harness = yield* makeCodexReplayHarness(
+        transcript,
+        (event) => {
+          if (event.type === "turn.terminal" && ++terminalCount === 2) {
+            return Deferred.succeed(secondTerminal, undefined);
+          }
+          return Effect.void;
+        },
+        () => Effect.void,
+        undefined,
+        [
+          {
+            config: { model_reasoning_summary: "none" },
+            origins: { model_reasoning_summary: { name: { type: "user" } } },
+          },
+          {
+            config: { model_reasoning_summary: "concise" },
+            origins: { model_reasoning_summary: { name: { type: "sessionFlags" } } },
+          },
+        ],
+      );
+      yield* harness.runtime.startTurn(
+        makeCodexTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("summary-config-first-attempt"),
+          text: firstPrompt,
+        }),
+      );
+      yield* harness.firstTerminal;
+      yield* harness.runtime.startTurn({
+        ...makeCodexTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("summary-config-second-attempt"),
+          text: secondPrompt,
+        }),
+        runOrdinal: 2,
+        providerTurnOrdinal: 2,
+      });
+      yield* Deferred.await(secondTerminal);
+      assert.deepEqual(
+        harness.terminalEvents().map((event) => event.status),
+        ["completed", "completed"],
+      );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
+  );
 
   it.effect.each(["supported", "unsupported", "invalid"] as const)(
     "delivers native history with %s app-server protocol",
@@ -3193,7 +3362,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                   approvalPolicy: "never",
                   approvalsReviewer: "user",
                   sandboxPolicy: { type: "dangerFullAccess" },
-                  summary: "detailed",
+                  summary: "auto",
                 },
               },
             },
@@ -4528,10 +4697,12 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "supacode-bg-stop-workspace-" });
-        const localTranscript = yield* decodeReplayTranscriptJson(
-          (yield* encodeReplayTranscriptJson(transcript)).replaceAll(
-            yield* encodeStringJson("/workspace"),
-            yield* encodeStringJson(cwd),
+        const localTranscript = withCodexReplayConfigReads(
+          yield* decodeReplayTranscriptJson(
+            (yield* encodeReplayTranscriptJson(transcript)).replaceAll(
+              yield* encodeStringJson("/workspace"),
+              yield* encodeStringJson(cwd),
+            ),
           ),
         );
         const replayDriver = yield* CodexReplay.makeReplayDriver(localTranscript);
@@ -4762,7 +4933,9 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           Effect.provide(
             ProviderReplayHarness.layerWithRegistry(
               { name: "codex-background-stop-untracked", runtimePolicyOverride: { cwd } },
-              CodexAdapterV2Testkit.layer({ transcript: localTranscript }),
+              CodexAdapterV2Testkit.layer({
+                transcript: withCodexReplayConfigReads(localTranscript),
+              }),
               { runEffectWorker: false },
             ),
           ),

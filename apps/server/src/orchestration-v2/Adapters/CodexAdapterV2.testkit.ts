@@ -43,6 +43,56 @@ export const CodexOrchestratorReplayHarnessError = Schema.Union([
 ]);
 export type CodexOrchestratorReplayHarnessError = typeof CodexOrchestratorReplayHarnessError.Type;
 
+const decodeReplayRequestId = Schema.decodeUnknownSync(Schema.Number);
+
+export function withCodexReplayConfigReads(
+  transcript: CodexReplay.CodexAppServerReplayTranscript,
+  responses: ReadonlyArray<unknown> = [],
+): CodexReplay.CodexAppServerReplayTranscript {
+  const entries: Array<CodexReplay.CodexAppServerReplayEntry> = [];
+  const requestIds = new Map<unknown, number>();
+  let offset = 0;
+  let turn = 0;
+  for (const entry of transcript.entries) {
+    if (entry.type === "runtime_exit") {
+      entries.push(entry);
+      continue;
+    }
+    const frame = entry.frame as Record<string, unknown>;
+    if (entry.type === "expect_outbound" && typeof frame.method === "string" && "id" in frame) {
+      const id = decodeReplayRequestId(frame.id);
+      if (frame.method === "initialize") {
+        requestIds.clear();
+        offset = 0;
+      }
+      if (frame.method === "turn/start") {
+        const params = frame.params as Record<string, unknown>;
+        entries.push({
+          type: "expect_outbound",
+          label: "config/read",
+          frame: { id: id + offset, method: "config/read", params: { cwd: params.cwd ?? null } },
+        });
+        entries.push({
+          type: "emit_inbound",
+          label: "config/read",
+          frame: {
+            id: id + offset,
+            result: responses[turn++] ?? { config: {}, origins: {} },
+          },
+        });
+        offset++;
+      }
+      requestIds.set(id, id + offset);
+      entries.push({ ...entry, frame: { ...frame, id: id + offset } });
+    } else if (entry.type === "emit_inbound" && !("method" in frame) && "id" in frame) {
+      entries.push({ ...entry, frame: { ...frame, id: requestIds.get(frame.id) ?? frame.id } });
+    } else {
+      entries.push(entry);
+    }
+  }
+  return { ...transcript, entries };
+}
+
 export function withCodexReplayChildMetadata(
   client: CodexClient.CodexAppServerClient["Service"],
   transcript: CodexReplay.CodexAppServerReplayTranscript,

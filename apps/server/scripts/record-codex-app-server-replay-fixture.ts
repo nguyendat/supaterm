@@ -1,6 +1,10 @@
 import * as NodeOS from "node:os";
 
 import { CODEX_THREAD_CONFIG } from "../src/orchestration-v2/Adapters/CodexAdapterV2.ts";
+import {
+  resolveCodexReasoningSummary,
+  sanitizeCodexConfigReadFrame,
+} from "../src/provider/CodexReasoningSummary.ts";
 import { revertCodexThread } from "../src/provider/CodexThreadRevert.ts";
 import { buildCodexInitializeParams } from "../src/provider/CodexProvider.ts";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
@@ -1186,17 +1190,21 @@ function layerCodex({ recorder }: { readonly recorder: Recorder }) {
       const updateVersion = version ? recorder.setVersion(version) : Effect.void;
 
       const label = method ?? correlatedRequestMethod;
+      const frame =
+        event.direction === "incoming" && correlatedRequestMethod === "config/read"
+          ? sanitizeCodexConfigReadFrame(event.payload)
+          : event.payload;
       const record =
         event.direction === "outgoing"
           ? {
               type: "expect_outbound",
               ...(label ? { label } : {}),
-              frame: event.payload,
+              frame,
             }
           : {
               type: "emit_inbound",
               ...(label ? { label } : {}),
-              frame: event.payload,
+              frame,
             };
 
       return Effect.gen(function* () {
@@ -1382,12 +1390,13 @@ function runReplaySession({
       step: TurnReplayStep,
     ) =>
       Effect.gen(function* () {
+        const cwd = process.cwd();
         const turnParams: TurnStartParams = {
           approvalPolicy: "never",
           sandboxPolicy: { type: "dangerFullAccess" },
-          cwd: process.cwd(),
+          cwd,
           model,
-          summary: "detailed",
+          summary: yield* resolveCodexReasoningSummary(client.raw, cwd),
           approvalsReviewer: "user",
           ...(run.interactionMode === "plan"
             ? { collaborationMode: planCollaborationMode(model) }
@@ -1397,7 +1406,6 @@ function runReplaySession({
           input: turnInput(step.prompt),
           threadId,
         };
-
         if (step.type === "steeredTurn") {
           approvalGate = yield* Deferred.make<void>();
         }
