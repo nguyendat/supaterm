@@ -176,13 +176,34 @@ describe("Micro connection lifecycle", () => {
     const micro = new MicroController(null, storage);
     micro.assign(4, { environmentId: "remote", threadId: "thread-9" });
     micro.setMicrophone("focus");
+    micro.setKeyAction("ACT07", "send");
+    micro.setKeyAction("ACT08", null);
     const restored = new MicroController(null, storage);
     expect(restored.getSnapshot().config.slots[4]).toEqual({
       environmentId: "remote",
       threadId: "thread-9",
     });
     expect(restored.getSnapshot().config.microphone).toBe("focus");
+    expect(restored.getSnapshot().config.keyBindings).toEqual({ ACT07: "send", ACT08: null });
+    restored.resetLayout();
+    expect(restored.getSnapshot().config.keyBindings).toEqual({});
+    expect(restored.getSnapshot().config.microphone).toBeNull();
+    expect(restored.getSnapshot().config.slots[4]?.threadId).toBe("thread-9");
     restored.assign(4, null);
     expect(restored.getSnapshot().config.slots[4]).toBeNull();
+  });
+
+  it("retains preferences saved before command key remapping", () => {
+    const micro = new MicroController(null, {
+      getItem: () =>
+        JSON.stringify({
+          slots: [{ environmentId: "remote", threadId: "saved" }],
+          microphone: "focus",
+        }),
+      setItem: () => undefined,
+    });
+    expect(micro.getSnapshot().config.slots[0]?.threadId).toBe("saved");
+    expect(micro.getSnapshot().config.microphone).toBe("focus");
+    expect(micro.getSnapshot().config.keyBindings).toBeUndefined();
   });
 });

@@ -2,7 +2,14 @@
 
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { MicroInput, type MicroAction, type MicroMappedAction } from "./input.ts";
+import {
+  MicroInput,
+  MicroKeyBindingsSchema,
+  MicroMappedActionSchema,
+  type MicroAction,
+  type MicroCommandKey,
+  type MicroMappedAction,
+} from "./input.ts";
 import type {
   MicroHid,
   MicroHidDevice,
@@ -29,9 +36,8 @@ const ThreadAssignment = Schema.Struct({
 export type ThreadAssignment = typeof ThreadAssignment.Type;
 const Config = Schema.Struct({
   slots: Schema.Array(Schema.NullOr(ThreadAssignment)).check(Schema.isMaxLength(MICRO_SLOT_COUNT)),
-  microphone: Schema.NullOr(
-    Schema.Literals(["fast", "approve", "reject", "fork", "send", "focus", "effortMenu"]),
-  ),
+  microphone: Schema.NullOr(MicroMappedActionSchema),
+  keyBindings: Schema.optional(MicroKeyBindingsSchema),
 });
 export type MicroConfig = typeof Config.Type;
 const configCodec = Schema.fromJsonString(Config);
@@ -126,6 +132,17 @@ export class MicroController {
 
   setMicrophone(action: MicroMappedAction | null): void {
     this.saveConfig({ ...this.snapshot.config, microphone: action });
+  }
+
+  setKeyAction(key: MicroCommandKey, action: MicroMappedAction | null): void {
+    this.saveConfig({
+      ...this.snapshot.config,
+      keyBindings: { ...this.snapshot.config.keyBindings, [key]: action },
+    });
+  }
+
+  resetLayout(): void {
+    this.saveConfig({ ...this.snapshot.config, keyBindings: {}, microphone: null });
   }
 
   private saveConfig(config: MicroConfig): void {
@@ -245,7 +262,11 @@ export class MicroController {
         this.pendingStatus = null;
       }
       if (this.snapshot.phase !== "connected") continue;
-      const action = this.input.read(message, this.snapshot.config.microphone);
+      const action = this.input.read(
+        message,
+        this.snapshot.config.microphone,
+        this.snapshot.config.keyBindings,
+      );
       if (action) for (const listener of this.actionListeners) listener(action);
     }
   };

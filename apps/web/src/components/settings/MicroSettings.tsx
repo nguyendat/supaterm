@@ -1,27 +1,44 @@
 import { getMicroController, useMicro } from "@supacode/micro/react";
-import { MICRO_SLOTS } from "@supacode/micro/protocol";
-import { ACTION_KEY_LABELS, MICRO_ACTIONS, type MicroMappedAction } from "@supacode/micro/input";
-import { useMemo } from "react";
+import { MICRO_ACTIONS, type MicroMappedAction } from "@supacode/micro/input";
+import { useMemo, useState } from "react";
 import { useThreadShells } from "../../state/entities";
 import { useEnvironments } from "../../state/environments";
+import { InlineConfirmButton } from "../InlineConfirm";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
+import { MicroKeyboard, type MicroEditTarget } from "./MicroKeyboard";
+import { MicroKeyEditor, type MicroKeyUpdate } from "./MicroKeyEditor";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+
+const CONNECTION_LABELS = {
+  connected: "Connected",
+  disconnected: "Disconnected",
+  connecting: "Connecting…",
+  disconnecting: "Disconnecting…",
+  unsupported: "Unavailable",
+  error: "Connection failed",
+} as const;
 
 export function MicroSettings() {
   const snapshot = useMicro();
   const threads = useThreadShells();
   const { environments } = useEnvironments();
   const micro = getMicroController();
+  const [editing, setEditing] = useState<MicroEditTarget | null>(null);
   const choices = useMemo(
     () =>
       threads
         .filter((thread) => thread.archivedAt === null)
         .map((thread) => ({
+          ref: { environmentId: thread.environmentId, threadId: thread.id },
           value: JSON.stringify([thread.environmentId, thread.id]),
-          thread,
-          label: `${thread.title} · ${environments.find((environment) => environment.environmentId === thread.environmentId)?.label ?? "Environment"}`,
+          title: thread.title,
+          label:
+            thread.title +
+            " · " +
+            (environments.find((environment) => environment.environmentId === thread.environmentId)
+              ?.label ?? "Environment"),
         }))
         .sort((a, b) => a.label.localeCompare(b.label)),
     [threads, environments],
@@ -29,39 +46,53 @@ export function MicroSettings() {
   const save = (operation: () => void) => {
     try {
       operation();
+      return true;
     } catch (error) {
       toastManager.add({
         type: "error",
         title: "Could not save Micro settings",
         description: error instanceof Error ? error.message : "Browser storage is unavailable.",
       });
+      return false;
     }
   };
+  const saveKey = (update: MicroKeyUpdate) =>
+    save(() => {
+      if (update.kind === "agent") micro.assign(update.slot, update.assignment);
+      else if (update.kind === "command") micro.setKeyAction(update.key, update.action);
+      else micro.setMicrophone(update.action);
+    });
   const connected = snapshot.phase === "connected";
   return (
     <SettingsPageContainer>
-      <SettingsSection id="micro-controller" title="Micro controller">
+      <SettingsSection id="micro-controller" title="Connection">
         <SettingsRow
           title="Codex Micro"
           description={
             snapshot.error ??
             (connected
-              ? `${snapshot.productName ?? "Micro"}${snapshot.firmware ? ` · Firmware ${snapshot.firmware}` : ""}`
+              ? (snapshot.productName ?? "Micro") +
+                (snapshot.firmware ? " · Firmware " + snapshot.firmware : "")
               : "Connect your Work Louder Micro to control Supacode.")
           }
           control={
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={snapshot.phase === "unsupported" || snapshot.phase === "disconnecting"}
-              onClick={() => {
-                void (connected || snapshot.phase === "connecting"
-                  ? micro.disconnect()
-                  : micro.connect());
-              }}
-            >
-              {connected ? "Disconnect" : snapshot.phase === "connecting" ? "Cancel" : "Connect"}
-            </Button>
+            <div className="flex items-center gap-3">
+              <span role="status" className="text-xs text-muted-foreground">
+                {CONNECTION_LABELS[snapshot.phase]}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={snapshot.phase === "unsupported" || snapshot.phase === "disconnecting"}
+                onClick={() => {
+                  void (connected || snapshot.phase === "connecting"
+                    ? micro.disconnect()
+                    : micro.connect());
+                }}
+              >
+                {connected ? "Disconnect" : snapshot.phase === "connecting" ? "Cancel" : "Connect"}
+              </Button>
+            </div>
           }
         />
         {snapshot.phase === "unsupported" ? (
@@ -70,62 +101,44 @@ export function MicroSettings() {
             description="Use the desktop app or a browser with WebHID support."
           />
         ) : null}
-        {MICRO_SLOTS.map((slot) => {
-          const assignment = snapshot.config.slots[slot];
-          const value = assignment
-            ? JSON.stringify([assignment.environmentId, assignment.threadId])
-            : "none";
-          const selected = choices.find((choice) => choice.value === value);
-          return (
-            <SettingsRow
-              key={slot}
-              title={`Agent Key ${slot + 1}`}
-              description="Keeps its assigned thread when the sidebar order changes."
-              control={
-                <Select
-                  value={value}
-                  onValueChange={(next) => {
-                    const choice = choices.find((candidate) => candidate.value === next);
-                    if (next !== "none" && !choice) return;
-                    save(() =>
-                      micro.assign(
-                        slot,
-                        choice
-                          ? {
-                              environmentId: choice.thread.environmentId,
-                              threadId: choice.thread.id,
-                            }
-                          : null,
-                      ),
-                    );
-                  }}
-                >
-                  <SelectTrigger size="sm" aria-label={`Assign Agent Key ${slot + 1}`}>
-                    <SelectValue>
-                      {selected?.label ?? (assignment ? "Thread unavailable" : "Unassigned")}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup align="end">
-                    <SelectItem value="none">Unassigned</SelectItem>
-                    {choices.map((choice) => (
-                      <SelectItem key={choice.value} value={choice.value}>
-                        {choice.label}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
-              }
-            />
-          );
-        })}
-        <SettingsRow title="Command keys" description={ACTION_KEY_LABELS.join(" · ")} />
+      </SettingsSection>
+      <SettingsSection
+        id="micro-layout"
+        title="Layout"
+        variant="plain"
+        headerAction={
+          <InlineConfirmButton
+            size="xs"
+            variant="ghost-muted"
+            label="Reset layout"
+            confirmLabel="Restore defaults"
+            tooltip="Restore factory command actions and clear the microphone action."
+            confirmTooltip="Restore the default key actions?"
+            onConfirm={() => {
+              save(() => micro.resetLayout());
+            }}
+          />
+        }
+      >
+        <MicroKeyboard config={snapshot.config} choices={choices} onEdit={setEditing} />
+        <p className="px-4 pt-3 text-xs text-muted-foreground">
+          Click a key to change its assignment. The six Agent Keys keep their assigned threads.
+        </p>
+      </SettingsSection>
+      <SettingsSection id="micro-options" title="Options">
         <SettingsRow
-          title="Dial and joystick"
-          description="Turn the dial to change reasoning effort. Press it for the effort menu. The joystick opens effort, model, host, or workspace controls."
+          title="Agent Keys"
+          description="Assign each key to a local or remote thread in the layout above."
+          control={<span className="text-sm text-muted-foreground">Fixed assignments</span>}
+        />
+        <SettingsRow
+          title="Dial"
+          description="Turn to change the next prompt’s supported reasoning effort. Click the dial in the layout to choose its press action."
+          control={<span className="text-sm text-muted-foreground">Reasoning effort</span>}
         />
         <SettingsRow
           title="Microphone key"
-          description="Choose an action for the wide key. Voice recording is not available here yet."
+          description="The wide key triggers one action. Voice recording is not available here yet."
           control={
             <Select
               value={snapshot.config.microphone ?? "none"}
@@ -154,6 +167,15 @@ export function MicroSettings() {
           }
         />
       </SettingsSection>
+      {editing ? (
+        <MicroKeyEditor
+          target={editing}
+          config={snapshot.config}
+          choices={choices}
+          onSave={saveKey}
+          onClose={() => setEditing(null)}
+        />
+      ) : null}
     </SettingsPageContainer>
   );
 }

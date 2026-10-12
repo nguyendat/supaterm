@@ -18,15 +18,42 @@ export type MicroAction =
   | { type: "effort"; direction: 1 | -1 }
   | { type: "joystick"; direction: "up" | "right" | "down" | "left" };
 
-export const ACTION_KEY_LABELS = ["Fast mode", "Approve", "Reject", "Fork", "Send"] as const;
-const DEFAULT_KEYS: Readonly<Record<string, MicroMappedAction>> = {
+export const MicroMappedActionSchema = Schema.Literals([
+  "fast",
+  "approve",
+  "reject",
+  "fork",
+  "send",
+  "focus",
+  "effortMenu",
+]);
+const KeyAction = Schema.optional(Schema.NullOr(MicroMappedActionSchema));
+export const MicroKeyBindingsSchema = Schema.Struct({
+  ACT06: KeyAction,
+  ACT07: KeyAction,
+  ACT08: KeyAction,
+  ACT09: KeyAction,
+  ACT12: KeyAction,
+  ENC_CLK: KeyAction,
+});
+export type MicroKeyBindings = typeof MicroKeyBindingsSchema.Type;
+export type MicroCommandKey = keyof MicroKeyBindings;
+export const DEFAULT_MICRO_KEY_BINDINGS = {
   ACT06: "fast",
   ACT07: "approve",
   ACT08: "reject",
   ACT09: "fork",
   ACT12: "send",
   ENC_CLK: "effortMenu",
-};
+} as const satisfies Readonly<Record<MicroCommandKey, MicroMappedAction>>;
+
+export function resolveMicroKeyAction(key: MicroCommandKey, bindings: MicroKeyBindings = {}) {
+  return Object.hasOwn(bindings, key) ? (bindings[key] ?? null) : DEFAULT_MICRO_KEY_BINDINGS[key];
+}
+
+function isCommandKey(key: string): key is MicroCommandKey {
+  return Object.hasOwn(DEFAULT_MICRO_KEY_BINDINGS, key);
+}
 
 const KeyEvent = Schema.Struct({ k: Schema.String, act: Schema.Int });
 const RadialEvent = Schema.Struct({
@@ -45,7 +72,11 @@ export class MicroInput {
     this.joystickActive = false;
   }
 
-  read(message: RpcMessage, microphone: MicroMappedAction | null): MicroAction | null {
+  read(
+    message: RpcMessage,
+    microphone: MicroMappedAction | null,
+    bindings: MicroKeyBindings = {},
+  ): MicroAction | null {
     const method = message.method ?? message.m;
     const params = message.params ?? message.p;
     if (method === "v.oai.rad") {
@@ -77,7 +108,7 @@ export class MicroInput {
     }
     const slot = /^AG0([0-5])$/.exec(k)?.[1];
     if (slot !== undefined) return { type: "thread", slot: Number(slot) };
-    const action = DEFAULT_KEYS[k];
+    const action = isCommandKey(k) ? resolveMicroKeyAction(k, bindings) : null;
     return action ? { type: action } : null;
   }
 }

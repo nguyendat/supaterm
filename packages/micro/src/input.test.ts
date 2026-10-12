@@ -29,6 +29,15 @@ describe("Micro controls", () => {
     expect(input.read(key("ACT11"), "send")).toEqual({ type: "send" });
   });
 
+  it("remaps command presses and allows a key to be unassigned", () => {
+    const input = new MicroInput();
+    expect(input.read(key("ACT07"), null, { ACT07: "focus" })).toEqual({ type: "focus" });
+    input.read(key("ACT07", 0), null);
+    expect(input.read(key("ACT07"), null, { ACT07: null })).toBeNull();
+    expect(input.read(key("ENC_CLK"), null, { ENC_CLK: "send" })).toEqual({ type: "send" });
+    expect(input.read(key("ACT06"), null, { ACT07: null })).toEqual({ type: "fast" });
+  });
+
   it("accepts dial detents with non-key act values", () => {
     const input = new MicroInput();
     expect(input.read(key("ENC_CW", 2), null)).toEqual({ type: "effort", direction: 1 });
