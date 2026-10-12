@@ -12,11 +12,7 @@ import {
 } from "@supacode/contracts";
 import type { AcpRegistryDistributionPreference } from "../settings.ts";
 import type { AcpRegistrySettings } from "../settings.ts";
-import {
-  HostProcessArchitecture,
-  HostProcessEnvironment,
-  HostProcessPlatform,
-} from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import {
   mergePathEntries,
   resolveSpawnCommand,
@@ -631,9 +627,9 @@ export const makeAcpRegistryCatalog = Effect.fn("AcpRegistryCatalog.make")(funct
   const httpClient = yield* HttpClient.HttpClient;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const { settings: hostSettings } = yield* ProviderHost.ProviderHost;
-  const platform = yield* HostProcessPlatform;
-  const architecture = yield* HostProcessArchitecture;
-  const hostEnvironment = yield* HostProcessEnvironment;
+  const platform = yield* HostProcess.Platform;
+  const architecture = yield* HostProcess.Architecture;
+  const hostEnvironment = yield* HostProcess.Environment;
   const resolveExecutable = yield* SpawnExecutableResolution;
   const platformTarget = resolveAcpRegistryPlatformTarget(platform, architecture);
   const registryUrl = input.registryUrl ?? ACP_REGISTRY_URL;

@@ -1,3 +1,4 @@
+import { SourceControlProviderKind } from "@supacode/contracts";
 import type { VcsStatusResult } from "@supacode/contracts";
 import { WORKTREE_BRANCH_PREFIX } from "@supacode/shared/git";
 import { assert, describe, it } from "vite-plus/test";
@@ -344,7 +345,7 @@ describe("when: source control provider uses merge requests", () => {
     const gitlabStatus = status({
       aheadCount: 2,
       sourceControlProvider: {
-        kind: "gitlab",
+        kind: SourceControlProviderKind.make("gitlab"),
         name: "GitLab",
         baseUrl: "https://gitlab.com",
       },
@@ -366,7 +367,7 @@ describe("when: source control provider uses merge requests", () => {
 });
 
 describe("when: ref is clean, up to date, and has no open PR", () => {
-  it("enables create PR when synced with upstream but ahead of default", () => {
+  it("enables create PR when synced with upstream but ahead of default, even with local changes", () => {
     const syncedFeature = status({
       aheadCount: 0,
       behindCount: 0,
@@ -384,6 +385,12 @@ describe("when: ref is clean, up to date, and has no open PR", () => {
 
     const items = buildMenuItems(syncedFeature, false);
     assert.equal(items.find((item) => item.id === "pr")?.disabled, false);
+
+    const dirtyFeature = { ...syncedFeature, hasWorkingTreeChanges: true };
+    assert.equal(
+      buildMenuItems(dirtyFeature, false).find((item) => item.id === "pr")?.disabled,
+      false,
+    );
   });
 
   it("resolveQuickAction returns disabled no-action state", () => {
@@ -551,7 +558,7 @@ describe("when: working tree has local changes", () => {
     ]);
   });
 
-  it("buildMenuItems enables push for ahead commits while local changes remain uncommitted", () => {
+  it("buildMenuItems enables push and create PR for ahead commits while local changes remain uncommitted", () => {
     const items = buildMenuItems(
       status({
         refName: "feature/test",
@@ -585,7 +592,7 @@ describe("when: working tree has local changes", () => {
       {
         id: "pr",
         label: "Create PR",
-        disabled: true,
+        disabled: false,
         icon: "pr",
         kind: "open_dialog",
         dialogAction: "create_pr",

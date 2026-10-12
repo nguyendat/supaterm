@@ -2,6 +2,7 @@ import { CheckIcon } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 
 import { useInlineConfirm } from "~/hooks/useInlineConfirm";
+import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 
 import { Button, type ButtonSize, type ButtonVariant } from "./ui/button";
@@ -45,9 +46,7 @@ export function InlineConfirmLabel({
   useLayoutEffect(() => {
     const idleLabel = idleRef.current;
     const confirmLabel = confirmRef.current;
-    if (idleLabel === null || confirmLabel === null || typeof ResizeObserver === "undefined") {
-      return;
-    }
+    if (idleLabel === null || confirmLabel === null) return;
     const layoutWidth = (element: HTMLElement) =>
       Math.ceil(Number.parseFloat(getComputedStyle(element).width) || 0);
     const measure = () => {
@@ -55,10 +54,7 @@ export function InlineConfirmLabel({
       setWidths({ idle: layoutWidth(idleLabel), confirm: layoutWidth(confirmLabel) });
     };
     measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(idleLabel);
-    observer.observe(confirmLabel);
-    return () => observer.disconnect();
+    return observeResize([idleLabel, confirmLabel], measure);
   }, []);
 
   return (

@@ -1,6 +1,7 @@
 import { pendingThreadCreationLabel } from "@supacode/client-runtime/pending-thread-creation";
 import { useSelectedThreadComposerMetadata } from "../../state/use-thread-detail";
 import { useAtomValue } from "@effect/atom-react";
+import { useChildThreadInputs } from "../../state/entities";
 import { UsageLimitRecoveryCard } from "./UsageLimitRecoveryCard";
 import { useNavigation } from "@react-navigation/native";
 import type { WorktreeSetupCardProps } from "./worktree-setup-card";
@@ -15,6 +16,8 @@ import { useKeyboardChatComposerInset, useKeyboardScrollToEnd } from "@legendapp
 import { resolveProviderSkillsForCwd } from "@supacode/client-runtime/providerSkills";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { HeaderHeightContext } from "@react-navigation/elements";
+import { NativeLayoutObserver } from "../../native/NativeLayoutObserver";
+import { deriveBottomControlInsets, type NativeLayoutMetrics } from "../../lib/reserved-regions";
 import type {
   EnvironmentId,
   MessageId,
@@ -85,6 +88,8 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useWorkspaceContentWidth } from "../layout/workspace-content-width";
+import { useNativeWorkspaceColumnsSupported } from "../../native/NativeWorkspaceColumns";
+import { useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { collectProviderUsageLimits } from "@supacode/shared/usageLimits";
 import type { ComposerEditorHandle } from "../../components/ComposerEditor";
@@ -170,9 +175,15 @@ export interface ThreadDetailScreenProps {
    * The server has not created this thread yet. "preparing" runs while the
    * queued creation is delivered (a worktree may be checking out); "failed"
    * is a rejected creation whose content went back to the project draft.
+   * `serverOwned` marks a thread the server already created that is still
+   * setting up its worktree; follow-ups queue on the server behind that setup.
    */
   readonly creationState:
-    | { readonly kind: "preparing"; readonly preparingWorktree: boolean }
+    | {
+        readonly kind: "preparing";
+        readonly preparingWorktree: boolean;
+        readonly serverOwned: boolean;
+      }
     | { readonly kind: "failed"; readonly reason: string; readonly onEditTask: () => void }
     | null;
   readonly activePendingApproval: PendingApproval | null;
@@ -363,6 +374,7 @@ const USER_INPUT_TOGGLE_TIMING = {
 };
 
 export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: ThreadDetailScreenProps) {
+  const usesNativeWorkspaceColumns = useNativeWorkspaceColumnsSupported();
   const navigation = useNavigation();
   const { session: voiceInputSession } = useGlobalVoiceInput();
   const { reportedModelSelection, queuedCount, turnSubagents } =
@@ -440,9 +452,17 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     }
   }, []);
   const windowHeight = useWindowDimensions().height;
-  const navigationHeaderHeight = useContext(HeaderHeightContext) || insets.top + 44;
+  const navigationHeaderHeight = useContext(HeaderHeightContext) ?? insets.top + 44;
+  const [screenMetrics, setScreenMetrics] = useState<NativeLayoutMetrics | null>(null);
+  const columnMetrics = useNativeColumnLayoutMetrics();
+  const nativeMetrics = usesNativeWorkspaceColumns ? columnMetrics : screenMetrics;
+  const controlInsets = deriveBottomControlInsets(nativeMetrics);
   const agentLabel = `${props.selectedThread.modelSelection.instanceId} agent`;
   const selectedThreadKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
+  const childThreadInputs = useChildThreadInputs({
+    environmentId: props.environmentId,
+    threadId: props.selectedThread.id,
+  });
   const composerError = useAtomValue(threadComposerErrorsAtom)[selectedThreadKey]?.message ?? null;
   const agentsSegment = resolveSubagentPillSegment(turnSubagents);
   const composerEditorRef = useRef<ComposerEditorHandle>(null);
@@ -554,6 +574,24 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     }
     if (threadSyncLabel !== null) {
       return { kind: "syncing", label: threadSyncLabel };
+    }
+    const childInput = childThreadInputs[0];
+    if (childInput && contentPresentationKind === "ready") {
+      return {
+        kind: "child-input",
+        label:
+          childThreadInputs.length === 1
+            ? "Subagent needs input"
+            : `${childThreadInputs.length} subagents need input`,
+        accessibilityLabel: `Open question from ${childInput.title}`,
+        onPress: () => {
+          Keyboard.dismiss();
+          navigation.navigate("Thread", {
+            environmentId: props.environmentId,
+            threadId: childInput.id,
+          });
+        },
+      };
     }
     if (props.isCompacting && contentPresentationKind === "ready") {
       return { kind: "compacting" };
@@ -884,8 +922,14 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   // Assign both layouts explicitly so the dock always follows its current parent.
   const composerWidthStyle = useAnimatedStyle(() =>
     isSplitLayout && workspaceContentWidth !== null
-      ? { width: workspaceContentWidth.value }
-      : { width: "100%" },
+      ? {
+          width: Math.max(
+            0,
+            workspaceContentWidth.value - controlInsets.left - controlInsets.right,
+          ),
+          right: undefined,
+        }
+      : { width: undefined, right: controlInsets.right },
   );
   const selectedInstanceId = props.selectedThread.modelSelection.instanceId;
   useStreamingHaptics(props.selectedThread.id, props.selectedThreadFeed);
@@ -1178,6 +1222,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
 
   return (
     <View className="flex-1">
+      {!usesNativeWorkspaceColumns ? <NativeLayoutObserver onChange={setScreenMetrics} /> : null}
       {showContent ? (
         <View
           style={{ flex: 1 }}
@@ -1235,6 +1280,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
               }
               contentMaxWidth={contentMaxWidth}
               historyControls={props.historyControls}
+              contentSideInsets={nativeMetrics?.safeArea}
               layoutVariant={layoutVariant}
               usesAutomaticContentInsets={props.usesAutomaticContentInsets}
               onHeaderMaterialVisibilityChange={props.onHeaderMaterialVisibilityChange}
@@ -1280,7 +1326,15 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
             <Animated.View
               layout={COMPOSER_LAYOUT_TRANSITION}
               pointerEvents="box-none"
-              style={[{ position: "absolute", bottom: 0, left: 0 }, composerWidthStyle]}
+              style={[
+                {
+                  position: "absolute",
+                  bottom: controlInsets.bottom,
+                  left: controlInsets.left,
+                  right: controlInsets.right,
+                },
+                composerWidthStyle,
+              ]}
             >
               {/* No paddingTop here: the overlay's measured height becomes the
                 list's bottom inset, so any padding above the pill/composer
@@ -1496,11 +1550,12 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                         canStopThread={props.canStopThread}
                         environmentId={props.environmentId}
                         projectCwd={props.threadCwd ?? props.projectWorkspaceRoot}
-                        // Follow-ups typed during setup wait in the draft: queueing
-                        // them against a thread id the server may still reject
-                        // would strand them in the outbox.
+                        // Follow-ups typed before the server creates the thread wait in
+                        // the draft: queueing them against a thread id the server may
+                        // still reject would strand them in the outbox.
                         sendBlockedReason={
-                          props.creationState?.kind === "preparing"
+                          props.creationState?.kind === "preparing" &&
+                          !props.creationState.serverOwned
                             ? pendingThreadCreationLabel({
                                 connected: props.connectionStateLabel === "connected",
                                 preparingWorktree: props.creationState.preparingWorktree,

@@ -3,7 +3,7 @@ import * as NodeChildProcess from "node:child_process";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
-import { HostProcessPlatform } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -67,7 +67,7 @@ const recordFromDeadServer = (stateDir: string, server: { readonly pid: number }
     yield* previousServer.exited;
   });
 
-const hostPlatform = HostProcessPlatform.defaultValue();
+const hostPlatform = HostProcess.Platform.defaultValue();
 // procps accepts the same `ps` flags as macOS, so Linux also covers the macOS path.
 const observedPlatforms: ReadonlyArray<NodeJS.Platform> =
   hostPlatform === "linux" ? ["linux", "darwin"] : hostPlatform === "darwin" ? ["darwin"] : [];
@@ -75,7 +75,7 @@ const observedPlatforms: ReadonlyArray<NodeJS.Platform> =
 describe.each(observedPlatforms)("OpenCodeServerLedger observing as %s", (platform) => {
   const provideHost = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
-      Effect.provideService(HostProcessPlatform, platform),
+      Effect.provideService(HostProcess.Platform, platform),
       Effect.provide(NodeServices.layer),
     );
 
@@ -94,6 +94,32 @@ describe.each(observedPlatforms)("OpenCodeServerLedger observing as %s", (platfo
       expect(yield* orphan.exited).toBe("SIGTERM");
       expect(groupExists(orphan.pid)).toBe(false);
       expect(yield* fs.readDirectory(path.join(stateDir, "opencode-servers"))).toEqual([]);
+    }).pipe(provideHost),
+  );
+
+  it.live("stops a server recorded before the agent wrapper exec'd into it", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "supacode-opencode-ledger-" });
+      const orphan = yield* spawnGroup(SERVE_ARGS);
+      yield* recordFromDeadServer(stateDir, orphan);
+      const entryPath = path.join(stateDir, "opencode-servers", `${orphan.pid}.json`);
+      // The same process, seen while it still ran the wrapper that then exec'd the server.
+      const entry = yield* fs.readFileString(entryPath);
+      yield* fs.writeFileString(
+        entryPath,
+        entry.replace(
+          /"command":"[^"]+"/,
+          `"command":"/bin/sh -c launch supacode-agent /usr/local/bin/opencode ${SERVE_ARGS.join(" ")}"`,
+        ),
+      );
+
+      const restarted = yield* OpenCodeServerLedger.make({ stateDir });
+      yield* restarted.reapOrphans;
+
+      expect(yield* orphan.exited).toBe("SIGTERM");
+      expect(groupExists(orphan.pid)).toBe(false);
     }).pipe(provideHost),
   );
 
@@ -151,7 +177,7 @@ describe.each(observedPlatforms)("OpenCodeServerLedger observing as %s", (platfo
       const entryPath = path.join(stateDir, "opencode-servers", `${unrelated.pid}.json`);
       // Same pid and start second, but not the server Supacode started.
       const entry = yield* fs.readFileString(entryPath);
-      yield* fs.writeFileString(entryPath, entry.replace("--port=4096", "--port=4097"));
+      yield* fs.writeFileString(entryPath, entry.replaceAll("--port=4096", "--port=4097"));
 
       const restarted = yield* OpenCodeServerLedger.make({ stateDir });
       yield* restarted.reapOrphans;

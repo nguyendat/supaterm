@@ -95,6 +95,10 @@ export function useThreadShell(ref: ScopedThreadRef | null): EnvironmentThreadSh
   );
 }
 
+export function useChildThreadInputs(ref: ScopedThreadRef) {
+  return useAtomValue(environmentThreadShells.childThreadInputsAtom(ref));
+}
+
 export function useLiveThreadLinkLabels(markdown: string, environmentId: EnvironmentId): string {
   const titles = useAtomValue(
     hasThreadLinks(markdown) ? threadTitlesAtom(environmentId) : EMPTY_THREAD_TITLES_ATOM,

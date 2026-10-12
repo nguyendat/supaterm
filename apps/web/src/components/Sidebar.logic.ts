@@ -1,4 +1,5 @@
 import { backgroundWorkHoldsCompletion } from "@supacode/shared/orchestrationV2PendingBackgroundWork";
+import { threadPullRequestSearchTerms } from "@supacode/shared/threadPullRequests";
 import * as React from "react";
 import {
   isAtomCommandInterrupted,
@@ -20,6 +21,7 @@ import {
   type ThreadSortInput,
 } from "../lib/threadSort";
 import type { SidebarThreadSummary, Thread } from "../types";
+import { normalizeSearchText } from "../lib/utils";
 import { isLatestRunSettled } from "../session-logic";
 import { resolveServerBackedAppStageLabel } from "../branding.logic";
 
@@ -982,6 +984,21 @@ export {
 // (state/thread-sort) so web and mobile compute identical pinned orders.
 export { pinOrderKeyBetween } from "@supacode/client-runtime/state/thread-sort";
 export { sortPinnedThreadsByOrderKey as sortPinnedThreadsForSidebar } from "@supacode/client-runtime/state/thread-sort";
+
+/**
+ * Whether a PR's search terms contain every whitespace-separated token of the
+ * query. Search results use this to pick the PR number to show, so it has to
+ * accept the multi-token queries the command palette matches on.
+ */
+export function pullRequestMatchesSearchQuery(
+  pullRequest: Parameters<typeof threadPullRequestSearchTerms>[0],
+  query: string,
+): boolean {
+  const normalizedQuery = normalizeSearchText(query);
+  if (normalizedQuery.length === 0) return false;
+  const haystack = normalizeSearchText(threadPullRequestSearchTerms(pullRequest).join(" "));
+  return normalizedQuery.split(" ").every((token) => haystack.includes(token));
+}
 
 export function filterSidebarProjectScopeItems<TItem extends { readonly value: string }>(input: {
   items: readonly TItem[];

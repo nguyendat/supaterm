@@ -1,3 +1,4 @@
+import { SourceControlProviderKind } from "@supacode/contracts";
 import { vi } from "vite-plus/test";
 import {
   EnvironmentId,
@@ -37,7 +38,7 @@ const TARGET = new PrimaryConnectionTarget({
 
 const PUBLISH_RESULT: SourceControlPublishRepositoryResult = {
   repository: {
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     nameWithOwner: "supabitapp/supacode-next",
     url: "https://github.com/supabitapp/supacode-next",
     sshUrl: "git@github.com:supabitapp/supacode-next.git",
@@ -142,7 +143,7 @@ describe("source control environment atoms", () => {
             environmentId: TARGET.environmentId,
             input: {
               cwd: "/repo",
-              provider: "github",
+              provider: SourceControlProviderKind.make("github"),
               repository: "supabitapp/supacode-next",
               visibility: "private",
             },
@@ -158,7 +159,7 @@ describe("source control environment atoms", () => {
             environmentId: TARGET.environmentId,
             input: {
               cwd: "/repo",
-              provider: "github",
+              provider: SourceControlProviderKind.make("github"),
               repository: "supabitapp/supacode-next",
               visibility: "private",
             },

@@ -1,9 +1,10 @@
+import { AppActivityIndicator } from "../../components/AppActivityIndicator";
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { type EnvironmentMachineKind, resolveEnvironmentMachineKind } from "@supacode/contracts";
 import { AsyncResult } from "effect/reactivity";
 import { useMemo } from "react";
-import { ActivityIndicator, Pressable, View } from "react-native";
+import { Pressable, View } from "react-native";
 import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -69,7 +70,7 @@ export function SettingsClientStorageRouteScreen() {
             </View>
           ) : !summary ? (
             <View className="items-center gap-3 px-6 py-8">
-              <ActivityIndicator />
+              <AppActivityIndicator />
               <Text className="text-center text-sm text-foreground-muted">
                 Inspecting cached data…
               </Text>

@@ -190,6 +190,7 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
     queuedRuns.map(({ run }) => ({ id: run.id, ...rowLayouts.current.get(run.id) }));
   const content = (
     <ScrollView
+      nestedScrollEnabled
       className="ios:flex-1 android:shrink android:grow-0"
       scrollEnabled={draggedRunId === null}
       contentInsetAdjustmentBehavior="never"

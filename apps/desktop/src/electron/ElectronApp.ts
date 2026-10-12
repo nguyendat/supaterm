@@ -1,5 +1,5 @@
 import type { DesktopEnvironmentMachineIcons } from "@supacode/contracts";
-import { HostProcessPlatform } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -143,7 +143,7 @@ export const make = ElectronApp.of({
   // the tag is normalized here rather than in the renderer that consumes it.
   systemLocale: Effect.sync(() => Electron.app.getSystemLocale().replace(/_/g, "-")),
   environmentMachineIcons: Effect.gen(function* () {
-    if ((yield* HostProcessPlatform) !== "darwin") return {};
+    if ((yield* HostProcess.Platform) !== "darwin") return {};
     const mini = yield* readEnvironmentMachineSymbol("macmini");
     const studio = yield* readEnvironmentMachineSymbol("macstudio");
     return {

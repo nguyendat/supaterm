@@ -12,7 +12,7 @@ import {
   ProviderSessionId,
   ThreadId,
 } from "@supacode/contracts";
-import { HostProcessPlatform } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
@@ -93,7 +93,7 @@ const layerDeps = ServerConfig.layerTest(process.cwd(), {
 const layerTest = ProviderHostLive.layer.pipe(Layer.provideMerge(layerDeps));
 
 // The `#!/bin/sh` stub below cannot be resolved as an executable on Windows.
-const windowsHost = HostProcessPlatform.defaultValue() === "win32";
+const windowsHost = HostProcess.Platform.defaultValue() === "win32";
 
 const noSpawn = ChildProcessSpawner.make(() =>
   Effect.die("Disabled Codex must not spawn a process"),

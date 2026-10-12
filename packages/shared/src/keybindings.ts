@@ -197,7 +197,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
     key: `mod+${index + 1}`,
     command,
-    when: "isDesktop",
+    when: "!modelPickerOpen && !projectPickerOpen && !hostPickerOpen && !branchPickerOpen && isDesktop",
   })),
   ...MODEL_PICKER_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
     key: `mod+${index + 1}`,

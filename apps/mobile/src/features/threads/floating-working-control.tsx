@@ -3,7 +3,6 @@ import { formatDuration } from "@supacode/shared/orchestrationTiming";
 import { GlassContainer, GlassView } from "expo-glass-effect";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   type LayoutChangeEvent,
   Pressable,
   Text as SystemText,
@@ -22,6 +21,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { withUniwind } from "uniwind";
 
+import { AppActivityIndicator } from "../../components/AppActivityIndicator";
 import { AppText as Text } from "../../components/AppText";
 import { SymbolView } from "../../components/AppSymbol";
 import { ControlPill } from "../../components/ControlPill";
@@ -46,7 +46,8 @@ const CONTROL_TIMING = {
   easing: Easing.out(Easing.cubic),
   reduceMotion: ReduceMotion.System,
 } as const;
-const CONTROL_SEPARATION = (16 + CONTROL_HEIGHT) / 2;
+const CONTROL_ROW_GAP = 14;
+const CONTROL_SEPARATION = (CONTROL_ROW_GAP + CONTROL_HEIGHT) / 2;
 const HIDDEN_STYLE = { opacity: 0 } as const;
 // Both rows share the same centered anchor, so the outgoing one clears fast and
 // the incoming one waits for it to be mostly gone before it starts to show.
@@ -190,12 +191,13 @@ export function FloatingWorkingControl(props: {
       ? { onPress: props.browserPreview.onPress, accessibilityLabel: "View browser" }
       : null,
   ].filter((action) => action !== null);
+  const statusInteractive =
+    props.status?.kind === "connection" || props.status?.kind === "child-input";
   const statusAction =
-    props.status !== null && props.status.kind !== "connection" && companionActions.length === 1
+    props.status !== null && !statusInteractive && companionActions.length === 1
       ? companionActions[0]
       : undefined;
   const StatusContainer = statusAction ? Pressable : View;
-  const statusInteractive = props.status?.kind === "connection";
   const capsuleInteractive = statusInteractive || hasQueue || hasAgents || hasPreview;
   // The host stays centered on the capsule, but its measurement constraint
   // comes from the overlay, independent of the capsule's current width.
@@ -319,7 +321,10 @@ export function FloatingWorkingControl(props: {
 
           <AnimatedGlassView
             colorScheme={props.colorScheme}
-            glassEffectStyle={glassEffectStyle}
+            glassEffectStyle={{
+              style: hidden || !props.showScrollToEnd ? "none" : "regular",
+              animate: true,
+            }}
             isInteractive
             pointerEvents={props.showScrollToEnd ? "auto" : "none"}
             accessibilityElementsHidden={!props.showScrollToEnd}
@@ -412,7 +417,7 @@ function FloatingStatusLabel(props: {
         className="gap-2"
         onLayout={props.onLayout}
       >
-        <ActivityIndicator size="small" colorClassName="accent-icon-muted" />
+        <AppActivityIndicator size="small" colorClassName="accent-icon-muted" />
         <Text className="shrink font-supacode-medium text-xs text-foreground" numberOfLines={1}>
           {props.status.label}
         </Text>
@@ -421,6 +426,23 @@ function FloatingStatusLabel(props: {
   }
   if (props.status.kind === "compacting") {
     return <CompactingLabel key="compacting" onLayout={props.onLayout} />;
+  }
+  if (props.status.kind === "child-input") {
+    return (
+      <StatusLabelRow
+        key="child-input"
+        accessibilityLabel={props.status.accessibilityLabel}
+        accessibilityRole="button"
+        className="gap-2"
+        onLayout={props.onLayout}
+        onPress={props.status.onPress}
+      >
+        <SymbolView name="text.bubble" size={13} tintColorClassName="foreground" />
+        <Text className="shrink font-supacode-medium text-xs text-foreground" numberOfLines={1}>
+          {props.status.label}
+        </Text>
+      </StatusLabelRow>
+    );
   }
   if (props.status.kind === "connection") {
     return (
@@ -433,7 +455,7 @@ function FloatingStatusLabel(props: {
         onPress={props.status.onPress}
       >
         {props.status.tone === "reconnecting" ? (
-          <ActivityIndicator size="small" colorClassName="accent-icon-muted" />
+          <AppActivityIndicator size="small" colorClassName="accent-icon-muted" />
         ) : (
           <View className="h-2 w-2 rounded-full bg-red-500" />
         )}

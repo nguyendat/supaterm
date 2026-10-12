@@ -18,7 +18,7 @@ import * as Option from "effect/Option";
 import * as Electron from "electron";
 
 import * as NetService from "@supacode/shared/Net";
-import { HostProcessArchitecture, HostProcessPlatform } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import type { RemoteSupacodeRunnerOptions } from "@supacode/ssh/tunnel";
 import serverPackageJson from "../../server/package.json" with { type: "json" };
 
@@ -87,8 +87,8 @@ const layerDesktopEnvironment = Layer.unwrap(
     const metadata = yield* Effect.service(ElectronApp.ElectronApp).pipe(
       Effect.flatMap((app) => app.metadata),
     );
-    const platform = yield* HostProcessPlatform;
-    const processArch = yield* HostProcessArchitecture;
+    const platform = yield* HostProcess.Platform;
+    const processArch = yield* HostProcess.Architecture;
     return DesktopEnvironment.layer({
       dirname: __dirname,
       homeDirectory: NodeOS.homedir(),

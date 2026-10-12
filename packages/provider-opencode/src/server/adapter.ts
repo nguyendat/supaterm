@@ -9,7 +9,7 @@ import type {
   Todo as OpenCodeTodo,
   ToolPart,
 } from "@opencode-ai/sdk/v2";
-import { HostProcessEnvironment } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import { getModelSelectionStringOptionValue } from "@supacode/shared/model";
 import { causeErrorTag } from "@supacode/shared/observability";
 import {
@@ -383,7 +383,6 @@ interface OpenCodeThreadState {
   appThread: OrchestrationV2AppThread | null;
   activeTurn: ActiveOpenCodeTurn | null;
   readonly providerTurns: Map<string, OrchestrationV2ProviderTurn>;
-  readonly messages: Map<string, OrchestrationV2ConversationMessage>;
   readonly runtimeRequests: Map<string, OrchestrationV2RuntimeRequest>;
   readonly messageRoles: Map<string, "user" | "assistant">;
   readonly userMessageIds: Array<string>;
@@ -1256,7 +1255,6 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
               createdAt: startedAt,
               updatedAt: emittedAt,
             };
-            state.messages.set(String(message.id), message);
             yield* emitProviderEvent({
               type: "message.updated",
               driver: OPENCODE_PROVIDER,
@@ -1427,7 +1425,6 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
               appThread: childThread,
               activeTurn: null,
               providerTurns: new Map(),
-              messages: new Map(),
               runtimeRequests: new Map(),
               messageRoles: new Map(),
               userMessageIds: [],
@@ -2335,7 +2332,6 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
             createdAt: turn.startedAt,
             updatedAt: now,
           };
-          state.messages.set(String(messageId), projected);
           yield* emitProviderEvent({
             type: "message.updated",
             driver: OPENCODE_PROVIDER,
@@ -2833,7 +2829,6 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
             appThread,
             activeTurn: null,
             providerTurns: new Map(),
-            messages: new Map(),
             runtimeRequests: new Map(),
             messageRoles: new Map(),
             userMessageIds: [],
@@ -3738,12 +3733,12 @@ export const OpenCodeAdapterV2Driver: ProviderAdapterDriver<
   defaultConfig: (): OpenCodeSettings => DEFAULT_OPENCODE_SETTINGS,
   create: Effect.fn("OpenCodeAdapterV2Driver.create")(
     function* (input: ProviderAdapterDriverCreateInput<OpenCodeSettings>) {
-      const hostEnvironment = yield* HostProcessEnvironment;
+      const hostEnvironment = yield* HostProcess.Environment;
       const providerEventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
       return yield* makeOpenCodeAdapterV2({
         instanceId: input.instanceId,
         settings: { ...input.config, enabled: input.enabled },
-        environment: mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
+        environment: yield* mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
         ...(providerEventLoggers.native === undefined
           ? {}
           : { nativeEventLogger: providerEventLoggers.native }),

@@ -37,6 +37,8 @@ import { ResourceTelemetryDiagnostics } from "./ResourceTelemetryDiagnostics";
 import { SettingsPageContainer, SettingsSection, useRelativeTimeTick } from "./settingsLayout";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useSettingsScope } from "./SettingsScopeContext";
+import { formatBytes } from "../../lib/formatBytes";
+import { TelemetryExportSettings } from "./TelemetryExportSettings";
 
 const NUMBER_FORMAT = new Intl.NumberFormat();
 
@@ -47,18 +49,6 @@ function formatCount(value: number): string {
 function formatDuration(value: number): string {
   if (value < 1_000) return `${Math.round(value)} ms`;
   return `${(value / 1_000).toFixed(value >= 10_000 ? 1 : 2)} s`;
-}
-
-function formatBytes(value: number): string {
-  if (value < 1024) return `${value} B`;
-  const units = ["KB", "MB", "GB"] as const;
-  let unitIndex = -1;
-  let next = value;
-  do {
-    next /= 1024;
-    unitIndex += 1;
-  } while (next >= 1024 && unitIndex < units.length - 1);
-  return `${next.toFixed(next >= 10 ? 1 : 2)} ${units[unitIndex]}`;
 }
 
 function formatRelative(value: DateTime.Utc | null): string {
@@ -800,6 +790,20 @@ export function DiagnosticsSettingsPanel() {
 
   const isInitialLoading = isPending && data === null;
   const isProcessInitialLoading = isProcessPending && processData === null;
+  const isResourceInitialLoading = isResourcePending && resourceData === null;
+  // The export form waits for each environment's first tables so a search target below them
+  // stays in view. Later loads, such as a new resource window, must not remount it and drop drafts.
+  const [exportFormEnvironmentId, setExportFormEnvironmentId] =
+    useState<typeof environmentId>(null);
+  if (
+    exportFormEnvironmentId !== environmentId &&
+    canReadDiagnostics &&
+    !isInitialLoading &&
+    !isProcessInitialLoading &&
+    !isResourceInitialLoading
+  ) {
+    setExportFormEnvironmentId(environmentId);
+  }
   const signalProcess = useCallback(
     (process: ServerProcessDiagnosticsEntry, signal: ServerProcessSignal) => {
       if (
@@ -1000,7 +1004,7 @@ export function DiagnosticsSettingsPanel() {
         <ProcessResourceHistoryTable
           processes={resourceData?.topProcesses ?? []}
           emptyLabel={
-            isResourcePending && resourceData === null
+            isResourceInitialLoading
               ? "Collecting process resource samples..."
               : "No process resource samples found for this window."
           }
@@ -1276,6 +1280,7 @@ export function DiagnosticsSettingsPanel() {
           <EmptyRows label={isInitialLoading ? "Loading span names..." : "No spans found."} />
         )}
       </SettingsSection>
+      {exportFormEnvironmentId === environmentId && <TelemetryExportSettings />}
     </SettingsPageContainer>
   );
 }

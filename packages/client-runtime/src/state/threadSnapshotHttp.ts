@@ -3,7 +3,6 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
 import type { PreparedConnection } from "../connection/model.ts";
-import { environmentEndpointUrl } from "../environment/endpoint.ts";
 import type { RemoteEnvironmentRequestError } from "../rpc/http.ts";
 import {
   executeAuthenticatedEnvironmentHttpRequest,
@@ -57,8 +56,7 @@ export const fetchEnvironmentThreadSnapshot = Effect.fn(
   return yield* executeAuthenticatedEnvironmentHttpRequest({
     ...input,
     group: "orchestration",
-    url: (httpBaseUrl) =>
-      environmentEndpointUrl(httpBaseUrl, `/api/orchestration/threads/${input.threadId}`),
+    url: (urls) => urls.threadSnapshot({ params: { threadId: input.threadId } }),
     timeoutMs: input.timeoutMs ?? DEFAULT_THREAD_SNAPSHOT_TIMEOUT_MS,
     request: ({ client, headers }) =>
       client.threadSnapshot({

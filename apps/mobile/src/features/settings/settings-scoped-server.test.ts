@@ -154,7 +154,10 @@ describe("mobile project settings scope", () => {
     expect(planMobileScopedSettingsClear(targets, ["responseStreamingMode"])).toEqual([
       {
         environmentId: firstId,
-        patch: { projectSettingsOverrides: { [firstProject]: { defaultAutoPull: true } } },
+        patch: {
+          projectSettingsOverrides: { [firstProject]: { defaultAutoPull: true } },
+          projectSettingsOverrideRemovals: { [firstProject]: ["responseStreamingMode"] },
+        },
       },
     ]);
     expect(

@@ -23,8 +23,11 @@
  * Terminal-only decoration such as status, widget, title, and editor-text
  * updates has no matching Supacode surface and is ignored.
  */
-import { HostProcessEnvironment } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
+import { AgentScope } from "@supacode/shared/AgentScope";
 import { getModelSelectionStringOptionValue } from "@supacode/shared/model";
+import { readToolOutputImage } from "@supacode/shared/toolOutput";
+import * as Predicate from "effect/Predicate";
 import {
   ProviderDriverKind,
   type ChatAttachment,
@@ -52,6 +55,7 @@ import * as Option from "effect/Option";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Fiber from "effect/Fiber";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -240,6 +244,104 @@ function contentText(content: unknown): string {
     .join("");
 }
 
+const MAX_STRUCTURED_TOOL_OUTPUT_BYTES = 64 * 1024;
+
+/** Preserve complete structured JSON only when its size and traversal remain bounded. */
+function isBoundedStructuredToolValue(value: unknown): boolean {
+  let bytes = MAX_STRUCTURED_TOOL_OUTPUT_BYTES;
+  let nodes = 4_096;
+  const visit = (entry: unknown, depth: number): boolean => {
+    if (depth > 32 || --nodes < 0 || bytes < 0) return false;
+    if (Array.isArray(entry)) {
+      bytes -= 2 + entry.length;
+      return entry.every((item) => visit(item, depth + 1));
+    }
+    if (Predicate.isObject(entry)) {
+      bytes -= 2;
+      for (const key in entry) {
+        if (!Object.hasOwn(entry, key)) continue;
+        if (key.length > bytes) return false;
+        bytes -= Buffer.byteLength(JSON.stringify(key), "utf8") + 2;
+        if (!visit(entry[key], depth + 1)) return false;
+      }
+      return bytes >= 0;
+    }
+    if (typeof entry === "string" && entry.length > bytes) return false;
+    bytes -= Buffer.byteLength(JSON.stringify(entry) ?? "null", "utf8");
+    return bytes >= 0;
+  };
+  return visit(value, 0);
+}
+
+/** Keep model content and distinct typed values; server ingestion owns image byte policy. */
+function piToolOutput(result: unknown, toolName: string): unknown {
+  const rawContent = recordField(result, "content");
+  const content = Array.isArray(rawContent)
+    ? rawContent
+    : typeof rawContent === "string"
+      ? [{ type: "text", text: rawContent }]
+      : [];
+  let structured = recordField(result, "structuredContent");
+  // Pi MCP tools return the full CallToolResult to scripts. The model content
+  // is already captured, so store only its distinct structured payload.
+  const details = recordField(result, "details");
+  const isMcpResult =
+    toolName.startsWith("mcp__") &&
+    recordString(details, "server") !== undefined &&
+    recordString(details, "tool") !== undefined &&
+    Array.isArray(recordField(structured, "content"));
+  if (isMcpResult) {
+    structured = recordField(structured, "structuredContent");
+  }
+  if (typeof structured === "string" && structured === contentText(content)) {
+    structured = undefined;
+  }
+  // Native read repeats its image and first text note as structured output.
+  // Drop only that exact mirror; an extension's extra metadata stays distinct.
+  if (toolName === "read" && Predicate.isObject(structured)) {
+    const image = readToolOutputImage(structured);
+    const note =
+      recordString(
+        content.find((block) => recordField(block, "type") === "text"),
+        "text",
+      ) ?? "";
+    if (
+      image !== null &&
+      Object.keys(structured).every((key) => ["type", "data", "mimeType", "note"].includes(key)) &&
+      recordString(structured, "note") === note &&
+      content.some((block) => {
+        const match = readToolOutputImage(block);
+        return match !== null && match.mimeType === image.mimeType && match.data === image.data;
+      })
+    ) {
+      structured = undefined;
+    }
+  }
+  if (structured !== undefined && !isBoundedStructuredToolValue(structured)) {
+    return {
+      content: [
+        ...content,
+        {
+          type: "text",
+          text: "Structured output omitted because it exceeds the stored result limit.",
+        },
+      ],
+    };
+  }
+  if (
+    !isMcpResult &&
+    structured === undefined &&
+    content.every((block) => recordField(block, "type") === "text")
+  ) {
+    const text = contentText(content);
+    return text.length > 0 ? text : undefined;
+  }
+  return {
+    content,
+    ...(structured === undefined ? {} : { structuredContent: structured }),
+  };
+}
+
 function providerRef(
   nativeId: string,
   strength: "strong" | "weak" = "strong",
@@ -303,6 +405,8 @@ interface ActivePiTurn {
    */
   readonly toolStartedAt: Map<string, DateTime.Utc>;
   interrupted: boolean;
+  /** Cancellation of the latest native run; new work can recover before settlement. */
+  nativeAborted: boolean;
   /**
    * Whether any agent run activity was observed. Command-only prompts (pure
    * extension slash commands) never start an agent run and never emit
@@ -346,6 +450,8 @@ interface PendingPiPrompt {
   readonly method: "select" | "confirm" | "input" | "editor";
   readonly questionId: string;
   readonly approvalKey: string;
+  readonly expiresAt: number | null;
+  expirationFiber: Fiber.Fiber<void> | null;
   runtimeRequest: OrchestrationV2RuntimeRequest;
   readonly node: OrchestrationV2ExecutionNode;
   readonly turnItem: OrchestrationV2TurnItem;
@@ -380,6 +486,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
   options: PiAdapterV2Options,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const agentScope = yield* AgentScope;
   const fileSystem = yield* FileSystem.FileSystem;
   const idAllocator = yield* IdAllocator.IdAllocatorV2;
   const host = yield* ProviderHost.ProviderHost;
@@ -433,9 +540,16 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
         extensionPath,
         runtimeMode: input.runtimePolicy.runtimeMode,
       });
-      const connection: PiRpcConnection = yield* makePiRpcConnection({
+      const scopedLaunch = yield* agentScope.wrap({
         command: options.settings.binaryPath || "pi",
         args: launch.args,
+        name: "pi",
+        threadId: input.threadId,
+        env: launch.env,
+      });
+      const connection: PiRpcConnection = yield* makePiRpcConnection({
+        command: scopedLaunch.command,
+        args: scopedLaunch.args,
         cwd,
         env: launch.env,
       }).pipe(
@@ -990,8 +1104,10 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
           status,
           completedAt: completed ? emittedAt : null,
         } as const;
-        if (toolName === "bash") {
-          const exitCode = recordNumber(recordField(resultRecord, "details"), "exitCode");
+        if (toolName === "bash" || toolName === "powershell") {
+          const exitCode =
+            recordNumber(recordField(resultRecord, "structuredContent"), "exit_code") ??
+            recordNumber(recordField(resultRecord, "details"), "exitCode");
           yield* emit({
             type: "turn_item.updated",
             driver: PI_PROVIDER,
@@ -1030,6 +1146,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
             return;
           }
         }
+        const output = piToolOutput(resultRecord, toolName);
         yield* emit({
           type: "turn_item.updated",
           driver: PI_PROVIDER,
@@ -1040,7 +1157,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
             ...mcpToolPresentation({ toolName }),
             toolName,
             input: args ?? {},
-            ...(outputText.length > 0 ? { output: outputText } : {}),
+            ...(output === undefined ? {} : { output }),
           },
         });
         if (toolName === "subagent") {
@@ -1148,6 +1265,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
 
       const cancelPrompt = (pending: PendingPiPrompt, resolvedAt: DateTime.Utc) =>
         Effect.gen(function* () {
+          if (pending.expirationFiber !== null) yield* Fiber.interrupt(pending.expirationFiber);
           yield* connection
             .send({
               type: "extension_ui_response",
@@ -1246,6 +1364,12 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
         const state = threadState;
         const turn = state?.activeTurn ?? null;
         const createdAt = yield* DateTime.now;
+        const timeout = recordNumber(event, "timeout");
+        // Pi treats zero as no timeout and negative durations as immediate expiry.
+        const expiresAt =
+          timeout === undefined || timeout === 0
+            ? null
+            : DateTime.toEpochMillis(createdAt) + Math.max(0, timeout);
         const requestId = yield* idAllocator.allocate.runtimeRequest({
           driver: PI_PROVIDER,
           ...(turn === null ? {} : { providerTurnId: turn.providerTurn.id }),
@@ -1318,15 +1442,18 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
                 requestId,
                 questions: [piQuestion(nativeRequestId, method, title, event)],
               };
-        pendingPrompts.set(String(requestId), {
+        const pending: PendingPiPrompt = {
           nativeRequestId,
           method,
           questionId: nativeRequestId,
           approvalKey,
+          expiresAt,
+          expirationFiber: null,
           runtimeRequest,
           node,
           turnItem,
-        });
+        };
+        pendingPrompts.set(String(requestId), pending);
         yield* emit({
           type: "runtime_request.updated",
           driver: PI_PROVIDER,
@@ -1335,6 +1462,22 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
         });
         yield* emit({ type: "node.updated", driver: PI_PROVIDER, node });
         yield* emit({ type: "turn_item.updated", driver: PI_PROVIDER, turnItem });
+        if (expiresAt !== null) {
+          const now = yield* DateTime.now;
+          pending.expirationFiber = yield* Effect.sleep(
+            Duration.millis(Math.max(0, expiresAt - DateTime.toEpochMillis(now))),
+          ).pipe(
+            Effect.andThen(
+              Queue.offer(connection.events, {
+                type: "supacode.ui_request_expired",
+                requestId: String(requestId),
+                pending,
+              }),
+            ),
+            Effect.asVoid,
+            Effect.forkIn(scope),
+          );
+        }
       });
 
       const emitExtensionError = Effect.fnUntraced(function* (event: PiRpcRecord) {
@@ -1430,19 +1573,16 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
         const turn = state.activeTurn;
         if (turn === null) return;
         state.activeTurn = null;
+        const interrupted = turn.interrupted || turn.nativeAborted;
         const completedAt = yield* DateTime.now;
         yield* completeOpenStreamItems(turn);
         if (turn.activeCompaction !== null) {
-          const status = turn.interrupted
-            ? "cancelled"
-            : turn.failure === null
-              ? "completed"
-              : "failed";
+          const status = interrupted ? "cancelled" : turn.failure === null ? "completed" : "failed";
           yield* emitCompaction(turn, turn.activeCompaction, status);
           turn.activeCompaction = null;
         }
         if (turn.activeProviderRetry !== null) {
-          if (turn.interrupted) {
+          if (interrupted) {
             yield* emitProviderRetry(turn, turn.activeProviderRetry, "interrupted", completedAt);
             turn.activeProviderRetry = null;
           } else if (turn.failure === null) {
@@ -1456,7 +1596,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
         const tokenUsage = readUsage
           ? yield* readTokenUsage(turn.latestCompactionAfterTokens, completedAt)
           : undefined;
-        const failure = turn.interrupted ? null : (turn.rejectedPromptFailure ?? turn.failure);
+        const failure = interrupted ? null : (turn.rejectedPromptFailure ?? turn.failure);
         yield* emit({
           type: "provider_turn.updated",
           driver: PI_PROVIDER,
@@ -1466,7 +1606,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
             ...(treeRefs === null || treeRefs.nativeTurnRef === undefined
               ? {}
               : { nativeTurnRef: treeRefs.nativeTurnRef }),
-            status: turn.interrupted ? "interrupted" : failure !== null ? "failed" : "completed",
+            status: interrupted ? "interrupted" : failure !== null ? "failed" : "completed",
             completedAt,
             ...(tokenUsage === undefined ? {} : { tokenUsage }),
           },
@@ -1535,7 +1675,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
             providerThreadId: state.providerThread.id,
             providerTurnId: turn.providerTurn.id,
             runOrdinal: turn.turnInput.runOrdinal,
-            status: turn.interrupted ? "interrupted" : "completed",
+            status: interrupted ? "interrupted" : "completed",
             failure: null,
             threadDisposition: "reusable",
           });
@@ -1652,6 +1792,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
               return;
             }
             turn.sawAgentActivity = true;
+            turn.nativeAborted = false;
             turn.settleProbeGeneration += 1;
             return;
           }
@@ -1871,6 +2012,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
               return;
             }
             if (turn !== null) {
+              turn.nativeAborted = event["aborted"] === true;
               turn.settleWhenIdle = true;
               turn.settleProbeGeneration += 1;
 
@@ -1981,6 +2123,15 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
             }
             return;
           }
+          case "supacode.ui_request_expired": {
+            const requestId = recordString(event, "requestId");
+            if (requestId === undefined) return;
+            const pending = pendingPrompts.get(requestId);
+            if (pending === undefined || pending !== event["pending"]) return;
+            pendingPrompts.delete(requestId);
+            yield* cancelPrompt(pending, yield* DateTime.now);
+            return;
+          }
           case "supacode.flush_extension_errors": {
             // Startup extension failures are informational and do not block
             // Pi, so attach them to the next real turn instead of creating a
@@ -2060,7 +2211,6 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
                   rollbackBarrier,
                   protocolError("Pi transport closed during rollback"),
                 );
-              const hadPendingWake = pendingWake !== null;
               pendingWake = null;
               const interrupted = state?.activeTurn?.interrupted === true;
               if (state?.activeTurn != null) {
@@ -2072,7 +2222,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
                       class: "transport_error",
                     });
                 yield* finalizeTurn(state, false);
-              } else if (hadPendingWake) {
+              } else {
                 yield* cancelPendingPrompts(yield* DateTime.now);
               }
               if (unsolicitedActivityDetected) {
@@ -2462,6 +2612,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
               toolArgs: new Map(),
               toolStartedAt: new Map(),
               interrupted: false,
+              nativeAborted: false,
               sawAgentActivity: false,
               adoptedWake: false,
               promptMayBeCommandOnly:
@@ -2534,6 +2685,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
               if (wake !== null) {
                 for (const event of wake.events) {
                   if (!continuation && event["type"] === "agent_settled") {
+                    activeTurn.nativeAborted = event["aborted"] === true;
                     activeTurn.settleWhenIdle = true;
                     continue;
                   }
@@ -2690,6 +2842,17 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
                 `No pending Pi extension request ${requestInput.requestId}`,
               );
             }
+            const answeredAt = yield* DateTime.now;
+            if (
+              pending.expiresAt !== null &&
+              DateTime.toEpochMillis(answeredAt) >= pending.expiresAt
+            ) {
+              pendingPrompts.delete(String(requestInput.requestId));
+              yield* cancelPrompt(pending, answeredAt);
+              return yield* protocolError(
+                `Pi extension request ${requestInput.requestId} has expired`,
+              );
+            }
             const response = piUiResponse(pending, requestInput.decision, requestInput.answers);
             yield* connection.send({
               type: "extension_ui_response",
@@ -2699,6 +2862,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
             // Dropped only once Pi has the answer, so a failed send leaves the
             // request retryable and still cancellable during teardown.
             pendingPrompts.delete(String(requestInput.requestId));
+            if (pending.expirationFiber !== null) yield* Fiber.interrupt(pending.expirationFiber);
             if (pending.method === "confirm" && requestInput.decision === "acceptForSession") {
               sessionApprovals.add(pending.approvalKey);
             }
@@ -3214,12 +3378,12 @@ export const PiAdapterV2Driver: ProviderAdapterDriver<PiSettings, PiAdapterV2Dri
   defaultConfig: (): PiSettings => DEFAULT_PI_SETTINGS,
   create: Effect.fn("PiAdapterV2Driver.create")(
     function* (input: ProviderAdapterDriverCreateInput<PiSettings>) {
-      const hostEnvironment = yield* HostProcessEnvironment;
+      const hostEnvironment = yield* HostProcess.Environment;
       const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
       return yield* makePiAdapterV2({
         instanceId: input.instanceId,
         settings: { ...input.config, enabled: input.enabled },
-        environment: mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
+        environment: yield* mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
         continuationRequests,
       });
     },

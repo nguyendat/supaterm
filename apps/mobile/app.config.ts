@@ -242,6 +242,11 @@ const config: ExpoConfig = {
     infoPlist: {
       // Native navigation owns visibility across full-screen preview transitions.
       UIViewControllerBasedStatusBarAppearance: true,
+      UISupportedInterfaceOrientations: [
+        "UIInterfaceOrientationPortrait",
+        "UIInterfaceOrientationLandscapeLeft",
+        "UIInterfaceOrientationLandscapeRight",
+      ],
       NSAppTransportSecurity: {
         NSAllowsArbitraryLoads: true,
       },

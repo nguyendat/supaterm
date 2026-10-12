@@ -37,7 +37,7 @@ export const resolveDeviceHubAccess = Effect.fn("clientRuntime.state.resolveDevi
     const ticket = yield* executeAuthenticatedEnvironmentHttpRequest({
       prepared: input.prepared,
       group: "auth",
-      url: (httpBaseUrl) => environmentEndpointUrl(httpBaseUrl, "/api/auth/websocket-ticket"),
+      url: (urls) => urls.webSocketTicket(),
       timeoutMs: TICKET_TIMEOUT_MS,
       request: ({ client, headers }) => client.webSocketTicket({ headers }),
     });

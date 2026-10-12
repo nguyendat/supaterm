@@ -4,7 +4,7 @@ import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   type ExecutionEnvironmentDescriptor,
 } from "@supacode/contracts";
-import { HostProcessArchitecture, HostProcessPlatform } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -183,8 +183,8 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig.ServerConfig;
   const identity = yield* ServerEnvironmentIdentity;
-  const hostPlatform = yield* HostProcessPlatform;
-  const hostArchitecture = yield* HostProcessArchitecture;
+  const hostPlatform = yield* HostProcess.Platform;
+  const hostArchitecture = yield* HostProcess.Architecture;
   const environmentId = yield* identity.getEnvironmentId;
   const cwdBaseName = path.basename(serverConfig.cwd).trim();
   const label = yield* resolveServerEnvironmentLabel({ cwdBaseName });
@@ -227,10 +227,14 @@ export const make = Effect.gen(function* () {
       questionAutoDismiss: true,
       questionAutoDismissPause: true,
       storageCleanup: true,
+      storageCleanupRun: true,
+      otlpEndpointCheck: true,
       projectWorktreeCleanup: true,
       worktreesDirectory: true,
       threadRestartContinuation: true,
       projectSettingsOverrides: true,
+      projectProviderInstanceOverrides: true,
+      modelPreferences: true,
       threadSnooze: true,
       environmentThemes: true,
       usageLimitSources: true,

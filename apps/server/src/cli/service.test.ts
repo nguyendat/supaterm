@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, expect, it } from "@effect/vitest";
-import { HostProcessEnvironment } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import * as NetService from "@supacode/shared/Net";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
@@ -129,7 +129,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands
         "--base-dir",
         baseDir,
       ]).pipe(
-        Effect.provideService(HostProcessEnvironment, {}),
+        Effect.provideService(HostProcess.Environment, {}),
         Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }))),
       );
 
@@ -154,7 +154,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands
           "--base-dir",
           baseDir,
         ]).pipe(
-          Effect.provideService(HostProcessEnvironment, {}),
+          Effect.provideService(HostProcess.Environment, {}),
           Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }))),
           Effect.flip,
         );
@@ -183,7 +183,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands
         baseDir,
         "--allow-downgrade",
       ]).pipe(
-        Effect.provideService(HostProcessEnvironment, {}),
+        Effect.provideService(HostProcess.Environment, {}),
         Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }))),
       );
 

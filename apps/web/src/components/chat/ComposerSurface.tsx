@@ -83,7 +83,7 @@ function Main({ className, ...props }: ComponentProps<"div">) {
 }
 
 const contextStripRowClasses =
-  "group/composer-context flex items-center gap-2 overflow-x-clip overflow-y-visible ps-1 pe-2";
+  "group/composer-context flex items-center gap-2 overflow-x-clip overflow-y-visible px-2";
 
 /**
  * The context controls' drawer. Below the composer it extends the shell's glass; above it, it

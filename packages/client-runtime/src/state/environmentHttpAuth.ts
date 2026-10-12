@@ -9,6 +9,7 @@ import type { PreparedConnection, PreparedHttpAuthorization } from "../connectio
 import {
   executeEnvironmentHttpRequest,
   makeEnvironmentHttpApiGroupClient,
+  makeEnvironmentHttpApiUrlBuilder,
   RemoteEnvironmentAuthTimeoutError,
   type RemoteEnvironmentRequestError,
 } from "../rpc/http.ts";
@@ -58,7 +59,7 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
   R,
 >(input: {
   readonly prepared: PreparedConnection;
-  readonly url: (httpBaseUrl: string) => string;
+  readonly url: (urls: ReturnType<typeof makeEnvironmentHttpApiUrlBuilder>[Group]) => string;
   readonly timeoutMs: number;
   readonly group: Group;
   readonly request: (input: {
@@ -71,7 +72,7 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
   Effect.Services<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>> | R
 > {
   const { httpBaseUrl, httpAuthorization } = input.prepared;
-  const requestUrl = input.url(httpBaseUrl);
+  const requestUrl = input.url(makeEnvironmentHttpApiUrlBuilder(httpBaseUrl)[input.group]);
   return yield* Effect.gen(function* () {
     const client = yield* makeEnvironmentHttpApiGroupClient(httpBaseUrl, input.group);
     return yield* executeEnvironmentHttpRequest(

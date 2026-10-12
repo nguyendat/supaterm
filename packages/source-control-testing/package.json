@@ -1,0 +1,23 @@
+{
+  "name": "@supacode/source-control-testing",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./TestSourceControlHost": {
+      "types": "./src/TestSourceControlHost.ts",
+      "import": "./src/TestSourceControlHost.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@supacode/contracts": "workspace:*",
+    "@supacode/shared": "workspace:*",
+    "@supacode/source-control-core": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:"
+  }
+}

@@ -1,3 +1,4 @@
+import { SourceControlProviderKind } from "@supacode/contracts";
 import * as Stream from "effect/Stream";
 import {
   EventId,
@@ -32,7 +33,7 @@ import * as Ref from "effect/Ref";
 import * as Struct from "effect/Struct";
 import { TestClock } from "effect/testing";
 
-import { PullRequestProviderError } from "../pullRequest/PullRequestProvider.ts";
+import { PullRequestProviderError } from "@supacode/source-control-core/server/PullRequestProvider";
 import * as GitManager from "../git/GitManager.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as ServerActivation from "../serverActivation.ts";
@@ -149,7 +150,7 @@ function makeSummary(
   overrides: Partial<PullRequestSummary> = {},
 ): PullRequestSummary {
   return {
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     projectId: input.projectId,
     repository: input.repository,
     number: input.number,
@@ -1014,7 +1015,7 @@ describe("PullRequestSyncReactor", () => {
             Effect.gen(function* () {
               if (input.host === "github.com" && (yield* Clock.currentTimeMillis) < retryAt) {
                 const paused = new PullRequestProviderError({
-                  provider: "github",
+                  provider: SourceControlProviderKind.make("github"),
                   operation: "getChangeRequestSummary",
                   reason: "rate-limited",
                   detail: "paused",
@@ -1084,7 +1085,7 @@ describe("PullRequestSyncReactor", () => {
                 operation: "stack",
                 detail: "paused",
                 cause: new PullRequestProviderError({
-                  provider: "github",
+                  provider: SourceControlProviderKind.make("github"),
                   operation: "getChangeRequestStack",
                   reason: "rate-limited",
                   detail: "paused",

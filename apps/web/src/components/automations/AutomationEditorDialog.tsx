@@ -179,13 +179,6 @@ export function AutomationEditorDialog({
   const upsertTask = useAtomCommand(serverEnvironment.upsertScheduledTask, {
     label: "scheduled task upsert",
   });
-  const instanceEntries = useMemo(
-    () =>
-      sortProviderInstanceEntries(
-        applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings),
-      ),
-    [providers, settings],
-  );
   const [draft, setDraft] = useState<DraftState>(() =>
     task ? taskToDraft(task) : { ...EMPTY_DRAFT, projectId: projects[0]?.id ?? "" },
   );
@@ -197,13 +190,27 @@ export function AutomationEditorDialog({
     !tasksQuery.data.tasks.some((entry) => entry.id === draft.editingId);
   const selectedProjectId = draft.projectId || projects[0]?.id || "";
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
+  const instanceEntries = useMemo(
+    () =>
+      sortProviderInstanceEntries(
+        applyProviderInstanceSettings(
+          deriveProviderInstanceEntries(providers),
+          settings,
+          selectedProject?.id ?? null,
+        ),
+      ),
+    [providers, settings, selectedProject?.id],
+  );
 
   // The real model picker is keyed by a `${instanceId}:${model}` string, which
   // is exactly how the draft stores its selection.
   const firstInstance = instanceEntries[0];
-  const activeSelection = draft.modelKey
-    ? splitModelKey(draft.modelKey)
-    : scheduledTaskDefaultModel(settings, selectedProject ?? null, instanceEntries);
+  const draftSelection = draft.modelKey ? splitModelKey(draft.modelKey) : null;
+  const activeSelection =
+    draftSelection &&
+    instanceEntries.some((entry) => entry.instanceId === draftSelection.instanceId && entry.enabled)
+      ? draftSelection
+      : scheduledTaskDefaultModel(settings, selectedProject ?? null, instanceEntries);
   const activeInstanceId =
     activeSelection?.instanceId ?? firstInstance?.instanceId ?? ("" as ProviderInstanceId);
   const activeModel = activeSelection?.model ?? "";
@@ -479,6 +486,7 @@ export function AutomationEditorDialog({
 
             <Field label="Model">
               <ProviderModelPicker
+                environmentId={environmentId}
                 disabled={saving || !connected}
                 activeInstanceId={activeInstanceId}
                 model={activeModel}

@@ -16,6 +16,7 @@ import { TestClock } from "effect/testing";
 import {
   connectMuseTransport,
   layer as museReplayLayer,
+  materializeMuseReplayWorkspace,
   MUSE_MSP_REPLAY_PROTOCOL,
   MUSE_PROVIDER_KIND,
   museRecordLabel,
@@ -24,14 +25,15 @@ import {
 import * as IdAllocator from "@supacode/provider-core/server/IdAllocator";
 import {
   makeMuseEnvironment,
+  museLaunch,
   museServeArgs,
+  museWorkspaceRoot,
   parseMuseVersion,
 } from "@supacode/provider-muse/testing";
 import { provideDeterministicTestRuntime } from "../src/orchestration-v2/testkit/DeterministicRuntime.ts";
 import { ORCHESTRATOR_REPLAY_FIXTURES } from "../src/orchestration-v2/testkit/fixtures/index.ts";
 import { materializeFixtureInput } from "../src/orchestration-v2/testkit/fixtures/shared.ts";
 import { runOrchestratorV2ProviderReplayScenario } from "../src/orchestration-v2/testkit/ProviderReplayHarness.ts";
-import { materializeReplayTranscriptWorkspace } from "@supacode/provider-testing/replayTranscript";
 import {
   checkpointWorkspace,
   makeCheckpointWorkspace,
@@ -55,6 +57,8 @@ if (fixture === undefined || variant === undefined) {
 }
 
 const museBinary = process.env.SUPACODE_MUSE_BIN ?? "muse";
+// Started as Supacode starts it, so Windows needs no SUPACODE_MUSE_BIN for Muse's `muse.cmd` launcher.
+const museStart = Effect.runSync(museLaunch(museBinary));
 const home = process.env.HOME ?? "";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -125,8 +129,7 @@ function makeRecordingCreateHost(
       entries.push({ type, ...(label === undefined ? {} : { label }), frame });
     };
     record("expect_outbound", { type: "host_start", args });
-
-    const child = NodeChildProcess.spawn(museBinary, args, {
+    const child = NodeChildProcess.spawn(museStart.command, [...museStart.args, ...args], {
       cwd: options.cwd,
       env: options.environment ?? makeMuseEnvironment(),
       stdio: ["pipe", "pipe", "inherit"],
@@ -187,7 +190,11 @@ function makeRecordingCreateHost(
 }
 
 const readMuseVersion = Effect.sync(() => {
-  const output = NodeChildProcess.execFileSync(museBinary, ["--version"], { encoding: "utf8" });
+  const output = NodeChildProcess.execFileSync(
+    museStart.command,
+    [...museStart.args, "--version"],
+    { encoding: "utf8" },
+  );
   return parseMuseVersion(output) ?? output.trim();
 });
 
@@ -203,6 +210,7 @@ const record = Effect.gen(function* () {
   yield* Effect.addFinalizer(() =>
     fs.remove(workspace, { recursive: true, force: true }).pipe(Effect.ignore),
   );
+  const canonicalWorkspace = yield* fs.realPath(workspace);
 
   const entries: Array<ProviderReplayEntry> = [];
   const commandIds: Array<Array<string>> = [];
@@ -255,7 +263,12 @@ const record = Effect.gen(function* () {
       model: variant.modelSelection.model,
       commandIds,
     },
-    entries: normalizeEntries(entries, [yield* fs.realPath(workspace), workspace]),
+    // The verbatim root first: it contains the canonical path.
+    entries: normalizeEntries(entries, [
+      yield* museWorkspaceRoot(canonicalWorkspace),
+      canonicalWorkspace,
+      workspace,
+    ]),
   } satisfies ProviderReplayTranscript;
 
   yield* Effect.gen(function* () {
@@ -265,7 +278,7 @@ const record = Effect.gen(function* () {
       {
         name: `${fixture.name}/muse:verify`,
         transcript: yield* MuseOrchestratorReplayHarness.decodeTranscript(
-          materializeReplayTranscriptWorkspace(transcript, yield* fs.realPath(replayWorkspace)),
+          yield* materializeMuseReplayWorkspace(transcript, replayWorkspace),
         ),
         commands: materialized.commands,
         steps: materialized.steps,

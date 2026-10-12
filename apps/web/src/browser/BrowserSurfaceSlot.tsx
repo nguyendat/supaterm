@@ -3,6 +3,7 @@
 import { useLayoutEffect, useRef } from "react";
 
 import { acquireBrowserSurface } from "./browserSurfaceStore";
+import { observeResize } from "../lib/observeResize";
 
 export function BrowserSurfaceSlot(props: {
   readonly tabId: string;
@@ -62,20 +63,18 @@ export function BrowserSurfaceSlot(props: {
     };
     updateRef.current = update;
     update();
-    const observer = new ResizeObserver(update);
-    observer.observe(element);
+    const observed: Element[] = [element];
     // Inline panels animate their outer width while keeping the content at
     // full width. The slot moves without resizing, so measure on shell resizes too.
     const panel = element.closest('[data-preview-panel-mode="inline"]');
-    if (panel) observer.observe(panel);
+    if (panel) observed.push(panel);
 
-    for (const gap of document.querySelectorAll('[data-slot="sidebar-gap"]')) {
-      observer.observe(gap);
-    }
+    observed.push(...document.querySelectorAll('[data-slot="sidebar-gap"]'));
+    const stopObserving = observeResize(observed, update);
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);
     return () => {
-      observer.disconnect();
+      stopObserving();
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
       if (updateRef.current === update) updateRef.current = null;

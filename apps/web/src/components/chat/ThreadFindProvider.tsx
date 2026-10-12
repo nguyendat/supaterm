@@ -1,8 +1,8 @@
 import {
   createContext,
   use,
-  useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   type ReactNode,
   type ComponentProps,
   type Ref,
@@ -48,7 +48,8 @@ export function ThreadFindProvider({
     find.open,
     find.close,
   ]);
-  useEffect(() => onOpenChange(find.isOpen), [find.isOpen, onOpenChange]);
+  // Before paint, so the details card makes room in the same frame the bar appears.
+  useLayoutEffect(() => onOpenChange(find.isOpen), [find.isOpen, onOpenChange]);
   return (
     <ThreadFindBarContext value={find.barProps}>
       <ThreadFindTimelineContext value={find.timelineProps}>{children}</ThreadFindTimelineContext>

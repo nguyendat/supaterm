@@ -5,6 +5,7 @@ export const PI_SUPACODE_MCP_EXTENSION_FILENAME = "pi-supacode-mcp-extension.ts"
 export const SUPACODE_MCP_URL_ENV = "SUPACODE_MCP_URL";
 export const SUPACODE_MCP_BEARER_ENV = "SUPACODE_MCP_BEARER_TOKEN";
 export const SUPACODE_PI_RUNTIME_MODE_ENV = "SUPACODE_PI_RUNTIME_MODE";
+export const SUPACODE_PI_MCP_EXTENSION_PATH_ENV = "SUPACODE_PI_MCP_EXTENSION_PATH";
 
 /**
  * Pi tools whose confirmations the bridge raises as file-change approvals.
@@ -21,6 +22,7 @@ import { Type } from "typebox";
 const URL_ENV = ${JSON.stringify(SUPACODE_MCP_URL_ENV)};
 const TOKEN_ENV = ${JSON.stringify(SUPACODE_MCP_BEARER_ENV)};
 const RUNTIME_MODE_ENV = ${JSON.stringify(SUPACODE_PI_RUNTIME_MODE_ENV)};
+const EXTENSION_PATH_ENV = ${JSON.stringify(SUPACODE_PI_MCP_EXTENSION_PATH_ENV)};
 const ORCHESTRATION_INSTRUCTIONS = ${JSON.stringify(SUPACODE_ORCHESTRATION_INSTRUCTIONS.trim())};
 const PROTOCOL = "2025-06-18";
 const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls"]);
@@ -28,9 +30,11 @@ const FILE_CHANGE_TOOLS = new Set(${JSON.stringify(PI_FILE_CHANGE_TOOLS)});
 
 type RuntimeMode = "approval-required" | "auto-accept-edits" | "auto" | "full-access";
 
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
 type JsonRpcResponse = {
   readonly id?: number | string;
-  readonly result?: unknown;
+  readonly result?: JsonValue;
   readonly error?: { readonly message?: string };
 };
 
@@ -38,6 +42,8 @@ type McpTool = {
   readonly name: string;
   readonly description?: string;
   readonly inputSchema?: Record<string, unknown>;
+  readonly annotations?: { readonly readOnlyHint?: boolean };
+  readonly outputSchema?: Record<string, unknown>;
 };
 
 function env(name: string): string | undefined {
@@ -86,28 +92,57 @@ function jsonSchemaToTypebox(schema: Record<string, unknown> | undefined) {
   return Type.Object({}, { additionalProperties: true });
 }
 
-function formatMcpContent(result: unknown): string {
-  if (result === null || result === undefined) return "";
-  if (typeof result !== "object") return String(result);
+type ModelContent =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType: string };
+
+function mcpModelContent(result: unknown): ModelContent[] {
+  if (result === null || result === undefined) return [];
+  if (typeof result !== "object") return [{ type: "text", text: String(result) }];
   const record = result as {
-    readonly content?: ReadonlyArray<{ readonly type?: string; readonly text?: string }>;
+    readonly content?: ReadonlyArray<{
+      readonly type?: string;
+      readonly text?: string;
+      readonly data?: string;
+      readonly mimeType?: string;
+    }>;
     readonly structuredContent?: unknown;
-    readonly isError?: boolean;
   };
-  const texts: string[] = [];
+  const content: ModelContent[] = [];
   if (Array.isArray(record.content)) {
     for (const part of record.content) {
-      if (part?.type === "text" && typeof part.text === "string") texts.push(part.text);
+      if (part?.type === "text" && typeof part.text === "string") {
+        content.push({ type: "text", text: part.text });
+      } else if (part?.type === "image" && typeof part.data === "string" && typeof part.mimeType === "string") {
+        content.push({ type: "image", data: part.data, mimeType: part.mimeType });
+      }
     }
   }
-  // Most Supacode tools mirror structuredContent in a text block. Repeating it would
-  // leave Supacode's own output parsing two JSON documents instead of one.
-  if (record.structuredContent !== undefined) {
-    const structured = JSON.stringify(record.structuredContent);
-    if (!texts.includes(structured)) texts.push(structured);
+  // Structured output belongs to scripts. Only use it as model text when
+  // the server supplied no model-facing blocks, matching Pi's native MCP tools.
+  if (content.length === 0) {
+    content.push({ type: "text", text: JSON.stringify(record.structuredContent ?? result) });
   }
-  if (texts.length > 0) return texts.join("\\n");
-  return JSON.stringify(result);
+  return content;
+}
+
+function mcpScriptResult(result: JsonValue | undefined) {
+  if (typeof result !== "object" || result === null || Array.isArray(result)) return result;
+  const { _meta: _ignored, ...scriptResult } = result;
+  return scriptResult;
+}
+
+function mcpOutputSchema(tool: McpTool) {
+  return jsonSchemaToTypebox({
+    type: "object",
+    properties: {
+      content: { type: "array", items: { type: "object" } },
+      ...(tool.outputSchema === undefined ? {} : { structuredContent: tool.outputSchema }),
+      isError: { type: "boolean" },
+      _meta: { type: "object" },
+    },
+    required: ["content"],
+  });
 }
 
 function isMcpToolError(result: unknown): boolean {
@@ -264,10 +299,21 @@ export default async function supacodeMcpExtension(pi: ExtensionAPI) {
     typeof pi.getAllTools === "function" &&
     pi.getAllTools().some((tool) => tool.name === "tool_search" && tool.sourceInfo?.path === "builtin:tool-search");
 
+  const readOnlyMcpTools = new Set<string>();
+  const isReadOnlyMcpTool = (name: string) => {
+    const extensionPath = env(EXTENSION_PATH_ENV);
+    if (extensionPath === undefined || !readOnlyMcpTools.has(name) || typeof pi.getAllTools !== "function") return false;
+    // A user extension may own the same name. Only our registered HTTP bridge
+    // may inherit the canonical Supacode server's read-only annotation.
+    return pi.getAllTools().some((tool) => tool.name === name &&
+      typeof tool.sourceInfo?.path === "string" &&
+      NodePath.resolve(tool.sourceInfo.path) === NodePath.resolve(extensionPath));
+  };
+
   pi.on("tool_call", async (event, ctx) => {
     const mode = runtimeMode();
     if (mode === "full-access") return;
-    if (event.toolName === "tool_search" ? hasBuiltinToolSearch() : READ_ONLY_TOOLS.has(event.toolName)) {
+    if ((event.toolName === "tool_search" ? hasBuiltinToolSearch() : READ_ONLY_TOOLS.has(event.toolName)) || isReadOnlyMcpTool(event.toolName)) {
       return;
     }
     if (mode === "auto-accept-edits" && FILE_CHANGE_TOOLS.has(event.toolName)) {
@@ -276,6 +322,7 @@ export default async function supacodeMcpExtension(pi: ExtensionAPI) {
     const approved = await ctx.ui.confirm(
       \`Allow \${event.toolName}?\`,
       toolInputSummary(event.input),
+      { signal: ctx.signal },
     );
     if (!approved) {
       return { block: true, reason: \`\${event.toolName} was declined in Supacode.\` };
@@ -308,15 +355,18 @@ export default async function supacodeMcpExtension(pi: ExtensionAPI) {
     // Preserve public names for saved loadouts and tool selectors. Hidden
     // canonical names reserve ownership against Pi's configured MCP servers.
     const prefixes = ["mcp__supacode__"];
+    readOnlyMcpTools.clear();
     for (const tool of catalog) {
       const name = tool.name;
       for (const prefix of prefixes) {
+        if (tool.annotations?.readOnlyHint === true) readOnlyMcpTools.add(\`\${prefix}\${name}\`);
         const exposure = deferOptionalTools && !directTools.has(name) ? "deferred" : "direct";
         pi.registerTool({
           name: \`\${prefix}\${name}\`,
           label: name,
           description: tool.description ?? name,
           parameters: jsonSchemaToTypebox(tool.inputSchema),
+          ...(supportsExposure ? { outputSchema: mcpOutputSchema(tool) } : {}),
           ...(supportsExposure ? { exposure } : {}),
           async execute(_toolCallId, params, signal) {
             const result = await client.callTool(
@@ -324,9 +374,13 @@ export default async function supacodeMcpExtension(pi: ExtensionAPI) {
               (params ?? {}) as Record<string, unknown>,
               signal,
             );
-            const text = formatMcpContent(result);
+            const content = mcpModelContent(result);
+            if (isMcpToolError(result) && !content.some((part) => part.type === "text" && part.text.length > 0)) {
+              content.push({ type: "text", text: "MCP tool supacode/" + name + " returned an error" });
+            }
             return {
-              content: [{ type: "text", text }],
+              content,
+              structuredContent: mcpScriptResult(result),
               details: { server: "supacode", tool: name },
               ...(isMcpToolError(result) ? { isError: true } : {}),
             };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { HostProcessPlatform } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
@@ -66,7 +66,7 @@ const diagnose = (input: {
     setupCommand: "sudo supacode browser setup",
   }).pipe(
     Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-    Effect.provideService(HostProcessPlatform, input.platform),
+    Effect.provideService(HostProcess.Platform, input.platform),
     Effect.map((error) => ({ error, commands })),
   );
 };

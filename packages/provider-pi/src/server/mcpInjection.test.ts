@@ -9,6 +9,7 @@ import {
   SUPACODE_MCP_BEARER_ENV,
   SUPACODE_MCP_URL_ENV,
   SUPACODE_PI_RUNTIME_MODE_ENV,
+  SUPACODE_PI_MCP_EXTENSION_PATH_ENV,
 } from "./mcpExtensionSource.ts";
 import {
   buildPiRpcLaunch,
@@ -65,12 +66,17 @@ describe("pi Supacode MCP injection", () => {
     assert.equal(launch.env[SUPACODE_MCP_URL_ENV], "http://127.0.0.1:43123/mcp");
     assert.equal(launch.env[SUPACODE_MCP_BEARER_ENV], "secret-pi-token");
     assert.equal(launch.env[SUPACODE_PI_RUNTIME_MODE_ENV], "approval-required");
+    assert.equal(
+      launch.env[SUPACODE_PI_MCP_EXTENSION_PATH_ENV],
+      "/tmp/cache/pi-supacode-mcp-extension.ts",
+    );
 
     const permissionOnly = buildPiRpcLaunch({
       launchArgs: [],
       environment: {
         [SUPACODE_MCP_URL_ENV]: "http://127.0.0.1:9999/stale",
         [SUPACODE_MCP_BEARER_ENV]: "stale-token",
+        [SUPACODE_PI_MCP_EXTENSION_PATH_ENV]: "/stale/extension.ts",
       },
       mcpSession: undefined,
       extensionPath: "/tmp/cache/pi-supacode-mcp-extension.ts",
@@ -86,6 +92,10 @@ describe("pi Supacode MCP injection", () => {
     assert.isUndefined(permissionOnly.env[SUPACODE_MCP_URL_ENV]);
     assert.isUndefined(permissionOnly.env[SUPACODE_MCP_BEARER_ENV]);
     assert.equal(permissionOnly.env[SUPACODE_PI_RUNTIME_MODE_ENV], "auto-accept-edits");
+    assert.equal(
+      permissionOnly.env[SUPACODE_PI_MCP_EXTENSION_PATH_ENV],
+      "/tmp/cache/pi-supacode-mcp-extension.ts",
+    );
   });
 
   it("falls back to Pi's first supported mode for legacy auto threads", () => {
@@ -161,7 +171,6 @@ describe("pi Supacode MCP injection", () => {
       assert.include(mcpSource, "Allow ${event.toolName}?");
       assert.include(mcpSource, '"mcp-protocol-version"');
       assert.include(mcpSource, '"tools/call"');
-      assert.include(mcpSource, "mcp__supacode__");
       assert.include(mcpSource, "mcp__supacode__");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );

@@ -36,7 +36,7 @@ export function SidebarSnoozeButton({
                   onClick={(event) => event.stopPropagation()}
                   onDoubleClick={(event) => event.stopPropagation()}
                   onPointerDown={(event) => event.stopPropagation()}
-                  className="inline-flex h-5 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/65 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                  className="inline-flex h-5 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/65 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 />
               }
             />

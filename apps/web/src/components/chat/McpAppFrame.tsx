@@ -31,6 +31,7 @@ import { cn } from "~/lib/utils";
 import { useTurnItemDetail } from "~/state/queries";
 import { mcpAppEnvironment } from "~/state/mcpApps";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { observeResize } from "~/lib/observeResize";
 
 const MIN_URL_LIFE_MS = 5 * 60_000;
 const fullscreenSupported =
@@ -78,11 +79,9 @@ export function McpAppFrame(props: {
     const box = boxRef.current;
     if (!box) return;
     setWidth(box.clientWidth);
-    const observer = new ResizeObserver(([entry]) => {
+    return observeResize(box, ([entry]) => {
       if (entry) setWidth(Math.round(entry.contentRect.width));
     });
-    observer.observe(box);
-    return () => observer.disconnect();
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Closing and reopening replaces the box.
   }, [closed]);
 
@@ -93,6 +92,7 @@ export function McpAppFrame(props: {
       fileName: mcpAppFileName(app),
       mimeType: "text/html",
       disposition: "inline" as const,
+      renderIntent: "mcp-app" as const,
     }),
     [app],
   );

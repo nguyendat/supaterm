@@ -1,6 +1,7 @@
 import type { ComponentProps } from "react";
-import { ActivityIndicator, Platform, Pressable } from "react-native";
+import { Platform, Pressable } from "react-native";
 
+import { AppActivityIndicator } from "../../../components/AppActivityIndicator";
 import { SymbolView } from "../../../components/AppSymbol";
 import { AppText as Text } from "../../../components/AppText";
 import { MaterialListRow } from "../../../components/MaterialListRow";
@@ -30,7 +31,7 @@ export function SettingsActionRow({
       weight="regular"
     />
   );
-  const spinner = loading ? <ActivityIndicator colorClassName={iconColorClassName} /> : null;
+  const spinner = loading ? <AppActivityIndicator colorClassName={iconColorClassName} /> : null;
 
   if (Platform.OS === "android") {
     return (

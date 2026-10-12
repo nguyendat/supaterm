@@ -10,10 +10,8 @@ import {
 import {
   canCommitPendingModel,
   favoritesFirst,
-  modelFavoriteKey,
   modelMatchesCatalogQuery,
   pendingModelAfterPress,
-  toggleModelFavorite,
 } from "./thread-settings-sheet-state";
 
 function modelOption(
@@ -60,23 +58,6 @@ describe("thread settings sheet state", () => {
       "third",
       "fourth",
     ]);
-  });
-
-  it("adds and removes favorites for one provider instance", () => {
-    const codexModel = modelOption("shared");
-    const otherProvider = ProviderInstanceId.make("codex_personal");
-    const personalModel = {
-      ...codexModel,
-      key: modelFavoriteKey(otherProvider, "shared"),
-      selection: { ...codexModel.selection, instanceId: otherProvider },
-    };
-    const favorites = toggleModelFavorite([], codexModel);
-
-    expect(toggleModelFavorite(favorites, personalModel)).toEqual([
-      { provider: ProviderInstanceId.make("codex"), model: "shared" },
-      { provider: otherProvider, model: "shared" },
-    ]);
-    expect(toggleModelFavorite(favorites, codexModel)).toEqual([]);
   });
 
   it("matches visible model and provider terms", () => {
@@ -187,6 +168,15 @@ describe("thread settings sheet state", () => {
       { id: "fastMode", value: true },
     ]);
     expect(pressed.selection.options).toEqual([]);
+  });
+
+  it("cannot select a hidden model exposed only for visibility management", () => {
+    const pending = modelOption("gpt-next");
+    expect(
+      canCommitPendingModel(pending, [
+        { providerKey: "codex", providerLabel: "Codex", models: [{ ...pending, isHidden: true }] },
+      ]),
+    ).toBe(false);
   });
 
   it("cannot save a staged model after sign-out removes it from the catalog", () => {

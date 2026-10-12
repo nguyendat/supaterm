@@ -13,7 +13,7 @@ layer("055_OrchestrationV2", (it) => {
     Effect.sync(() => {
       assert.deepStrictEqual(
         migrationEntries.map(([id]) => id),
-        Array.from({ length: 59 }, (_, index) => index + 1),
+        Array.from({ length: 60 }, (_, index) => index + 1),
       );
     }),
   );
@@ -31,6 +31,7 @@ layer("055_OrchestrationV2", (it) => {
         [57, "QuestionAutoDismissIndex"],
         [58, "McpAppModelContext"],
         [59, "ThreadSnapshotWindowIndexes"],
+        [60, "PullRequestReviewGuides"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
 
@@ -56,6 +57,7 @@ layer("055_OrchestrationV2", (it) => {
         { migration_id: 57, name: "QuestionAutoDismissIndex" },
         { migration_id: 58, name: "McpAppModelContext" },
         { migration_id: 59, name: "ThreadSnapshotWindowIndexes" },
+        { migration_id: 60, name: "PullRequestReviewGuides" },
       ]);
 
       const tables = yield* sql<{ readonly name: string }>`

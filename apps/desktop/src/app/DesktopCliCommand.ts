@@ -1,6 +1,6 @@
 import * as Path from "effect/Path";
 import { CommandResolutionCache, resolveCommandPath } from "@supacode/shared/shell";
-import { HostProcessPlatform } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import type { DesktopCliCommandState } from "@supacode/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -129,7 +129,7 @@ export const make = Effect.gen(function* () {
 
   const firstOnPath = Effect.suspend(() =>
     resolveCommandPath("supacode", { env: process.env }).pipe(
-      Effect.provideService(HostProcessPlatform, environment.platform),
+      Effect.provideService(HostProcess.Platform, environment.platform),
       Effect.provideService(FileSystem.FileSystem, fs),
       Effect.provideService(Path.Path, path),
       Effect.provideService(CommandResolutionCache, new Map()),

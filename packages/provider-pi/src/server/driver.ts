@@ -6,7 +6,6 @@
  * Pi state (sessions, settings, extensions, auth) lives in the user's own
  * `~/.pi/agent`, so continuation identity uses the default instance grouping.
  */
-import * as NodeOS from "node:os";
 import { expandHomePath } from "@supacode/provider-core/server/pathExpansion";
 import { ProviderDriverKind, type ServerProvider } from "@supacode/contracts";
 import { PiSettings } from "../settings.ts";
@@ -19,6 +18,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as ProviderLatestVersions from "@supacode/provider-core/server/ProviderLatestVersions";
 import * as ProviderHost from "@supacode/provider-core/server/ProviderHost";
+import { piUsageReader } from "./usage.ts";
 import { makePiTextGeneration } from "./textGeneration.ts";
 import { PiAdapterV2Driver, type PiAdapterV2DriverEnv } from "./adapter.ts";
 import { ProviderDriverError } from "@supacode/provider-core/server/errors";
@@ -46,6 +46,7 @@ import {
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
 } from "@supacode/provider-core/server/snapshotSettings";
+import * as HostProcess from "@supacode/shared/HostProcess";
 
 const decodePiSettings = Schema.decodeSync(PiSettings);
 
@@ -82,12 +83,13 @@ const withInstanceIdentity =
     continuation: { groupKey: input.continuationGroupKey },
   });
 
-export const PiDriver: ProviderDriver<PiSettings, PiDriverEnv> = {
+export const PiDriver: ProviderDriver<PiSettings, PiDriverEnv, Path.Path> = {
   driverKind: DRIVER_KIND,
   metadata: {
     displayName: "Pi",
     supportsMultipleInstances: true,
   },
+  usage: piUsageReader,
   configSchema: PiSettings,
   defaultConfig: (): PiSettings => decodePiSettings({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
@@ -99,7 +101,8 @@ export const PiDriver: ProviderDriver<PiSettings, PiDriverEnv> = {
       const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
       const host = yield* ProviderHost.ProviderHost;
       const { cwd } = host.paths;
-      const processEnv = mergeProviderInstanceEnvironment(environment);
+      const processEnv = yield* mergeProviderInstanceEnvironment(environment);
+      const homeDirectory = yield* HostProcess.HomeDirectory;
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,
@@ -186,10 +189,11 @@ export const PiDriver: ProviderDriver<PiSettings, PiDriverEnv> = {
           expandHomePath(
             processEnv.PI_CODING_AGENT_DIR?.trim() ||
               pathService.join(
-                processEnv.HOME || processEnv.USERPROFILE || NodeOS.homedir(),
+                processEnv.HOME || processEnv.USERPROFILE || homeDirectory,
                 ".pi",
                 "agent",
               ),
+            homeDirectory,
           ),
           "skills",
         ),

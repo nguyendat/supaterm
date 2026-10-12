@@ -42,7 +42,7 @@ export function SidebarPinButton({
             target.onClick(event);
           }}
           onPointerDown={(event) => event.stopPropagation()}
-          className="inline-flex h-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/65 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-3.5"
+          className="inline-flex h-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/65 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&_svg]:size-3.5"
         />
       }
     >

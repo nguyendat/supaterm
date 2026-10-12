@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { HostProcessPlatform } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import { beforeEach, vi } from "vite-plus/test";
 
@@ -141,7 +141,7 @@ describe("ElectronApp", () => {
       ]);
     }).pipe(
       Effect.provide(ElectronApp.layer),
-      Effect.provideService(HostProcessPlatform, "darwin"),
+      Effect.provideService(HostProcess.Platform, "darwin"),
     ),
   );
 
@@ -151,13 +151,13 @@ describe("ElectronApp", () => {
 
       assert.deepEqual(
         yield* electronApp.environmentMachineIcons.pipe(
-          Effect.provideService(HostProcessPlatform, "win32"),
+          Effect.provideService(HostProcess.Platform, "win32"),
         ),
         {},
       );
       assert.deepEqual(
         yield* electronApp.environmentMachineIcons.pipe(
-          Effect.provideService(HostProcessPlatform, "linux"),
+          Effect.provideService(HostProcess.Platform, "linux"),
         ),
         {},
       );
@@ -178,7 +178,7 @@ describe("ElectronApp", () => {
       });
     }).pipe(
       Effect.provide(ElectronApp.layer),
-      Effect.provideService(HostProcessPlatform, "darwin"),
+      Effect.provideService(HostProcess.Platform, "darwin"),
     ),
   );
 
@@ -194,7 +194,7 @@ describe("ElectronApp", () => {
       });
     }).pipe(
       Effect.provide(ElectronApp.layer),
-      Effect.provideService(HostProcessPlatform, "darwin"),
+      Effect.provideService(HostProcess.Platform, "darwin"),
     ),
   );
 

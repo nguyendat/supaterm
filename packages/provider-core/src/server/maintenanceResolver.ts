@@ -12,7 +12,7 @@ import {
   type ServerProviderVersionAdvisory,
 } from "@supacode/contracts";
 import { compareSemverVersions } from "@supacode/shared/semver";
-import { HostProcessPlatform } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import { causeErrorTag } from "@supacode/shared/observability";
 import { resolveCommandPath } from "@supacode/shared/shell";
 import * as Cache from "effect/Cache";
@@ -141,7 +141,7 @@ export function makeProviderMaintenanceCapabilities(input: {
   readonly env?: NodeJS.ProcessEnv;
   readonly latestVersion?: string | null;
 }): ProviderMaintenanceCapabilities {
-  const platform = input.platform ?? HostProcessPlatform.defaultValue();
+  const platform = input.platform ?? HostProcess.Platform.defaultValue();
   const update =
     input.updateExecutable === null || input.updateLockKey === null
       ? null
@@ -587,7 +587,7 @@ const resolveNpmGlobalPrefix = Effect.fn("resolveNpmGlobalPrefix")(function* (
   if (fromRealPath) {
     return fromRealPath;
   }
-  if ((yield* HostProcessPlatform) !== "win32") {
+  if ((yield* HostProcess.Platform) !== "win32") {
     return null;
   }
   const fileSystem = yield* FileSystem.FileSystem;
@@ -667,7 +667,7 @@ export const resolveProviderMaintenanceCapabilitiesEffect = Effect.fn(
     resolvedCommandPath,
     realCommandPath,
     env,
-    platform: yield* HostProcessPlatform,
+    platform: yield* HostProcess.Platform,
   });
 });
 

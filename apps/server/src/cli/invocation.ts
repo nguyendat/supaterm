@@ -5,13 +5,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import type { ServerInstallation } from "@supacode/contracts";
-import {
-  HostProcessArguments,
-  HostProcessEnvironment,
-  HostProcessExecutablePath,
-  HostProcessIsExecutable,
-  HostProcessPlatform,
-} from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import { isCommandAvailable } from "@supacode/shared/shell";
 import { resolveSelfInvocation } from "@supacode/shared/nodeRuntime";
 
@@ -61,10 +55,10 @@ const decodeInstallManifest = Schema.decodeUnknownEffect(Schema.fromJsonString(I
 export const resolveServerInstallation = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const args = yield* HostProcessArguments;
-  const executable = yield* HostProcessIsExecutable;
-  const executablePath = yield* HostProcessExecutablePath;
-  const platform = yield* HostProcessPlatform;
+  const args = yield* HostProcess.Arguments;
+  const executable = yield* HostProcess.IsExecutable;
+  const executablePath = yield* HostProcess.ExecutablePath;
+  const platform = yield* HostProcess.Platform;
   const entry = yield* fs.realPath(executable ? executablePath : (args[1] ?? ""));
   const match =
     /^(.*)\/lib\/node_modules\/supacode\/(?:dist\/bin\.mjs|bin\/supacode\.js|node_modules\/@supabitapp\/supacode-[^/]+\/supacode)$/.exec(
@@ -142,7 +136,7 @@ export function formatCliCommand(input: {
 
 /** `formatCliCommand` against this process's real entry path and version. */
 export const resolveCliCommand = (subcommand: string) =>
-  Effect.map(HostProcessArguments, (processArguments) =>
+  Effect.map(HostProcess.Arguments, (processArguments) =>
     formatCliCommand({
       subcommand,
       entryPath: processArguments[1] ?? "",
@@ -155,7 +149,7 @@ const shellWord = (value: string) =>
 
 const resolveInstallCommand = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
-  const shim = (yield* HostProcessEnvironment).SUPACODE_CLI_PATH?.trim();
+  const shim = (yield* HostProcess.Environment).SUPACODE_CLI_PATH?.trim();
   if (shim && (yield* fs.exists(shim).pipe(Effect.orElseSucceed(() => false)))) {
     return Option.some(shellWord(shim));
   }
@@ -166,7 +160,7 @@ const resolveInstallCommand = Effect.gen(function* () {
   }
   const command = `${shellWord(invocation.command)} ${shellWord(invocation.entrypoint)}`;
   return Option.some(
-    (yield* HostProcessEnvironment).ELECTRON_RUN_AS_NODE === "1"
+    (yield* HostProcess.Environment).ELECTRON_RUN_AS_NODE === "1"
       ? `env ELECTRON_RUN_AS_NODE=1 ${command}`
       : command,
   );
@@ -187,7 +181,7 @@ export const resolveRootCliCommand = (subcommand: string) =>
   Effect.gen(function* () {
     const { command, launcher } = yield* resolveHostCliCommand(subcommand);
     if (launcher) return `sudo ${command}`;
-    const executablePath = yield* HostProcessExecutablePath;
+    const executablePath = yield* HostProcess.ExecutablePath;
     const systemNode = ROOT_PATH_DIRECTORIES.some((directory) =>
       executablePath.startsWith(`${directory}/`),
     );

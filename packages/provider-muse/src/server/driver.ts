@@ -1,6 +1,6 @@
 import { ProviderDriverKind } from "@supacode/contracts";
 import { MuseSettings } from "../settings.ts";
-import { HostProcessEnvironment } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -69,16 +69,16 @@ export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv> = {
       const eventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
       const { cwd } = host.paths;
       const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
-      const hostEnvironment = yield* HostProcessEnvironment;
+      const hostEnvironment = yield* HostProcess.Environment;
 
-      const processEnvironment = mergeProviderInstanceEnvironment(
+      const processEnvironment = yield* mergeProviderInstanceEnvironment(
         environment,
         makeMuseEnvironment(hostEnvironment),
       );
       const effectiveConfig = {
         ...config,
         enabled,
-        binaryPath: expandHomePath(config.binaryPath),
+        binaryPath: expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
       } satisfies MuseSettings;
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,

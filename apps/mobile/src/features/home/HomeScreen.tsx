@@ -1,4 +1,5 @@
 import { useThreadListV2Layout } from "../threads/use-thread-list-v2-layout";
+import { AppActivityIndicator } from "../../components/AppActivityIndicator";
 import { useAndroidControlSizing } from "../../components/useAndroidControlSizing";
 import { type LegendListRef } from "@legendapp/list/react-native";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
@@ -27,7 +28,6 @@ import {
   type ComponentProps,
 } from "react";
 import {
-  ActivityIndicator,
   Platform,
   ScrollView,
   View,
@@ -37,6 +37,7 @@ import {
   type NativeSyntheticEvent,
 } from "react-native";
 import { ScrollViewMarker } from "react-native-screens";
+import { GestureDetector, useNativeGesture } from "react-native-gesture-handler";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -49,8 +50,12 @@ import type { SavedRemoteConnection } from "../../lib/connection";
 import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
 import { NativePrimaryColumnContext } from "../../native/v5-workspace-context";
 import { nativeHeaderScrollEdgeEffects } from "../../native/scrollEdgeEffects";
-import { useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics";
+import {
+  useNativeColumnLayoutMetrics,
+  useNativeLayoutMetrics,
+} from "../../native/native-layout-metrics";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
+import { useNativeWorkspaceColumnsSupported } from "../../native/NativeWorkspaceColumns";
 import { useThreadSearch } from "../../state/queries";
 import { useThreadJumpShortcuts } from "../keyboard/threadKeyboardShortcuts";
 import { usePendingThreadOrder } from "../../state/thread-order";
@@ -85,12 +90,8 @@ import {
 import { createSwipeRowActivation } from "./swipe-row-activation";
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "./thread-swipe-actions";
 import { useMaterialFabScroll } from "./MaterialFabScrollContext";
-import { homeSearchRidesKeyboard } from "./home-search-placement";
-import {
-  KeyboardLiftedView,
-  useRestingSafeAreaBottom,
-  useSearchKeyboardLift,
-} from "./search-keyboard-lift";
+import { useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
+import { ThreadListFilters } from "./ThreadListFilters";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
@@ -271,9 +272,10 @@ function renderHomeScrollView(props: ScrollViewProps) {
 
 /* ─── Main screen ────────────────────────────────────────────────────── */
 
-const PRE_LIQUID_GLASS_BOTTOM_TOOLBAR_HEIGHT = 44;
-
 export function HomeScreen(props: HomeScreenProps) {
+  const usesNativeWorkspaceColumns = useNativeWorkspaceColumnsSupported();
+  const workspace = useWorkspaceTabs();
+  const [initialScrollOffset] = useState(() => workspace?.getScrollOffset("threads") ?? 0);
   const primaryColumn = use(NativePrimaryColumnContext);
   const contentBackground = primaryColumn ? "bg-drawer" : "bg-screen";
   const containerClassName = cn(
@@ -285,6 +287,8 @@ export function HomeScreen(props: HomeScreenProps) {
   const fullSwipeWidth = primaryColumn && columnMetrics ? columnMetrics.width - 20 : undefined;
   const queuedThreadKeys = useQueuedThreadKeys();
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
+  // Let trackpad scrolling coexist with each row's horizontal swipe gesture.
+  const homeScrollGesture = useNativeGesture();
   const insets = useSafeAreaInsets();
   const navigationHeaderHeight = useContext(HeaderHeightContext) ?? insets.top + 44;
   const navigation = useNavigation();
@@ -293,27 +297,18 @@ export function HomeScreen(props: HomeScreenProps) {
     (state) => state.isVisible && navigation.isFocused(),
   );
   const { fabClearance } = useAndroidControlSizing();
+  const screenMetrics = useNativeLayoutMetrics();
+  const contentSideInsets = usesNativeWorkspaceColumns
+    ? (columnMetrics ?? screenMetrics)?.safeArea
+    : undefined;
   const listTopInset =
     Platform.OS === "ios" && NATIVE_LIQUID_GLASS_SUPPORTED ? navigationHeaderHeight : 0;
-  const listBottomInset =
-    Platform.OS === "ios" && !NATIVE_LIQUID_GLASS_SUPPORTED
-      ? Math.max(insets.bottom, 24) + 60 + PRE_LIQUID_GLASS_BOTTOM_TOOLBAR_HEIGHT
-      : 0;
-
-  const safeAreaBottom = columnMetrics?.safeArea.bottom ?? insets.bottom;
-  // The list keeps its resting geometry while a keyboard is up and is lifted instead.
+  // UIKit's column safe area already includes its bottom toolbar.
   const iosBottomClearance = Math.max(
-    useRestingSafeAreaBottom(safeAreaBottom, searchKeyboardVisible),
+    columnMetrics?.safeArea.bottom ?? insets.bottom,
     24,
+    workspace?.bottomClearance ?? 0,
   );
-  const listContentBottomPadding =
-    Platform.OS === "ios"
-      ? iosBottomClearance
-      : Math.max(insets.bottom, 16) + (Platform.OS === "android" ? fabClearance : 88);
-  const searchKeyboardLift = useSearchKeyboardLift({
-    restingClearance: listBottomInset + listContentBottomPadding,
-    toolbarRidesKeyboard: homeSearchRidesKeyboard(primaryColumn),
-  });
   const searchEnvironmentIds = useMemo(
     () =>
       props.selectedEnvironmentId === null
@@ -361,6 +356,15 @@ export function HomeScreen(props: HomeScreenProps) {
   }, []);
   const onMaterialFabScroll = useMaterialFabScroll();
   const listRef = useRef<LegendListRef>(null);
+  const searchMode = workspace?.state.tabs.threads.searchMode;
+  const restoredOffset = workspace?.state.tabs.threads.scrollOffset;
+  useEffect(() => {
+    if (searchMode !== "resting" || restoredOffset === undefined) return;
+    listRef.current?.scrollToOffset({
+      offset: restoredOffset - (Platform.OS === "ios" ? insets.top : 0),
+      animated: false,
+    });
+  }, [searchMode, insets.top, restoredOffset]);
   const swipeRowActivation = useMemo(() => createSwipeRowActivation(), []);
   const activateVisibleRows = useCallback(
     (rows: ReadonlyArray<ThreadListV2ListItem>) => {
@@ -379,13 +383,18 @@ export function HomeScreen(props: HomeScreenProps) {
   const handleListScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       onMaterialFabScroll?.(event);
+      if (workspace)
+        workspace.recordScrollOffset(
+          "threads",
+          Math.max(0, event.nativeEvent.contentOffset.y + (Platform.OS === "ios" ? insets.top : 0)),
+        );
       clearTimeout(activationTimerRef.current);
       activationTimerRef.current = setTimeout(
         () => activateVisibleRows(listRef.current?.getState().data ?? []),
         200,
       );
     },
-    [activateVisibleRows, onMaterialFabScroll],
+    [activateVisibleRows, onMaterialFabScroll, workspace, insets.top],
   );
   const trackListTouches = useCallback(
     (event: GestureResponderEvent, started: boolean) => {
@@ -668,7 +677,6 @@ export function HomeScreen(props: HomeScreenProps) {
     searching: hasSearchQuery || searchKeyboardVisible,
     scrolling: !swipeEnabled,
     ready: shelfPreferencesLoaded && !props.catalogState.isLoadingConnections,
-    lift: searchKeyboardLift,
   });
   const prepareListMotion = listMotion.prepare;
   const renderV2ItemContent = useCallback(
@@ -813,6 +821,7 @@ export function HomeScreen(props: HomeScreenProps) {
           onSetThreadAutoSettle={handleSetThreadAutoSettle}
           onSwipeableClose={handleSwipeableClose}
           onSwipeableWillOpen={handleSwipeableWillOpen}
+          simultaneousSwipeGesture={homeScrollGesture}
           activationKey={item.key}
         />
       );
@@ -830,6 +839,7 @@ export function HomeScreen(props: HomeScreenProps) {
       handleSwipeableWillOpen,
       handleUnsettleThread,
       handleSetThreadAutoSettle,
+      homeScrollGesture,
       autoSettleOptOutEnvironmentIds,
       pinningEnvironmentIds,
       autoSettleOptOutEnvironmentIds,
@@ -934,6 +944,8 @@ export function HomeScreen(props: HomeScreenProps) {
           style={{
             paddingBottom: Platform.OS === "ios" ? iosBottomClearance : Math.max(insets.bottom, 24),
             paddingTop: NATIVE_LIQUID_GLASS_SUPPORTED ? insets.top + 72 : 0,
+            paddingLeft: 32 + (contentSideInsets?.left ?? 0),
+            paddingRight: 32 + (contentSideInsets?.right ?? 0),
           }}
         >
           <View className="w-full max-w-[430px]">
@@ -957,7 +969,7 @@ export function HomeScreen(props: HomeScreenProps) {
             />
             {emptyState.loading ? (
               <View className="mt-4 items-center">
-                <ActivityIndicator colorClassName="accent-icon-muted" />
+                <AppActivityIndicator colorClassName="accent-icon-muted" />
               </View>
             ) : null}
           </View>
@@ -968,9 +980,21 @@ export function HomeScreen(props: HomeScreenProps) {
 
   const listHeader = Platform.OS === "ios" ? undefined : <HomeTopContentSpacer />;
 
-  // Project scoping lives in the header filter menu (no inline chip row on
-  // mobile — the menu is the one filter surface).
-  const v2ListHeader = listHeader;
+  const v2ListHeader = (
+    <>
+      {listHeader}
+      {workspace ? (
+        <ThreadListFilters
+          environments={props.environments}
+          projects={projectScopes.map((scope) => ({ key: scope.key, label: scope.title }))}
+          selectedEnvironmentId={props.selectedEnvironmentId}
+          selectedProjectKey={props.selectedProjectKey}
+          onEnvironmentChange={props.onEnvironmentChange}
+          onProjectChange={props.onProjectChange}
+        />
+      ) : null}
+    </>
+  );
 
   // Use the v2 project scope for its empty state. Snoozed threads need no
   // special empty state: their shelf header is a list row even while collapsed.
@@ -1008,9 +1032,7 @@ export function HomeScreen(props: HomeScreenProps) {
           className="flex-1 items-center justify-center overflow-hidden rounded-t-[28px] bg-screen px-4"
           style={{ paddingBottom: insets.bottom }}
         >
-          <KeyboardLiftedView lift={searchKeyboardLift} ratio={0.5}>
-            {v2ListEmpty}
-          </KeyboardLiftedView>
+          {v2ListEmpty}
         </View>
       </View>
     );
@@ -1024,59 +1046,72 @@ export function HomeScreen(props: HomeScreenProps) {
             ? "flex-1 overflow-hidden rounded-t-[28px] bg-screen"
             : cn("flex-1", contentBackground)
         }
-        style={{ marginTop: listTopInset, marginBottom: listBottomInset }}
+        style={{ marginTop: listTopInset }}
       >
         {/* Shared with the iPad sidebar: cells are reused across data
             rebuilds and `itemsAreEqual` keeps a minute tick (or an unrelated
             shell update) from re-rendering untouched rows. */}
         <SwipeableScrollGateProvider enabled={swipeEnabled} activation={swipeRowActivation}>
-          <AnimatedLegendList
-            ref={listRef}
-            onLoad={() => activateVisibleRows(threadListV2Items)}
-            onTouchStart={(event) => trackListTouches(event, true)}
-            onTouchEnd={(event) => trackListTouches(event, false)}
-            onTouchCancel={(event) => trackListTouches(event, false)}
-            renderScrollComponent={Platform.OS === "ios" ? renderHomeScrollView : undefined}
-            data={threadListV2Items}
-            renderItem={renderV2Item}
-            keyExtractor={v2KeyExtractor}
-            getItemType={(item) => item.type}
-            itemsAreEqual={threadListV2ListItemsAreEqual}
-            estimatedItemSize={ESTIMATED_THREAD_LIST_V2_ROW_HEIGHT}
-            drawDistance={THREAD_LIST_V2_DRAW_DISTANCE}
-            recycleItems
-            itemLayoutAnimation={listMotion.layout}
-            extraData={v2ExtraData}
-            ListHeaderComponent={v2ListHeader}
-            ListEmptyComponent={
-              v2ListEmpty && (
-                // The list's flex-end empty layout ignores the iOS start inset.
-                <KeyboardLiftedView
-                  lift={searchKeyboardLift}
-                  style={{ marginBottom: Platform.OS === "ios" ? insets.top : 0 }}
-                >
-                  {v2ListEmpty}
-                </KeyboardLiftedView>
-              )
-            }
-            style={{ flex: 1 }}
-            sharedValues={listMotion.sharedValues}
-            itemsContainerStyle={listMotion.alignmentStyle}
-            alignItemsAtEnd
-            automaticallyAdjustsScrollIndicatorInsets={Platform.OS === "ios"}
-            contentInsetAdjustmentBehavior="never"
-            contentInset={Platform.OS === "ios" ? { top: insets.top } : undefined}
-            contentInsetStartAdjustment={Platform.OS === "ios" ? insets.top : 0}
-            showsVerticalScrollIndicator={false}
-            keyboardDismissMode="on-drag"
-            keyboardShouldPersistTaps="handled"
-            {...scrollGateHandlers}
-            scrollEventThrottle={16}
-            contentContainerStyle={{
-              paddingHorizontal: primaryColumn ? 8 : 0,
-              paddingBottom: listContentBottomPadding,
-            }}
-          />
+          <GestureDetector gesture={homeScrollGesture}>
+            <AnimatedLegendList
+              ref={listRef}
+              onLoad={() => activateVisibleRows(threadListV2Items)}
+              onTouchStart={(event) => trackListTouches(event, true)}
+              onTouchEnd={(event) => trackListTouches(event, false)}
+              onTouchCancel={(event) => trackListTouches(event, false)}
+              renderScrollComponent={Platform.OS === "ios" ? renderHomeScrollView : undefined}
+              data={threadListV2Items}
+              renderItem={renderV2Item}
+              keyExtractor={v2KeyExtractor}
+              getItemType={(item) => item.type}
+              itemsAreEqual={threadListV2ListItemsAreEqual}
+              estimatedItemSize={ESTIMATED_THREAD_LIST_V2_ROW_HEIGHT}
+              drawDistance={THREAD_LIST_V2_DRAW_DISTANCE}
+              recycleItems
+              itemLayoutAnimation={listMotion.layout}
+              extraData={v2ExtraData}
+              ListHeaderComponent={v2ListHeader}
+              ListEmptyComponent={
+                v2ListEmpty && (
+                  // The list's flex-end empty layout ignores the iOS start inset.
+                  <View
+                    className="w-full"
+                    style={{ marginBottom: Platform.OS === "ios" ? insets.top : 0 }}
+                  >
+                    {v2ListEmpty}
+                  </View>
+                )
+              }
+              style={{ flex: 1 }}
+              sharedValues={listMotion.sharedValues}
+              itemsContainerStyle={listMotion.alignmentStyle}
+              alignItemsAtEnd
+              automaticallyAdjustsScrollIndicatorInsets={Platform.OS === "ios"}
+              contentInsetAdjustmentBehavior="never"
+              contentInset={Platform.OS === "ios" ? { top: insets.top } : undefined}
+              contentInsetStartAdjustment={Platform.OS === "ios" ? insets.top : 0}
+              initialScrollOffset={
+                initialScrollOffset > 0
+                  ? initialScrollOffset - (Platform.OS === "ios" ? insets.top : 0)
+                  : undefined
+              }
+              showsVerticalScrollIndicator={false}
+              keyboardDismissMode="on-drag"
+              keyboardShouldPersistTaps="handled"
+              {...scrollGateHandlers}
+              scrollEventThrottle={16}
+              contentContainerStyle={{
+                paddingLeft: (contentSideInsets?.left ?? 0) + (primaryColumn ? 8 : 0),
+                paddingRight: (contentSideInsets?.right ?? 0) + (primaryColumn ? 8 : 0),
+                paddingBottom:
+                  Platform.OS === "ios"
+                    ? iosBottomClearance
+                    : (workspace?.bottomClearance ??
+                      Math.max(insets.bottom, 16) +
+                        (Platform.OS === "android" ? fabClearance : 88)),
+              }}
+            />
+          </GestureDetector>
         </SwipeableScrollGateProvider>
       </View>
     </View>

@@ -28,6 +28,7 @@ import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ClaudeAdapterV2 from "./Adapters/ClaudeAdapterV2.ts";
+import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as EffectWorker from "./EffectWorker.ts";
 import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "@supacode/provider-core/server/IdAllocator";
@@ -37,6 +38,7 @@ import * as Orchestrator from "./Orchestrator.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ThreadLaunchService from "./ThreadLaunchService.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
 import { checkpointWorkspace } from "@supacode/provider-testing/replayWorkspace";
 
@@ -157,6 +159,7 @@ it.effect.each(["child completion", "scheduled message", "user steering"] as con
                   }),
                 setModel: () => Effect.void,
                 setPermissionMode: () => Effect.void,
+                stopTask: () => Effect.void,
                 interrupt: Effect.die("automatic delivery must never interrupt"),
                 close: Effect.void,
               }),
@@ -311,6 +314,7 @@ it.effect.each(["child completion", "scheduled message", "user steering"] as con
               Effect.provide(
                 ScheduledTaskService.layer.pipe(
                   Layer.provide(ThreadManagementService.layer),
+                  Layer.provide(ServerSettings.layerTest()),
                   Layer.provide(
                     Layer.mock(LegacyV1ThreadImporter.LegacyV1ThreadImporter)({
                       ensureTranscript: () =>
@@ -318,6 +322,9 @@ it.effect.each(["child completion", "scheduled message", "user steering"] as con
                     }),
                   ),
                   Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+                  Layer.provide(
+                    CommandReceiptStore.layer.pipe(Layer.provide(SqlitePersistence.layerMemory)),
+                  ),
                   Layer.provide(
                     Layer.mergeAll(
                       NodeCrypto.layer,

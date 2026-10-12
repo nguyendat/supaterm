@@ -45,6 +45,10 @@ script.
 Linux needs systemd user services. Setup enables lingering so Supacode starts at
 boot and keeps running after logout. If this needs administrator permission,
 setup prints a recovery command before changing the service.
+Agents and terminals run in their own systemd scopes, so when one runs the
+machine out of memory only that agent is killed and its turn fails with
+"Killed: out of memory." Processes they start, such as dev servers, keep
+running when the service restarts.
 
 macOS starts the service when you log in and stops it when you log out. Keep the
 Mac logged in and awake for unattended remote access. Installing over SSH while

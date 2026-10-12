@@ -7,7 +7,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import * as NodeSqliteClient from "@supacode/shared/nodeSqliteClient";
 import { runSqliteState } from "./supacode-sqlite-state.ts";
-import { HostProcessPlatform } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import { symlinksSupported } from "@supacode/shared/testing/symlinks";
 
 const createFixtureDatabase = Effect.fn("createSqliteStateFixtureDatabase")(function* (
@@ -92,7 +92,7 @@ it.layer(NodeServices.layer)("supacode-sqlite-state", (it) => {
           sql: "INSERT INTO fixtures (id, label) VALUES (2, 'seeded')",
         });
         assert.equal(mutation.operation, "exec");
-        if (mutation.operation === "exec" && (yield* HostProcessPlatform) !== "win32") {
+        if (mutation.operation === "exec" && (yield* HostProcess.Platform) !== "win32") {
           // NTFS has no POSIX mode bits to report.
           assert.equal((yield* fs.stat(mutation.backup)).mode & 0o777, 0o600);
         }

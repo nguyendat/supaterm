@@ -1,7 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import { ClaudeSettings, ProviderInstanceId } from "@supacode/contracts";
-import { HostProcessPlatform, isHostWindows } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import { createModelSelection } from "@supacode/shared/model";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -35,7 +35,7 @@ function makeFakeClaudeBinary(dir: string) {
   return Effect.gen(function* () {
     const path = yield* Path.Path;
     const fs = yield* FileSystem.FileSystem;
-    const platform = yield* HostProcessPlatform;
+    const platform = yield* HostProcess.Platform;
     const binDir = path.join(dir, "bin");
     const fixturePath = yield* path.fromFileUrl(
       new URL("./testing/ClaudeTextGeneration.fixture.mjs", import.meta.url),
@@ -69,7 +69,7 @@ function withFakeClaudeEnv<A, E, R>(
     const fs = yield* FileSystem.FileSystem;
     const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "supacode-claude-text-" });
     const binDir = yield* makeFakeClaudeBinary(tempDir);
-    const pathDelimiter = (yield* isHostWindows) ? ";" : ":";
+    const pathDelimiter = (yield* HostProcess.isWindows) ? ";" : ":";
     const previousPath = process.env.PATH;
     const previousOutput = process.env.SUPACODE_FAKE_CLAUDE_OUTPUT;
     const previousExitCode = process.env.SUPACODE_FAKE_CLAUDE_EXIT_CODE;
@@ -357,6 +357,33 @@ it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
           });
 
           expect(generated.branch).toBe("call-script");
+        }),
+    ),
+  );
+
+  it.effect("investigates a review guide checkout with user settings only", () =>
+    withFakeClaudeEnv(
+      {
+        output: JSON.stringify({ structured_output: { stops: [] } }),
+        argsMustContain: "--setting-sources user --tools Read,Grep,Glob,Bash",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateReviewGuide({
+            cwd: process.cwd(),
+            number: 7,
+            title: "Add a project setting",
+            description: "",
+            baseBranch: "main",
+            baseCommit: "0000000000000000000000000000000000000000",
+            settledReview: "",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+            },
+          });
+
+          expect(generated.stops).toEqual([]);
         }),
     ),
   );

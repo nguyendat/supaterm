@@ -14,9 +14,8 @@ import { AUTH_SCOPE_OPTIONS } from "@supacode/shared/authScopeOptions";
 import { AsyncResult } from "effect/reactivity";
 import * as Option from "effect/Option";
 import * as Haptics from "expo-haptics";
-import { type RefObject, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useContext, useState } from "react";
 import { Alert, Platform, Pressable, View } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, { ReduceMotion, useAnimatedStyle, withTiming } from "react-native-reanimated";
 
 import { type AppSymbolName, SymbolView } from "../../components/AppSymbol";
@@ -28,6 +27,7 @@ import { environmentSession } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { connectionTone } from "../connection/connectionTone";
 import { SettingsActionRow } from "./components/SettingsActionRow";
+import { SettingsDragHandle } from "./components/SettingsDragHandle";
 import { SettingsSection } from "./components/SettingsSection";
 
 const ICON_SIZE = Platform.OS === "android" ? 24 : 22;
@@ -346,7 +346,7 @@ function RouteRow(props: {
         <Text className="shrink-0 text-sm tabular-nums text-foreground-muted">{latency}</Text>
       </View>
       {props.editing ? (
-        <DragHandle
+        <SettingsDragHandle
           title={label}
           canMoveUp={props.position > 1}
           canMoveDown={props.position < props.count}
@@ -357,65 +357,5 @@ function RouteRow(props: {
         />
       ) : null}
     </Reanimated.View>
-  );
-}
-
-type DragHandleProps = {
-  readonly title: string;
-  readonly canMoveUp: boolean;
-  readonly canMoveDown: boolean;
-  readonly onStart: () => void;
-  readonly onMove: (translation: number) => void;
-  readonly onEnd: (translation: number, cancelled: boolean) => void;
-  readonly onStep: (direction: "up" | "down") => void;
-};
-
-// Gesture callbacks are separate worklets with their own copies of captured
-// variables, so the drop reads its translation from the event, not a closure.
-function createRouteDragPan(latest: RefObject<DragHandleProps>) {
-  return Gesture.Pan()
-    .minDistance(0)
-    .shouldCancelWhenOutside(false)
-    .runOnJS(true)
-    .onStart(() => latest.current.onStart())
-    .onUpdate((event) => latest.current.onMove(event.translationY))
-    .onFinalize((event, success) => latest.current.onEnd(event.translationY, !success));
-}
-
-function useRouteDragPan(latest: RefObject<DragHandleProps>) {
-  return useMemo(() => createRouteDragPan(latest), [latest]);
-}
-
-/** Pan recognition wins over the settings scroll view only inside the handle. */
-function DragHandle(props: DragHandleProps) {
-  const latest = useRef(props);
-  useLayoutEffect(() => {
-    latest.current = props;
-  });
-  const gesture = useRouteDragPan(latest);
-  return (
-    <GestureDetector gesture={gesture}>
-      <View
-        collapsable={false}
-        accessible
-        accessibilityRole="adjustable"
-        accessibilityLabel={`Reorder ${props.title}`}
-        accessibilityActions={[
-          ...(props.canMoveUp ? [{ name: "decrement", label: "Move up" }] : []),
-          ...(props.canMoveDown ? [{ name: "increment", label: "Move down" }] : []),
-        ]}
-        onAccessibilityAction={({ nativeEvent }) => {
-          if (nativeEvent.actionName === "decrement" && props.canMoveUp) props.onStep("up");
-          if (nativeEvent.actionName === "increment" && props.canMoveDown) props.onStep("down");
-        }}
-        style={{ width: 48, alignSelf: "stretch", alignItems: "center", justifyContent: "center" }}
-      >
-        <SymbolView
-          name="line.3.horizontal"
-          size={20}
-          tintColorClassName="accent-foreground-muted"
-        />
-      </View>
-    </GestureDetector>
   );
 }

@@ -20,7 +20,7 @@ import type {
   UsageTokenTotals,
 } from "@supacode/contracts";
 
-import { EMPTY_TOTALS, type UsageRecord } from "./usageTranscripts.ts";
+import { EMPTY_TOTALS, type UsageRecord } from "@supacode/provider-core/server/usage";
 import { cacheSavingsUsd, priceUsage, type RateTable } from "./usagePricing.ts";
 
 /**

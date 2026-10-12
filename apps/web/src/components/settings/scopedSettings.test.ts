@@ -3,6 +3,7 @@ import {
   EnvironmentAuthorizationError,
   EnvironmentId,
   ProjectId,
+  ProviderInstanceId,
   type ServerSettings,
 } from "@supacode/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -160,6 +161,7 @@ describe("scoped settings writes", () => {
             worktreeOnDelete: true,
             worktreeOnMerge: true,
             worktreeUnchanged: false,
+            worktreeKeepWhen: "uncommitted-changes",
           },
         },
       },
@@ -183,12 +185,14 @@ describe("scoped settings writes", () => {
         worktreeOnDelete: false,
         worktreeOnMerge: true,
         worktreeUnchanged: false,
+        worktreeKeepWhen: "uncommitted-changes",
       },
       {
         worktreeAfterDays: null,
         worktreeOnDelete: false,
         worktreeOnMerge: false,
         worktreeUnchanged: false,
+        worktreeKeepWhen: "uncommitted-changes",
       },
     ]);
   });
@@ -295,6 +299,7 @@ describe("scoped settings writes", () => {
                 worktreeOnDelete: false,
                 worktreeOnMerge: true,
                 worktreeUnchanged: false,
+                worktreeKeepWhen: "uncommitted-changes",
               },
             },
           },
@@ -315,6 +320,7 @@ describe("scoped settings writes", () => {
               worktreeOnDelete: true,
               worktreeOnMerge: true,
               worktreeUnchanged: false,
+              worktreeKeepWhen: "uncommitted-changes",
             },
           },
         },
@@ -328,6 +334,7 @@ describe("scoped settings writes", () => {
               worktreeOnDelete: true,
               worktreeOnMerge: false,
               worktreeUnchanged: false,
+              worktreeKeepWhen: "uncommitted-changes",
             },
           },
         },
@@ -337,6 +344,7 @@ describe("scoped settings writes", () => {
       planScopedSettingsClear(checkout, [customized], ["worktreeCleanup"]).serverWrites[0]?.patch,
     ).toEqual({
       projectSettingsOverrides: { [projectId]: { defaultAutoPull: true } },
+      projectSettingsOverrideRemovals: { [projectId]: ["worktreeCleanup"] },
     });
     expect(
       planScopedSettingsPatch(project, [machine, customized], {
@@ -384,7 +392,10 @@ describe("scoped settings writes", () => {
       {
         environmentId: server.environmentId,
         label: server.label,
-        patch: { projectSettingsOverrides: { [projectId]: { enableAgentBrowserAccess: false } } },
+        patch: {
+          projectSettingsOverrides: { [projectId]: { enableAgentBrowserAccess: false } },
+          projectSettingsOverrideRemovals: { [projectId]: ["defaultAutoPull"] },
+        },
       },
     ]);
     expect(
@@ -393,7 +404,12 @@ describe("scoped settings writes", () => {
         [laptop, withOverrides],
         ["defaultAutoPull", "enableAgentBrowserAccess"],
       ).serverWrites[0]?.patch,
-    ).toEqual({ projectSettingsOverrides: { [projectId]: null } });
+    ).toEqual({
+      projectSettingsOverrides: { [projectId]: null },
+      projectSettingsOverrideRemovals: {
+        [projectId]: ["defaultAutoPull", "enableAgentBrowserAccess"],
+      },
+    });
   });
 
   it("never substitutes an environment-default write for an invalid scope", () => {
@@ -525,6 +541,10 @@ describe("project overrides at environment scope", () => {
             [fleet]: { defaultThreadEnvMode: "local" },
             [supacode]: null,
           },
+          projectSettingsOverrideRemovals: {
+            [fleet]: ["defaultAutoPull"],
+            [supacode]: ["defaultAutoPull"],
+          },
         },
       },
     ]);
@@ -640,4 +660,17 @@ describe("partial object patches at project scope", () => {
       },
     });
   });
+});
+
+it("routes legacy model preference keys exclusively to the selected environment", () => {
+  const patch = {
+    favorites: [{ provider: ProviderInstanceId.make("codex"), model: "sol" }],
+    providerModelPreferences: {},
+  };
+  const plan = planScopedSettingsPatch(named, environments, patch);
+  expect(plan.clientPatch).toEqual({});
+  expect(plan.hasClientWrite).toBe(false);
+  expect(plan.serverWrites).toEqual([
+    { environmentId: server.environmentId, label: server.label, patch },
+  ]);
 });

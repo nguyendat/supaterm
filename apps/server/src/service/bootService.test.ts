@@ -1,10 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import {
-  HostProcessExecutablePath,
-  HostProcessPlatform,
-  HostProcessUserId,
-} from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -74,6 +70,14 @@ it("survives the kernel OOM-killing a greedy agent child", () => {
   const unit = BootService.renderBootServiceUnit(linuxPlan);
 
   expect(unit).toContain("OOMPolicy=continue");
+  expect(unit).toContain("ManagedOOMPreference=avoid");
+});
+
+it("outweighs the agents slice for CPU and disk", () => {
+  const unit = BootService.renderBootServiceUnit(linuxPlan);
+
+  expect(unit).toContain("CPUWeight=1000");
+  expect(unit).toContain("IOWeight=1000");
 });
 
 const macRuntime = "/Users/theo/.supacode/runtime/versions/1.2.3/supacode";
@@ -228,9 +232,9 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
       Effect.provideService(ProcessRunner.ProcessRunner, runner),
       Effect.provide(
         Layer.mergeAll(
-          Layer.succeed(HostProcessPlatform, platform),
-          Layer.succeed(HostProcessUserId, 501),
-          Layer.succeed(HostProcessExecutablePath, "/usr/bin/supacode"),
+          Layer.succeed(HostProcess.Platform, platform),
+          Layer.succeed(HostProcess.UserId, 501),
+          Layer.succeed(HostProcess.ExecutablePath, "/usr/bin/supacode"),
           Layer.succeed(
             HttpClient.HttpClient,
             HttpClient.make(() => Effect.die("no release download expected")),

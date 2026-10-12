@@ -1,6 +1,6 @@
 import { SidebarPendingThreadRow } from "./SidebarPendingThreadRow";
 import { useThreadOutbox } from "../state/threadOutbox";
-import { type EnvironmentId } from "@supacode/contracts";
+import { type EnvironmentId, type ScopedProjectRef } from "@supacode/contracts";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
 import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
@@ -135,6 +135,8 @@ import {
   buildSidebarProjectSnapshots,
   projectGroupMemberKeys,
   projectGroupsSpanEnvironments,
+  resolveSidebarProjectScopeKey,
+  getSidebarProjectSettingsKey,
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
@@ -168,6 +170,7 @@ import {
 } from "../state/entities";
 import { useSidebarThreadNavigation } from "../hooks/useSidebarThreadNavigation";
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
+import { environmentProjects } from "../state/projects";
 import { vcsEnvironment } from "../state/vcs";
 import { threadEnvironment } from "../state/threads";
 import { useEnvironmentQuery } from "../state/query";
@@ -1940,7 +1943,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                             type="button"
                             aria-label="Dismiss Woke notification"
                             onClick={handleAcknowledgeWokeClick}
-                            className="inline-flex cursor-pointer items-center gap-1 rounded-sm text-xs font-medium text-warning-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                            className="inline-flex cursor-pointer items-center gap-1 rounded-sm text-xs font-medium text-warning-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                           >
                             <AlarmClockIcon aria-hidden className="size-3" />
                             <span role="status">Woke</span>
@@ -2118,7 +2121,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                             aria-label="Dismiss Woke notification"
                             onClick={handleAcknowledgeWokeClick}
                             onPointerDown={(event) => event.stopPropagation()}
-                            className="inline-flex shrink-0 cursor-pointer items-center rounded-sm text-warning outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            className="inline-flex shrink-0 cursor-pointer items-center rounded-sm text-warning outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                           />
                         }
                       >
@@ -2151,7 +2154,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                             aria-label="Settle thread"
                             onClick={handleSettleClick}
                             onPointerDown={handleActionPointerDown}
-                            className="inline-flex h-5 shrink-0 cursor-pointer items-center gap-1 rounded-sm text-muted-foreground/65 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                            className="inline-flex h-5 shrink-0 cursor-pointer items-center gap-1 rounded-sm text-muted-foreground/65 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                           />
                         }
                       >
@@ -2362,6 +2365,7 @@ export default function Sidebar() {
     () =>
       buildSidebarProjectSnapshots({
         projects: sidebarProjectSortOrder === "manual" ? orderedProjects : projects,
+        groupScratchProjects: true,
         settings: projectGroupingSettings,
         primaryEnvironmentId,
         resolveEnvironmentLabel: (environmentId) => environmentLabelById.get(environmentId) ?? null,
@@ -2425,8 +2429,17 @@ export default function Sidebar() {
   // The selection lives in the persisted UI store next to the other sidebar
   // project preferences, so routes that unmount the sidebar (Settings) and
   // app restarts keep it.
-  const projectScopeKey = useUiStateStore((store) => store.sidebarProjectScopeKey);
+  const persistedProjectScopeKey = useUiStateStore((store) => store.sidebarProjectScopeKey);
   const setProjectScopeKey = useUiStateStore((store) => store.setSidebarProjectScopeKey);
+  const projectScopeKey = useMemo(
+    () =>
+      resolveSidebarProjectScopeKey({
+        groups: projectGroups,
+        key: persistedProjectScopeKey,
+        settings: projectGroupingSettings,
+      }),
+    [persistedProjectScopeKey, projectGroups, projectGroupingSettings],
+  );
   // {value, label} items let Base UI drive the combobox selection contract
   // while the popup search filters the same collection.
   const projectScopeItems = useMemo(
@@ -2516,15 +2529,28 @@ export default function Sidebar() {
     () => (scopedProjectGroup === null ? null : projectGroupMemberKeys(scopedProjectGroup)),
     [scopedProjectGroup],
   );
-  // A persisted scope whose project is gone falls back to all projects, but
-  // only after every catalog environment has a live project snapshot. Cached
-  // or disconnected environments cannot establish that the project is gone.
+  // Configs identify scratch projects, so both they and live project snapshots
+  // must arrive before a persisted scope can be considered missing.
   const allProjectSnapshotsReady = useAllEnvironmentProjectSnapshotsReady();
+  const allProjectConfigsReady = useAtomValue(environmentProjects.projectConfigsReadyAtom);
   useEffect(() => {
-    if (projectScopeKey !== null && allProjectSnapshotsReady && scopedProjectGroup === null) {
-      setProjectScopeKey(null);
+    const nextKey = resolveSidebarProjectScopeKey({
+      groups: projectGroups,
+      key: persistedProjectScopeKey,
+      settings: projectGroupingSettings,
+      canClearMissingScope: allProjectSnapshotsReady && allProjectConfigsReady,
+    });
+    if (nextKey !== persistedProjectScopeKey) {
+      setProjectScopeKey(nextKey);
     }
-  }, [allProjectSnapshotsReady, projectScopeKey, scopedProjectGroup, setProjectScopeKey]);
+  }, [
+    allProjectConfigsReady,
+    allProjectSnapshotsReady,
+    persistedProjectScopeKey,
+    projectGroups,
+    projectGroupingSettings,
+    setProjectScopeKey,
+  ]);
   // Count-only subscription: the parent needs "are there draft rows" for the
   // empty state, while SidebarDraftBlock owns the per-keystroke content
   // subscription. Selecting a number keeps typing in a draft composer from
@@ -2575,16 +2601,23 @@ export default function Sidebar() {
   }, [clearSelection, projectScopeKey]);
 
   const openProjectSettings = useCallback(
-    (projectGroup: SidebarProjectSnapshot) => {
+    (projectGroup: SidebarProjectSnapshot, projectRef?: ScopedProjectRef) => {
       if (isMobile) {
         setOpenMobile(false);
       }
       void router.navigate({
         to: "/projects/$projectKey",
-        params: { projectKey: projectGroup.projectKey },
+        params: {
+          projectKey: getSidebarProjectSettingsKey(
+            projectGroup,
+            projectGroupingSettings,
+            projects,
+            projectRef,
+          ),
+        },
       });
     },
-    [isMobile, router, setOpenMobile],
+    [isMobile, projectGroupingSettings, projects, router, setOpenMobile],
   );
   // Anchor for the scope popup: the thread list heading, not its icon trigger.
   const threadHeaderRef = useRef<HTMLDivElement | null>(null);
@@ -4289,7 +4322,11 @@ export default function Sidebar() {
         if (clicked._tag === "Failure") return;
         switch (clicked.value) {
           case "project-settings":
-            if (projectGroup) openProjectSettings(projectGroup);
+            if (projectGroup)
+              openProjectSettings(projectGroup, {
+                environmentId: session.environmentId,
+                projectId: session.projectId,
+              });
             return;
           case "copy-path":
             if (workspacePath) copyPathToClipboard(workspacePath, { path: workspacePath });
@@ -4413,7 +4450,11 @@ export default function Sidebar() {
             }
             return;
           case "project-settings":
-            if (threadProjectGroup) openProjectSettings(threadProjectGroup);
+            if (threadProjectGroup)
+              openProjectSettings(threadProjectGroup, {
+                environmentId: threadRef.environmentId,
+                projectId: thread.projectId,
+              });
             return;
           case "new-thread-on-branch": {
             // Explicit branch carry-over: reuse the thread's worktree when it

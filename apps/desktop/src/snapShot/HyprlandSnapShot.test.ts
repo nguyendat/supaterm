@@ -121,7 +121,7 @@ it.each([true, false])("uses the active config syntax and user bindings (Lua: %s
     NodePath.join(config, lua ? "bindings.lua" : "bindings.conf"),
     "custom bindings",
   );
-  const result = await hyprlandCaptureShortcut("com.supaterm.supacode", directory);
+  const result = await hyprlandCaptureShortcut("com.supaterm.supacode", "/home/test", directory);
   expect(result.shortcutConfigPath).toBe(
     NodePath.join(config, lua ? "bindings.lua" : "bindings.conf"),
   );

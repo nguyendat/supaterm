@@ -8,7 +8,7 @@
  *
  * @module AnalyticsService
  */
-import { HostProcessArchitecture, HostProcessPlatform } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import type { ClientOs } from "@supacode/contracts";
 import * as Clock from "effect/Clock";
 import * as Config from "effect/Config";
@@ -136,8 +136,8 @@ export const make = Effect.gen(function* () {
   // The background flush and the shutdown flush must not send the same batch at once.
   const flushLock = yield* Semaphore.make(1);
   const clientType = serverConfig.mode === "desktop" ? "desktop-app" : "cli-web-client";
-  const hostPlatform = yield* HostProcessPlatform;
-  const hostArchitecture = yield* HostProcessArchitecture;
+  const hostPlatform = yield* HostProcess.Platform;
+  const hostArchitecture = yield* HostProcess.Architecture;
 
   const enqueueBufferedEvent = (
     uuid: string,

@@ -1,8 +1,9 @@
 import { LegendList } from "@legendapp/list/react-native";
 import type { ProjectEntry } from "@supacode/contracts";
+import { AppActivityIndicator } from "../../components/AppActivityIndicator";
 import { DisclosureChevron } from "../../components/DisclosureChevron";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, RefreshControl, View } from "react-native";
+import { Platform, Pressable, RefreshControl, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/AppText";
@@ -96,7 +97,7 @@ const FileTreeRow = memo(function FileTreeRow(props: {
         {node.name}
       </Text>
       {node.kind === "directory" && props.expanded && props.loading ? (
-        <ActivityIndicator size="small" accessibilityLabel={`Loading ${node.name}`} />
+        <AppActivityIndicator size="small" accessibilityLabel={`Loading ${node.name}`} />
       ) : null}
     </Pressable>
   );
@@ -297,7 +298,7 @@ export function FileTreeBrowser(props: {
               </Pressable>
             </>
           ) : props.isPending ? (
-            <ActivityIndicator size="small" />
+            <AppActivityIndicator size="small" />
           ) : (
             <>
               <Text className="text-sm font-supacode-bold text-foreground">No files found</Text>

@@ -1,6 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { observeResize } from "../lib/observeResize";
 
 import { EASE_DRAWER, prefersReducedMotion } from "~/lib/motion";
 import { cn } from "~/lib/utils";
@@ -97,10 +98,9 @@ function TrackedHeight({
     };
 
     updateHeightAfterPaint();
-    const resizeObserver = new ResizeObserver(updateHeightAfterPaint);
-    resizeObserver.observe(element);
+    const stopObserving = observeResize(element, updateHeightAfterPaint);
     return () => {
-      resizeObserver.disconnect();
+      stopObserving();
       cancelPendingFrames();
     };
   }, [holdHeight]);
@@ -109,13 +109,13 @@ function TrackedHeight({
     <div
       data-slot="animated-height"
       className={cn(
-        "transition-[height] duration-200 ease-drawer motion-reduce:transition-none",
+        "transition-[height] duration-200 ease-drawer motion-reduce:transition-none [overflow-clip-margin:2px]",
         heightState.isShrinking && "duration-150",
       )}
       style={
         heightState.height === null
           ? undefined
-          : { height: heightState.height, overflow: heightState.isClipping ? "hidden" : "visible" }
+          : { height: heightState.height, overflow: heightState.isClipping ? "clip" : "visible" }
       }
       onTransitionEnd={(event) => {
         if (event.target !== event.currentTarget || event.propertyName !== "height") return;
@@ -149,12 +149,11 @@ function KeyedHeight({
   useLayoutEffect(() => {
     const content = contentRef.current;
     if (!content) return;
-    const observer = new ResizeObserver(() => {
+    const stopObserving = observeResize(content, () => {
       lastHeightRef.current = content.offsetHeight;
     });
-    observer.observe(content);
     return () => {
-      observer.disconnect();
+      stopObserving();
       animationRef.current?.cancel();
     };
   }, []);
@@ -174,7 +173,7 @@ function KeyedHeight({
       wrapper.style.removeProperty("overflow");
       return;
     }
-    wrapper.style.overflow = "hidden";
+    wrapper.style.overflow = "clip";
     const animation = wrapper.animate(
       { height: [`${from}px`, `${to}px`] },
       { duration: to > from ? 200 : 150, easing: EASE_DRAWER },
@@ -187,7 +186,7 @@ function KeyedHeight({
   }, [animateKey]);
 
   return (
-    <div ref={wrapperRef}>
+    <div ref={wrapperRef} className="[overflow-clip-margin:2px]">
       <div ref={contentRef}>{children}</div>
     </div>
   );

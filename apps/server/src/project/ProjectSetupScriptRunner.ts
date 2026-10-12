@@ -1,5 +1,5 @@
 import { ProjectId, type ProjectScript } from "@supacode/contracts";
-import { HostProcessEnvironment, HostProcessPlatform } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import {
   projectScriptRuntimeEnv,
   resolveProjectScripts,
@@ -219,8 +219,8 @@ export const make = Effect.gen(function* () {
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const crypto = yield* Crypto.Crypto;
   const completionShell = resolveCompletionShell(
-    yield* HostProcessPlatform,
-    yield* HostProcessEnvironment,
+    yield* HostProcess.Platform,
+    yield* HostProcess.Environment,
   );
 
   /**

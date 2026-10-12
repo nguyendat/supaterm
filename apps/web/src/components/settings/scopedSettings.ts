@@ -14,6 +14,7 @@ import {
 import type { EnvironmentConnectionPhase } from "@supacode/client-runtime/connection";
 import {
   clearProjectSettingsOverrides,
+  projectSettingsOverridesForWrite,
   resolveProjectSettings,
   resolveWorktreeCleanup,
   type ProjectSettingSource,
@@ -176,6 +177,7 @@ function projectOverrideWrites(
     settings: ServerSettings,
     projectId: ProjectId,
   ) => ProjectSettingsOverrides | null,
+  removals: readonly ProjectScopedServerSettingKey[] = [],
 ): ScopedServerWrite[] {
   const byId = new Map(environments.map((environment) => [environment.environmentId, environment]));
   const writes = new Map<EnvironmentId, ScopedServerWrite>();
@@ -189,7 +191,11 @@ function projectOverrideWrites(
       continue;
     }
     const settings = environment.serverConfig.settings;
-    const entry = update(settings.projectSettingsOverrides[member.id] ?? {}, settings, member.id);
+    const entry = update(
+      projectSettingsOverridesForWrite(settings, member.id),
+      settings,
+      member.id,
+    );
     const existing = writes.get(member.environmentId);
     writes.set(member.environmentId, {
       environmentId: member.environmentId,
@@ -199,6 +205,14 @@ function projectOverrideWrites(
           ...existing?.patch.projectSettingsOverrides,
           [member.id]: entry,
         },
+        ...(removals.length > 0
+          ? {
+              projectSettingsOverrideRemovals: {
+                ...existing?.patch.projectSettingsOverrideRemovals,
+                [member.id]: removals,
+              },
+            }
+          : {}),
       },
     });
   }
@@ -216,7 +230,7 @@ export function planScopedSettingsPatch(
   patch: ScopedSettingsPatch,
 ) {
   const clientPatch = Object.fromEntries(
-    Object.entries(patch).filter(([key]) => CLIENT_KEYS.has(key)),
+    Object.entries(patch).filter(([key]) => CLIENT_KEYS.has(key) && !SERVER_KEYS.has(key)),
   ) as ClientSettingsPatch;
   const serverPatch = Object.fromEntries(
     Object.entries(patch).filter(([key]) => SERVER_KEYS.has(key)),
@@ -313,8 +327,12 @@ export function planScopedSettingsClear(
 ) {
   const serverWrites =
     scope.kind === "project" || scope.kind === "checkout"
-      ? projectOverrideWrites(scope, environments, (_current, settings, projectId) =>
-          clearProjectSettingsOverrides(settings, projectId, keys),
+      ? projectOverrideWrites(
+          scope,
+          environments,
+          (_current, settings, projectId) =>
+            clearProjectSettingsOverrides(settings, projectId, keys),
+          keys,
         )
       : [];
   return {
@@ -375,6 +393,10 @@ export function planProjectOverridesClear(
         projectSettingsOverrides: {
           ...existing?.patch.projectSettingsOverrides,
           [projectId]: clearProjectSettingsOverrides(settings, projectId, keys),
+        },
+        projectSettingsOverrideRemovals: {
+          ...existing?.patch.projectSettingsOverrideRemovals,
+          [projectId]: keys,
         },
       },
     });

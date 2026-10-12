@@ -362,6 +362,8 @@ export interface ComposerDraftWorkspaceSelection {
   readonly branch: string | null;
   readonly worktreePath: string | null;
   readonly startFromOrigin?: boolean;
+  /** Resolve and check out this PR when the queued task is sent. */
+  readonly pullRequestReference?: string;
 }
 
 export type ComposerDraftSettingsUpdate = Pick<
@@ -374,6 +376,7 @@ const ComposerDraftWorkspaceSelectionSchema = Schema.Struct({
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
   startFromOrigin: Schema.optional(Schema.Boolean),
+  pullRequestReference: Schema.optional(Schema.String),
 });
 
 const ComposerDraftProjectSchema = Schema.Struct({

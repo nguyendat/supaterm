@@ -5,17 +5,10 @@ import {
 } from "@supacode/client-runtime/state/runtime";
 import type { ProviderAuthResponse, ServerProvider } from "@supacode/contracts";
 import { useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Linking,
-  Pressable,
-  ScrollView,
-  TextInput,
-  View,
-} from "react-native";
+import { Alert, Linking, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AppActivityIndicator } from "../../components/AppActivityIndicator";
 import { AppText as Text } from "../../components/AppText";
 import { MaterialButton } from "../../components/MaterialButton";
 import { ProviderIcon } from "../../components/ProviderIcon";
@@ -255,7 +248,10 @@ function ProviderAccount({
               onPress={chooseMethod}
             />
           ) : loading ? (
-            <ActivityIndicator accessibilityLabel="Loading account" colorClassName="accent-icon" />
+            <AppActivityIndicator
+              accessibilityLabel="Loading account"
+              colorClassName="accent-icon"
+            />
           ) : !active && unavailable ? (
             <Text className="text-sm text-foreground-muted">
               {provider.enabled ? "Not installed" : "Disabled"}

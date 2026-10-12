@@ -30,10 +30,11 @@ import {
   type VcsRef,
 } from "@supacode/contracts";
 import { dedupeRemoteBranchesWithLocalMatches, normalizeGitRemoteUrl } from "@supacode/shared/git";
-import { HostProcessPlatform } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import * as KeyedLock from "@supacode/shared/KeyedLock";
 import { compactTraceAttributes } from "@supacode/shared/observability";
 import { decodeJsonResult } from "@supacode/shared/schemaJson";
+import { resolveSpawnCommand } from "@supacode/shared/shell";
 import { parseSupacodeProjectFile } from "@supacode/shared/supacodeProjectFile";
 import { resolveProjectFileBackedSetting } from "@supacode/shared/projectSettings";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
@@ -951,7 +952,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const { worktreesDir } = yield* ServerConfig.ServerConfig;
   const crypto = yield* Crypto.Crypto;
-  const hostPlatform = yield* HostProcessPlatform;
+  const hostPlatform = yield* HostProcess.Platform;
 
   const executeRaw: GitVcsDriver.GitVcsDriver["Service"]["execute"] = Effect.fnUntraced(
     function* (input) {
@@ -984,11 +985,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           ...input.env,
           ...trace2Monitor.env,
         };
+        const spawnEnv = { ...env, ...windowsLongPathConfigEnv(hostPlatform, env) };
+        const resolved = yield* resolveSpawnCommand("git", [], { env: spawnEnv });
+        // A git.cmd wrapper would need cmd.exe, which cuts multi-line commit
+        // messages at the first newline; leave that case to Node's lookup.
+        const executable = resolved.shell ? "git" : resolved.command;
         const child = yield* commandSpawner
           .spawn(
-            ChildProcess.make("git", commandInput.args, {
+            ChildProcess.make(executable, commandInput.args, {
               cwd: commandInput.cwd,
-              env: { ...env, ...windowsLongPathConfigEnv(hostPlatform, env) },
+              env: spawnEnv,
             }),
           )
           .pipe(
@@ -2543,9 +2549,13 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       ["rev-parse", "HEAD"],
       true,
     ).pipe(Effect.map((stdout) => stdout.trim()));
+    // After a successful pull, HEAD before and after decides the result, so its output is not
+    // needed. A large fast-forward's diffstat can exceed the output cap, which must not fail a
+    // pull Git applied.
     yield* executeGit("GitVcsDriver.pullCurrentBranch.pull", cwd, ["pull", "--ff-only"], {
       timeoutMs: 30_000,
       fallbackErrorDetail: "git pull failed",
+      appendTruncationMarker: true,
     });
     const afterSha = yield* runGitStdout(
       "GitVcsDriver.pullCurrentBranch.afterSha",
@@ -2688,7 +2698,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       "hash-object",
       "-t",
       "tree",
-      (yield* HostProcessPlatform) === "win32" ? "NUL" : "/dev/null",
+      (yield* HostProcess.Platform) === "win32" ? "NUL" : "/dev/null",
     ]);
     return stdout.trim();
   });
@@ -3434,6 +3444,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         options?.worktreesDirectory ?? "",
         worktreesDir,
         path,
+        yield* HostProcess.HomeDirectory,
       );
       if (parentDir === null) {
         return yield* new GitCommandError({

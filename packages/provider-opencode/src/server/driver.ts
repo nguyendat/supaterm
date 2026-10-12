@@ -12,7 +12,6 @@
  *
  * @module provider/Drivers/OpenCodeDriver
  */
-import * as NodeOS from "node:os";
 import { ProviderDriverKind } from "@supacode/contracts";
 import { OpenCodeSettings } from "../settings.ts";
 import * as Crypto from "effect/Crypto";
@@ -35,7 +34,9 @@ import * as OpenCode2AdapterV2 from "./v2/adapter.ts";
 import type * as ProviderAdapter from "@supacode/provider-core/server/ProviderAdapter";
 import type { ProviderTextGeneration } from "@supacode/provider-core/server/textGeneration";
 import { ProviderDriverError } from "@supacode/provider-core/server/errors";
+import { openCodeUsageReader, type OpenCodeUsageReaderEnv } from "./usage.ts";
 import { readOpenCodeGoUsageLimits } from "./usageLimits.ts";
+import { loadOpenCode2Catalog } from "./openCode2Catalog.ts";
 import {
   checkOpenCodeProviderStatus,
   loadOpenCode2Workspace,
@@ -76,6 +77,7 @@ import {
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
 } from "@supacode/provider-core/server/snapshotSettings";
+import * as HostProcess from "@supacode/shared/HostProcess";
 const decodeOpenCodeSettings = Schema.decodeSync(OpenCodeSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("opencode");
@@ -169,6 +171,11 @@ function selectOpenCodeRuntimeTextGeneration(
         v1: v1.generateThreadTitle(input),
         v2: v2.generateThreadTitle(input),
       }),
+    generateReviewGuide: (input) =>
+      byOpenCodeRuntime(probe.get, {
+        v1: v1.generateReviewGuide(input),
+        v2: v2.generateReviewGuide(input),
+      }),
   };
 }
 
@@ -183,7 +190,11 @@ export type OpenCodeDriverEnv =
   | OpenCodeRuntime.OpenCodeRuntime
   | Path.Path;
 
-export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv> = {
+export const OpenCodeDriver: ProviderDriver<
+  OpenCodeSettings,
+  OpenCodeDriverEnv,
+  OpenCodeUsageReaderEnv
+> = {
   driverKind: DRIVER_KIND,
   metadata: {
     displayName: "OpenCode",
@@ -191,6 +202,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
   },
   configSchema: OpenCodeSettings,
   defaultConfig: (): OpenCodeSettings => decodeOpenCodeSettings({}),
+  usage: openCodeUsageReader,
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -201,7 +213,8 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
       const crypto = yield* Crypto.Crypto;
       const host = yield* ProviderHost.ProviderHost;
-      const processEnv = mergeProviderInstanceEnvironment(environment);
+      const processEnv = yield* mergeProviderInstanceEnvironment(environment);
+      const homeDirectory = yield* HostProcess.HomeDirectory;
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,
@@ -300,18 +313,8 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         ),
       });
       const loadOpenCode2Models = yield* makeOpenCode2ModelLoader(
-        openCode2Server.withConnection((connection) =>
-          connection.client.model.list({ location: { directory: host.paths.cwd } }).pipe(
-            Effect.map((models) => models.data),
-            Effect.mapError(
-              (cause) =>
-                new OpenCodeRuntime.OpenCodeRuntimeError({
-                  operation: "model.list",
-                  detail: "The OpenCode server could not list its models.",
-                  cause,
-                }),
-            ),
-          ),
+        openCode2Server.withConnection(({ client }) =>
+          loadOpenCode2Catalog(client, host.paths.cwd),
         ),
       );
       // A 2.x server lists skills and commands per directory, so one server
@@ -491,7 +494,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
           : pathService.join(
               processEnv.XDG_CONFIG_HOME?.trim() ||
                 pathService.join(
-                  processEnv.HOME || processEnv.USERPROFILE || NodeOS.homedir(),
+                  processEnv.HOME || processEnv.USERPROFILE || homeDirectory,
                   ".config",
                 ),
               "opencode",

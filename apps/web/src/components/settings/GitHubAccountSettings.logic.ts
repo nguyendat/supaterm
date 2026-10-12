@@ -1,4 +1,5 @@
-import type { GitHubSettings, SourceControlProviderAuth } from "@supacode/contracts";
+import type { SourceControlProviderAuth } from "@supacode/contracts";
+import type { GitHubSettings } from "@supacode/client-runtime/source-control-clients";
 
 export type GitHubDiscoveredAccount = NonNullable<SourceControlProviderAuth["accounts"]>[number];
 

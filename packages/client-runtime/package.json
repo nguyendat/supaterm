@@ -407,6 +407,10 @@
       "types": "./src/state/usageProgress.ts",
       "default": "./src/state/usageProgress.ts"
     },
+    "./diff-count": {
+      "types": "./src/diffCount.ts",
+      "default": "./src/diffCount.ts"
+    },
     "./mcp-apps": {
       "types": "./src/mcpApps/host.ts",
       "default": "./src/mcpApps/host.ts"
@@ -422,6 +426,14 @@
     "./relay": {
       "types": "./src/relay/gateway.ts",
       "default": "./src/relay/gateway.ts"
+    },
+    "./source-control-clients": {
+      "types": "./src/sourceControlClients.ts",
+      "default": "./src/sourceControlClients.ts"
+    },
+    "./review-guide-tour": {
+      "types": "./src/reviewGuideTour.ts",
+      "default": "./src/reviewGuideTour.ts"
     }
   },
   "scripts": {
@@ -429,9 +441,17 @@
     "test": "vp test run"
   },
   "dependencies": {
+    "@pierre/diffs": "catalog:",
     "@supacode/contracts": "workspace:*",
     "@supacode/mermaid-ascii": "workspace:*",
     "@supacode/shared": "workspace:*",
+    "@supacode/source-control-azure-devops": "workspace:*",
+    "@supacode/source-control-bitbucket": "workspace:*",
+    "@supacode/source-control-core": "workspace:*",
+    "@supacode/source-control-forgejo": "workspace:*",
+    "@supacode/source-control-gitcafe": "workspace:*",
+    "@supacode/source-control-github": "workspace:*",
+    "@supacode/source-control-gitlab": "workspace:*",
     "effect": "catalog:",
     "three": "0.180.0"
   },

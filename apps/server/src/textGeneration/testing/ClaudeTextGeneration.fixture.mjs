@@ -13,8 +13,15 @@ if (permissionIndex === -1 || argv[permissionIndex + 1] !== "dontAsk") {
   fail("text generation must deny permission prompts", 12);
 }
 const toolsIndex = argv.indexOf("--tools");
-if (toolsIndex === -1 || argv[toolsIndex + 1] !== "") {
-  fail("text generation must receive an explicit empty tool set", 6);
+if (toolsIndex === -1) {
+  fail("text generation must receive an explicit tool set", 6);
+}
+const settingSourcesIndex = argv.indexOf("--setting-sources");
+if (
+  argv[toolsIndex + 1] !== "" &&
+  (settingSourcesIndex === -1 || argv[settingSourcesIndex + 1] !== "user")
+) {
+  fail("an investigation must not load the checkout's project settings", 13);
 }
 if (argv.includes("--dangerously-skip-permissions")) {
   fail("text generation must not bypass permissions", 7);

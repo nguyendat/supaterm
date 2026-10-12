@@ -1,6 +1,6 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off - Effect symlink has no type argument; Windows needs directory junctions without elevation.
 import * as NodeFSP from "node:fs/promises";
-import { HostProcessPlatform } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import { OrchestrationSkillsError, type OrchestrationSkillsStatus } from "@supacode/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -45,7 +45,7 @@ const make = Effect.gen(function* () {
   const providers = yield* ProviderRegistry.ProviderRegistry;
   const lock = yield* Semaphore.make(1);
   const config = yield* ServerConfig.ServerConfig;
-  const platform = yield* HostProcessPlatform;
+  const platform = yield* HostProcess.Platform;
   // Native CLIs cannot read Electron's asar or a standalone executable's
   // embedded assets. Keep a stable on-disk target for links across upgrades.
   const bundleRoot = path.join(config.stateDir, "bundled-skills", "orchestration");

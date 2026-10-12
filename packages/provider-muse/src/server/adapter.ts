@@ -22,6 +22,7 @@ import {
   type ServerProviderModel,
 } from "@supacode/contracts";
 import type { MuseSettings } from "../settings.ts";
+import { AgentScope } from "@supacode/shared/AgentScope";
 import { getModelSelectionStringOptionValue } from "@supacode/shared/model";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
@@ -61,6 +62,7 @@ import {
 import {
   createMuseSdkHostEffect,
   museApprovalMode,
+  museWorkspaceRoot,
   type createMuseSdkHost,
   type MuseSdkHost,
 } from "./sdk.ts";
@@ -247,6 +249,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
   const providerHost = yield* ProviderHost.ProviderHost;
   const fileSystem = yield* FileSystem.FileSystem;
   const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+  const agentScope = yield* AgentScope;
 
   const protocolError = (detail: string, payload?: unknown) =>
     new ProviderAdapter.ProviderAdapterProtocolError({
@@ -271,6 +274,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
       const cwd = yield* fileSystem
         .realPath(requestedCwd)
         .pipe(Effect.orElseSucceed(() => requestedCwd));
+      const workspaceRoot = yield* museWorkspaceRoot(cwd);
       const now = yield* DateTime.now;
       let session: OrchestrationV2ProviderSession = {
         id: input.providerSessionId,
@@ -1348,15 +1352,24 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
       const launchHost = Effect.fnUntraced(function* () {
         const epoch = ++hostEpoch;
         const mcpSession = yield* mcpSessions.read(input.threadId);
+        const environment = McpProviderSession.withAgentDeviceEnvironment(
+          options.environment,
+          mcpSession,
+        );
+        const launch = yield* agentScope.wrap({
+          command: options.settings.binaryPath || "muse",
+          args: [],
+          name: "muse",
+          threadId: input.threadId,
+          env: environment,
+        });
         const created = yield* Effect.acquireRelease(
           createMuseSdkHostEffect(
             {
-              binaryPath: options.settings.binaryPath || "muse",
+              binaryPath: launch.command,
+              launchArgs: launch.args,
               cwd,
-              environment: McpProviderSession.withAgentDeviceEnvironment(
-                options.environment,
-                mcpSession,
-              ),
+              environment,
               runtimeMode: input.runtimePolicy.runtimeMode,
             },
             options.createHost,
@@ -1713,8 +1726,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                   ...parts,
                 ],
                 displayText: turnInput.message.text || "Image attachment",
-
-                workspaceRoots: [cwd],
+                workspaceRoots: [workspaceRoot],
                 ifBusy: "queue",
                 ...(effort ? { reasoningEffort: effort } : {}),
               },

@@ -3,14 +3,16 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   type OrchestrationMessageContext,
 } from "@supacode/contracts";
-import { collectComposerContextReferences } from "@supacode/shared/composerContextReferences";
+import {
+  ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
+  collectComposerContextReferences,
+} from "@supacode/shared/composerContextReferences";
 import * as Schema from "effect/Schema";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
 import { DraftId, useComposerDraftStore } from "../composerDraftStore";
 import { removeInlineContextReference } from "../lib/composerContextReferences";
 import { releaseDraftAttachments } from "../lib/attachmentUploadQueue";
-import { ATTACHMENT_ONLY_BOOTSTRAP_PROMPT } from "../components/chat/composerPromptHistory";
 import { replaceThreadOutboxTurn, webThreadOutbox, type PendingThreadTurn } from "./threadOutbox";
 import type { OutboxTurn } from "./threadOutboxSchema";
 

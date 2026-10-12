@@ -24,7 +24,7 @@ describe("mobile theme runtime variables", () => {
   });
 
   it.each(MOBILE_THEME_IDS)(
-    "keeps %s colors on Android with an opaque Material frame",
+    "uses a screen-colored %s sidebar beneath an opaque Android frame",
     (themeId) => {
       for (const appearance of ["light", "dark"] as const) {
         const base = getMobileThemeVariables(
@@ -43,6 +43,7 @@ describe("mobile theme runtime variables", () => {
             1,
           ),
           "--color-header-foreground": base["--color-drawer-foreground"],
+          "--color-drawer": base["--color-screen"],
         });
         expect(android["--color-header"]).toMatch(/^rgba\(\d+, \d+, \d+, 1\)$/);
       }
@@ -76,7 +77,6 @@ describe("mobile theme runtime variables", () => {
           expect(ios["--color-header-foreground"]).toBe(ios["--color-drawer-foreground"]);
         } else {
           expect(ios).toEqual(getMobileThemeVariables("supacode", appearance));
-          expect(ios["--color-drawer"]).toBe(android["--color-drawer"]);
           expect(ios["--color-drawer"]).toBe("#18191c");
           expect(ios["--color-thread-canvas"]).toBe("#1d1e22");
         }

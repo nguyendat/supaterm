@@ -1,5 +1,6 @@
 import { Connection } from "@supacode/client-runtime/connection";
 import { ShellSnapshotLoader } from "@supacode/client-runtime/state/shell";
+import { PullRequestDiffLoader } from "@supacode/client-runtime/state/pull-requests";
 import {
   BoundedThreadSnapshotLoader,
   ThreadHistoryController,
@@ -19,6 +20,7 @@ declare const module: { readonly hot?: FoundationHotModule } | undefined;
 const layerProvidedConnectionPlatform = ConnectionPlatform.layer.pipe(Layer.provide(Runtime.layer));
 
 const layerSnapshotLoader = Layer.mergeAll(
+  PullRequestDiffLoader.layer,
   BoundedThreadSnapshotLoader.layer,
   ShellSnapshotLoader.layer,
   ThreadHistoryController.layer,

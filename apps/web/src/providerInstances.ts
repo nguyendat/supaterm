@@ -15,9 +15,9 @@
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
-  isUnconfiguredDefaultInstanceEnabled,
-  resolveProviderInstanceEnabled,
+  resolveProjectProviderInstanceEnabled,
   type ModelSelection,
+  type ProjectId,
   type ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
@@ -154,13 +154,19 @@ export function deriveProviderInstanceEntries(
  */
 export function deriveProviderEntriesByEnvironment(
   providersByEnvironment: Iterable<
-    readonly [string, ReadonlyArray<ServerProvider>, Pick<ServerSettings, "providerInstances">?]
+    readonly [
+      string,
+      ReadonlyArray<ServerProvider>,
+      Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">?,
+    ]
   >,
 ): ReadonlyMap<string, ReadonlyMap<string, ProviderInstanceEntry>> {
   const byEnvironment = new Map<string, ReadonlyMap<string, ProviderInstanceEntry>>();
   for (const [environmentId, providers, settings] of providersByEnvironment) {
     const derived = deriveProviderInstanceEntries(providers);
-    const entries = settings ? applyProviderInstanceSettings(derived, settings) : derived;
+    // One map per environment serves every project with a thread there, so
+    // there is no single project to scope `enabled` to; it stays machine-wide.
+    const entries = settings ? applyProviderInstanceSettings(derived, settings, null) : derived;
     byEnvironment.set(
       environmentId,
       new Map(entries.map((entry) => [entry.instanceId as string, entry] as const)),
@@ -171,17 +177,14 @@ export function deriveProviderEntriesByEnvironment(
 
 export function applyProviderInstanceSettings(
   entries: ReadonlyArray<ProviderInstanceEntry>,
-  settings: Pick<ServerSettings, "providerInstances">,
+  settings: Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">,
+  projectId: ProjectId | null,
 ): ReadonlyArray<ProviderInstanceEntry> {
   return entries.map((entry) => {
     const explicitInstance = Object.hasOwn(settings.providerInstances, entry.instanceId)
       ? settings.providerInstances[entry.instanceId]
       : undefined;
-    const enabled = explicitInstance
-      ? resolveProviderInstanceEnabled(explicitInstance)
-      : entry.isDefault
-        ? isUnconfiguredDefaultInstanceEnabled(entry.instanceId)
-        : false;
+    const enabled = resolveProjectProviderInstanceEnabled(settings, projectId, entry.instanceId);
     if (entry.driverKind !== "acpRegistry" || explicitInstance === undefined) {
       return enabled === entry.enabled ? entry : { ...entry, enabled };
     }

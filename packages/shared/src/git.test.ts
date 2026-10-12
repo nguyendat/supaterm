@@ -1,3 +1,4 @@
+import { SourceControlProviderKind } from "@supacode/contracts";
 import type { VcsStatusRemoteResult, VcsStatusResult } from "@supacode/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -260,7 +261,7 @@ describe("applyGitStatusStreamEvent", () => {
     const current: VcsStatusResult = {
       isRepo: true,
       sourceControlProvider: {
-        kind: "github",
+        kind: SourceControlProviderKind.make("github"),
         name: "GitHub",
         baseUrl: "https://github.com",
       },

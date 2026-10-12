@@ -6,6 +6,7 @@ import {
   formatComposerContextHref,
   formatComposerContextProviderMarker,
   formatComposerContextReference,
+  isImageReferencesOnly,
   parseComposerContextHref,
   projectComposerContextForProvider,
   replaceComposerContextReferences,
@@ -86,6 +87,19 @@ describe("labels and reference links", () => {
       [],
     );
     expect(collectComposerContextReferences("[x](https://example.com)")).toEqual([]);
+  });
+
+  it("recognizes a prompt made only of image references", () => {
+    const image = "![a.png](supacode-context://v1/image/ctx_1)";
+    const file = "[notes.md](supacode-context://v1/file/ctx_3)";
+    expect(isImageReferencesOnly(image)).toBe(true);
+    expect(isImageReferencesOnly(` ${image}\n![b.png](supacode-context://v1/image/ctx_2) `)).toBe(
+      true,
+    );
+    expect(isImageReferencesOnly(`${image} what is this?`)).toBe(false);
+    expect(isImageReferencesOnly(file)).toBe(false);
+    expect(isImageReferencesOnly(`${image} ${file}`)).toBe(false);
+    expect(isImageReferencesOnly("  ")).toBe(false);
   });
 
   it("replaces occurrences in place", () => {

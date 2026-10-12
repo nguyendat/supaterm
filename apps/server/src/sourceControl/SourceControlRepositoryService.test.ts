@@ -1,3 +1,4 @@
+import { SourceControlProviderKind } from "@supacode/contracts";
 import * as NodePath from "@effect/platform-node/NodePath";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -13,9 +14,9 @@ import { GitCommandError, SourceControlProviderError } from "@supacode/contracts
 
 import * as ServerConfig from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
-import * as BitbucketApi from "./BitbucketApi.ts";
-import * as BitbucketSourceControlProvider from "./BitbucketSourceControlProvider.ts";
-import type * as SourceControlProvider from "./SourceControlProvider.ts";
+import * as BitbucketApi from "@supacode/source-control-bitbucket/server/BitbucketApi";
+import * as BitbucketSourceControlProvider from "@supacode/source-control-bitbucket/server/BitbucketSourceControlProvider";
+import type * as SourceControlProvider from "@supacode/source-control-core/server/SourceControlProvider";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 import * as SourceControlRepositoryService from "./SourceControlRepositoryService.ts";
 
@@ -37,7 +38,7 @@ function makeProvider(
     >;
 
   return {
-    kind: "github",
+    kind: SourceControlProviderKind.make("github"),
     listChangeRequests: () => unsupported("listChangeRequests"),
     getChangeRequest: () => unsupported("getChangeRequest"),
     createChangeRequest: () => unsupported("createChangeRequest"),
@@ -116,19 +117,22 @@ it.effect("looks up repositories through the requested provider without search",
   return Effect.gen(function* () {
     const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
     const result = yield* service.lookupRepository({
-      provider: "github",
+      provider: SourceControlProviderKind.make("github"),
       repository: "octocat/supacode",
       cwd: "/workspace",
     });
 
-    assert.deepStrictEqual(result, { provider: "github", ...CLONE_URLS });
+    assert.deepStrictEqual(result, {
+      provider: SourceControlProviderKind.make("github"),
+      ...CLONE_URLS,
+    });
     assert.deepStrictEqual(calls, [{ cwd: "/workspace", repository: "octocat/supacode" }]);
   }).pipe(Effect.provide(layer({ provider })));
 });
 
 it.effect("preserves provider failures without deriving the repository message from them", () => {
   const providerCause = new SourceControlProviderError({
-    provider: "github",
+    provider: SourceControlProviderKind.make("github"),
     operation: "getRepositoryCloneUrls",
     cwd: "/workspace",
     repository: "octocat/supacode",
@@ -142,7 +146,7 @@ it.effect("preserves provider failures without deriving the repository message f
     const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
     const error = yield* Effect.flip(
       service.lookupRepository({
-        provider: "github",
+        provider: SourceControlProviderKind.make("github"),
         repository: "octocat/supacode",
         cwd: "/workspace",
       }),
@@ -178,7 +182,7 @@ it.effect(
       yield* Effect.gen(function* () {
         const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
         const input = {
-          provider: "bitbucket" as const,
+          provider: SourceControlProviderKind.make("bitbucket"),
           repository: locatorCause.repository,
           cwd: "/workspace",
         };
@@ -206,11 +210,11 @@ it.effect(
 
 it.effect("keeps a plain Bitbucket locator lookalike out of the repository message", () => {
   const provider = makeProvider({
-    kind: "bitbucket",
+    kind: SourceControlProviderKind.make("bitbucket"),
     getRepositoryCloneUrls: () =>
       Effect.fail(
         new SourceControlProviderError({
-          provider: "bitbucket",
+          provider: SourceControlProviderKind.make("bitbucket"),
           operation: "getRepositoryCloneUrls",
           cwd: "/workspace",
           detail: "credential token abc123 was rejected",
@@ -226,7 +230,10 @@ it.effect("keeps a plain Bitbucket locator lookalike out of the repository messa
   return Effect.gen(function* () {
     const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
     const error = yield* Effect.flip(
-      service.lookupRepository({ provider: "bitbucket", repository: "supacode" }),
+      service.lookupRepository({
+        provider: SourceControlProviderKind.make("bitbucket"),
+        repository: "supacode",
+      }),
     );
 
     assert.strictEqual(error.detail, "The source control operation could not be completed.");
@@ -252,7 +259,7 @@ it.effect("keeps arbitrary Bitbucket request failures out of the repository mess
       const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
       const error = yield* Effect.flip(
         service.lookupRepository({
-          provider: "bitbucket",
+          provider: SourceControlProviderKind.make("bitbucket"),
           repository: "pingdotgg/supacode",
           cwd: "/workspace",
         }),
@@ -278,7 +285,7 @@ it.effect("clones a looked-up repository into the requested destination", () =>
     yield* Effect.gen(function* () {
       const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
       const result = yield* service.cloneRepository({
-        provider: "github",
+        provider: SourceControlProviderKind.make("github"),
         repository: "octocat/supacode",
         destinationPath,
         protocol: "https",
@@ -287,7 +294,7 @@ it.effect("clones a looked-up repository into the requested destination", () =>
       assert.deepStrictEqual(result, {
         cwd: destinationPath,
         remoteUrl: CLONE_URLS.url,
-        repository: { provider: "github", ...CLONE_URLS },
+        repository: { provider: SourceControlProviderKind.make("github"), ...CLONE_URLS },
       });
       assert.deepStrictEqual(cloneCalls, [
         {
@@ -552,7 +559,7 @@ it.effect("publishes by creating the repository, adding a remote, and pushing up
     const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
     const result = yield* service.publishRepository({
       cwd: "/workspace",
-      provider: "github",
+      provider: SourceControlProviderKind.make("github"),
       repository: "octocat/supacode",
       visibility: "private",
       remoteName: "origin",
@@ -560,7 +567,7 @@ it.effect("publishes by creating the repository, adding a remote, and pushing up
     });
 
     assert.deepStrictEqual(result, {
-      repository: { provider: "github", ...CLONE_URLS },
+      repository: { provider: SourceControlProviderKind.make("github"), ...CLONE_URLS },
       remoteName: "origin",
       remoteUrl: CLONE_URLS.sshUrl,
       branch: "feature/remote-v1",
@@ -607,7 +614,7 @@ it.effect("publishes to the remote name returned by ensureRemote", () => {
     const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
     const result = yield* service.publishRepository({
       cwd: "/workspace",
-      provider: "github",
+      provider: SourceControlProviderKind.make("github"),
       repository: "octocat/supacode",
       visibility: "private",
       remoteName: "origin",
@@ -643,7 +650,7 @@ it.effect("publish succeeds with status remote_added when the local repo has no 
     const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
     const result = yield* service.publishRepository({
       cwd: "/workspace",
-      provider: "github",
+      provider: SourceControlProviderKind.make("github"),
       repository: "octocat/supacode",
       visibility: "private",
       remoteName: "origin",
@@ -651,7 +658,7 @@ it.effect("publish succeeds with status remote_added when the local repo has no 
     });
 
     assert.deepStrictEqual(result, {
-      repository: { provider: "github", ...CLONE_URLS },
+      repository: { provider: SourceControlProviderKind.make("github"), ...CLONE_URLS },
       remoteName: "origin",
       remoteUrl: CLONE_URLS.sshUrl,
       branch: "main",

@@ -192,7 +192,7 @@ provider selection model-visible without allowing a request that cannot run.
 
 ## Tool Surface
 
-The server exposes eleven orchestration tools.
+The server exposes these orchestration tools.
 
 ### `orchestrator_capabilities`
 
@@ -236,6 +236,13 @@ when it can run child tasks, and otherwise selects an available instance of
 that driver; an explicit `providerInstanceId` is honored exactly and fails
 when unavailable. Selecting a different provider without a model uses that
 provider's first advertised model.
+
+A provider runs a runtime mode it does not offer as `approval-required`, so a
+child would ask for approval on every command. `orchestrator_capabilities`
+lists `runtimeModes` only for a provider that offers some of the modes, and
+omits it for a provider that offers all of them. When the target lists
+`runtimeModes`, an explicit `runtimeMode` outside that list is refused, and an
+inherited mode steps down to the broadest mode the target offers.
 
 Each delegated review round uses a new `delegate_task` call with the original brief,
 prior findings, responses, and unresolved objections. Track each round by its own `taskId` and use
@@ -413,6 +420,13 @@ Interrupts a selected active run through the normal V2 `run.interrupt` command.
 Without `runId`, it selects the newest interruptible run. A terminal run is
 returned unchanged, and a thread with no active provider turn returns
 `no_active_run`.
+
+### `supacode_workflow_stop`
+
+Stops one running Claude workflow, phases and members included, through the
+provider's task stop. The target is the coordinator's `subagentId` from
+`supacode_thread_read` with `view='activity'`. It leaves the parent thread and
+other workflows running, and it cannot stop a single phase or member.
 
 ## Delegated Task Lifecycle
 

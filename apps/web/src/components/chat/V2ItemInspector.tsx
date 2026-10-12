@@ -12,6 +12,7 @@ import {
   turnItemOutputImages,
   turnItemOutputText,
 } from "@supacode/client-runtime/work-log/item-detail";
+import { formatDiffCount } from "@supacode/client-runtime/diff-count";
 import { ExternalLinkIcon, GitBranchIcon } from "lucide-react";
 import { memo, Suspense, use, useMemo } from "react";
 
@@ -258,8 +259,8 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
             </span>
             {item.additions !== undefined || item.deletions !== undefined ? (
               <span>
-                <span className="text-success">+{item.additions ?? 0}</span>{" "}
-                <span className="text-destructive">-{item.deletions ?? 0}</span>
+                <span className="text-success">+{formatDiffCount(item.additions ?? 0)}</span>{" "}
+                <span className="text-destructive">-{formatDiffCount(item.deletions ?? 0)}</span>
               </span>
             ) : null}
             {item.runId !== null ? (

@@ -1,7 +1,9 @@
 export {
   makeMuseEnvironment,
   museInitializeParams,
+  museLaunch,
   museServeArgs,
+  museWorkspaceRoot,
   type MuseSdkHost,
   type MuseSdkHostOptions,
 } from "./server/sdk.ts";

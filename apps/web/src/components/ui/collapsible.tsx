@@ -18,12 +18,18 @@ function CollapsibleTrigger({ className, ...props }: CollapsiblePrimitive.Trigge
   );
 }
 
-function CollapsiblePanel({ className, ...props }: CollapsiblePrimitive.Panel.Props) {
+function CollapsiblePanel({
+  className,
+  animate = true,
+  ...props
+}: CollapsiblePrimitive.Panel.Props & { animate?: boolean }) {
   // https://ui.shadcn.com/docs/components/base/collapsible
   return (
     <CollapsiblePrimitive.Panel
       className={cn(
-        "h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-200 ease-drawer data-ending-style:duration-150 motion-reduce:transition-none data-ending-style:h-0 data-starting-style:h-0 data-open:data-ending-style:[height:var(--collapsible-panel-height)]",
+        "overflow-hidden",
+        animate &&
+          "h-(--collapsible-panel-height) transition-[height] duration-200 ease-drawer data-ending-style:duration-150 motion-reduce:transition-none data-ending-style:h-0 data-starting-style:h-0 data-open:data-ending-style:[height:var(--collapsible-panel-height)]",
         className,
       )}
       data-slot="collapsible-panel"

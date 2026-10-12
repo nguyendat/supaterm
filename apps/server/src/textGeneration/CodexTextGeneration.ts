@@ -26,6 +26,7 @@ import {
 } from "@supacode/provider-core/server/textGenerationUtils";
 import { codexModelFamily, getModelSelectionStringOptionValue } from "@supacode/shared/model";
 import { getCodexServiceTierOptionValue } from "../codexModelOptions.ts";
+import * as HostProcess from "@supacode/shared/HostProcess";
 
 const CODEX_TIMEOUT_MS = 180_000;
 const encodeJsonString = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
@@ -149,6 +150,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     outputSchema: outputSchemaJson,
     modelSelection,
     attachments,
+    investigate,
   }: TextGenerationOperations.Request<S>): Effect.fn.Return<
     S["Type"],
     TextGenerationError,
@@ -187,6 +189,23 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         getModelSelectionStringOptionValue(modelSelection, "reasoningEffort") ??
         DEFAULT_TEXT_GENERATION_REASONING_EFFORT;
       const serviceTier = resolved ? undefined : getCodexServiceTierOptionValue(modelSelection);
+      // Codex loads `.codex/config.toml` from a trusted project, and a checkout of a trusted
+      // repository inherits its trust. An investigation's checkout is someone else's change, so
+      // it is marked untrusted (by the canonical path Codex looks up) to keep that config out.
+      // A JSON string is also a valid TOML key.
+      const untrustedCheckoutKey = investigate
+        ? yield* fileSystem.realPath(cwd).pipe(
+            Effect.flatMap(encodeJsonString),
+            Effect.mapError(
+              (cause) =>
+                new TextGenerationError({
+                  operation,
+                  detail: "Failed to resolve the checkout to investigate.",
+                  cause,
+                }),
+            ),
+          )
+        : undefined;
       const spawnCommand = yield* resolveSpawnCommand(
         effectiveConfig.binaryPath || "codex",
         [
@@ -201,6 +220,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           "--config",
           `model_reasoning_effort="${reasoningEffort}"`,
           ...(serviceTier ? ["--config", `service_tier="${serviceTier}"`] : []),
+          ...(untrustedCheckoutKey
+            ? ["--config", `projects={${untrustedCheckoutKey}={trust_level="untrusted"}}`]
+            : []),
           "--output-schema",
           schemaPath,
           "--output-last-message",
@@ -214,7 +236,12 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         env: {
           ...effectiveEnvironment,
           ...(effectiveConfig.homePath
-            ? { CODEX_HOME: expandHomePath(effectiveConfig.homePath) }
+            ? {
+                CODEX_HOME: expandHomePath(
+                  effectiveConfig.homePath,
+                  yield* HostProcess.HomeDirectory,
+                ),
+              }
             : {}),
         },
         cwd,
@@ -266,7 +293,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     return yield* Effect.gen(function* () {
       yield* runCodexCommand().pipe(
         Effect.scoped,
-        Effect.timeoutOption(CODEX_TIMEOUT_MS),
+        // The read-only sandbox already holds an investigation to reading; it only needs longer.
+        Effect.timeoutOption(investigate?.timeoutMs ?? CODEX_TIMEOUT_MS),
         Effect.flatMap(
           Option.match({
             onNone: () =>

@@ -31,9 +31,10 @@ On Windows, in PowerShell, install the packaged command line with:
 irm https://next.supacode.sh/install.ps1 | iex
 ```
 
-This puts `supacode` in `~/.local/bin`. If your shell reports `command not found`
-afterwards, add that directory to `PATH`. Set `SUPACODE_CHANNEL=nightly` to install
-the nightly train, or `SUPACODE_VERSION` to pin an exact version.
+This installs the `supacode` binary to `~/.local/bin`. If your shell reports
+`command not found` afterwards, add that directory to `PATH`. Set
+`SUPACODE_CHANNEL=nightly` to install the nightly train, or `SUPACODE_VERSION` to pin an exact
+version.
 
 ### Intel Macs
 
@@ -126,7 +127,7 @@ computer.
 | Grok Build  | Install [Grok Build CLI](https://x.ai/cli), then run `grok login`.                                                                                        |
 | OpenCode    | Install [OpenCode](https://opencode.ai), then run `opencode auth login`.                                                                                  |
 | Antigravity | Install and sign in with Google from Supacode's provider settings.                                                                                        |
-| Pi          | Install [Pi](https://pi.dev), then run `pi` once to finish its login or API-key setup.                                                                    |
+| Pi          | Install [Pi](./providers-pi.md#set-up-pi) with Node.js 22.19 or newer, then run `pi` and `/login`.                                                        |
 | Muse Code   | Install [Muse Code](https://dev.meta.ai/docs/muse-code) on the server, run `muse login`, then enable it in Settings → Providers.                          |
 
 Provider CLIs must be on the server's `PATH`. If Supacode cannot find one, set its

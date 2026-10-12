@@ -21,6 +21,7 @@ export type SupacodeMcpToolSummaryAction =
   | "thread-send"
   | "thread-wait"
   | "thread-interrupt"
+  | "workflow-stop"
   | "thread-configuration"
   | "thread-configure"
   | "thread-fork"
@@ -57,6 +58,8 @@ export type SupacodeMcpToolSummaryAction =
   | "list-prs"
   | "watch-pr"
   | "unwatch-pr"
+  | "write-pr-guides"
+  | "read-pr-guide"
   | "browser"
   | "device"
   | "html-preview"
@@ -107,6 +110,16 @@ const SUPACODE_MCP_TOOLS: Readonly<Record<string, SupacodeMcpToolDefinition>> = 
     "unwatch-pr",
     "pull-request",
   ),
+  write_pull_request_guides: tool(
+    ["Write", "Writing", "Started", "review guides"],
+    "write-pr-guides",
+    "pull-request",
+  ),
+  read_pull_request_guide: tool(
+    ["Read", "Reading", "Read", "a review guide"],
+    "read-pr-guide",
+    "pull-request",
+  ),
   orchestrator_capabilities: tool(
     ["Get", "Getting", "Got", "orchestration capabilities"],
     "capabilities",
@@ -139,6 +152,10 @@ const SUPACODE_MCP_TOOLS: Readonly<Record<string, SupacodeMcpToolDefinition>> = 
   supacode_thread_read: tool(["Read", "Reading", "Read", "a Supacode thread"], "thread-read"),
   supacode_thread_send: tool(["Send", "Sending", "Sent", "to a Supacode thread"], "thread-send"),
   supacode_thread_wait: tool(["Wait", "Waiting", "Waited", "for a Supacode thread"], "thread-wait"),
+  supacode_workflow_stop: tool(
+    ["Stop", "Stopping", "Requested a stop for", "a workflow"],
+    "workflow-stop",
+  ),
   supacode_thread_interrupt: tool(
     ["Interrupt", "Interrupting", "Requested an interrupt of", "a Supacode thread"],
     "thread-interrupt",

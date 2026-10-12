@@ -8,7 +8,7 @@ import { codexAuthDeliveryUrl, readCodexAuthHandoff } from "@supacode/shared/cod
 import { receiveCodexAuthCallback, CodexAuthCallbackError } from "./CodexAuthCallback.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import { providerAuthReturnUrl } from "@supacode/shared/providerAuthReturnUrl";
-import { HostProcessArguments } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
@@ -100,7 +100,7 @@ export const make = Effect.gen(function* () {
         );
         return true;
       };
-      const args = yield* HostProcessArguments;
+      const args = yield* HostProcess.Arguments;
       args.some((value) => startProviderAuthHandoff(value));
       yield* electronApp.on("open-url", (event: { preventDefault: () => void }, url: string) => {
         if (startProviderAuthHandoff(url) || resumeProviderAuth(url)) event.preventDefault();

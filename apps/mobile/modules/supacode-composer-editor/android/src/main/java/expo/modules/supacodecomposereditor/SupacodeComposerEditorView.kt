@@ -37,6 +37,9 @@ class SupacodeComposerEditorView(context: Context, appContext: AppContext) : Exp
   context,
   appContext
 ) {
+  // React Native ignores the editor's requestLayout(), which makes TextView defer caret scrolls.
+  override val shouldUseAndroidLayout = true
+
   private val editor = SelectionAwareEditText(context)
   private val defaultHighlightColor = editor.highlightColor
   private val defaultSelectionColor = context.resolveThemeColor(

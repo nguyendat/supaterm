@@ -9,12 +9,16 @@ import { NativeLayoutObserver } from "./NativeLayoutObserver";
 export function NativeColumnContent(props: {
   readonly children: ReactNode;
   readonly primary?: boolean;
+  readonly insetHorizontally?: boolean;
 }) {
   const [metrics, setMetrics] = useState<NativeLayoutMetrics | null>(null);
   return (
     <View className={props.primary ? "flex-1 bg-drawer" : "flex-1 bg-screen"}>
       <SafeAreaProvider style={{ flex: 1 }}>
-        <SafeAreaView edges={["left", "right"]} style={{ flex: 1 }}>
+        <SafeAreaView
+          edges={props.insetHorizontally === false ? [] : ["left", "right"]}
+          style={{ flex: 1 }}
+        >
           <View style={{ flex: 1 }}>
             <NativeLayoutObserver onChange={setMetrics} />
             <NativeColumnLayoutMetricsContext value={metrics}>

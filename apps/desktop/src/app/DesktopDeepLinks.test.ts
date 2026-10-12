@@ -2,7 +2,7 @@
 import * as NodeHttp from "node:http";
 import { codexAuthHandoffUrl, readCodexAuthDelivery } from "@supacode/shared/codexAuthHandoff";
 import { EnvironmentId, ProviderInstanceId } from "@supacode/contracts";
-import { HostProcessArguments } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -292,7 +292,7 @@ describe("DesktopDeepLinks", () => {
         }).pipe(
           Effect.provide(makeDesktopDeepLinksLayer({ shell })),
           Effect.provideService(
-            HostProcessArguments,
+            HostProcess.Arguments,
             entry === "startup" ? ["supacode", link] : ["supacode"],
           ),
           Effect.provideService(ElectronApp.ElectronApp, makeListenerApp(listeners)),

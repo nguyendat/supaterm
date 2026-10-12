@@ -9,6 +9,7 @@ import {
   SUPACODE_MCP_BEARER_ENV,
   SUPACODE_MCP_URL_ENV,
   SUPACODE_PI_RUNTIME_MODE_ENV,
+  SUPACODE_PI_MCP_EXTENSION_PATH_ENV,
 } from "./mcpExtensionSource.ts";
 
 const RESERVED_PI_LAUNCH_ARGUMENTS = new Set([
@@ -292,11 +293,15 @@ export function buildPiRpcLaunch(input: {
   // credentials inherited from the server or a parent provider process.
   delete environment[SUPACODE_MCP_URL_ENV];
   delete environment[SUPACODE_MCP_BEARER_ENV];
+  delete environment[SUPACODE_PI_MCP_EXTENSION_PATH_ENV];
 
   return {
     args,
     env: {
       ...environment,
+      ...(hasSupacodeExtension && input.extensionPath !== undefined
+        ? { [SUPACODE_PI_MCP_EXTENSION_PATH_ENV]: input.extensionPath }
+        : {}),
       ...(hasSupacodeExtension && input.runtimeMode !== undefined
         ? {
             [SUPACODE_PI_RUNTIME_MODE_ENV]:

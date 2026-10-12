@@ -1,5 +1,5 @@
 import type { ContextMenuItem } from "@supacode/contracts";
-import { HostProcessPlatform } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -121,7 +121,7 @@ const MENU_ICON_SYMBOLS: Readonly<Record<string, string>> = {
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
-  const platform = yield* HostProcessPlatform;
+  const platform = yield* HostProcess.Platform;
   const menuIconCache = new Map<string, Option.Option<Electron.NativeImage>>();
 
   const loadMenuIcon = (symbol: string): Option.Option<Electron.NativeImage> => {

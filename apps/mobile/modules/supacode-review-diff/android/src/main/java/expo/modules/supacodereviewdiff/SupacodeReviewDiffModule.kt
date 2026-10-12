@@ -41,6 +41,9 @@ class SupacodeReviewDiffModule : Module() {
       Prop("contentWidth") { view: SupacodeReviewDiffView, contentWidth: Double ->
         view.setContentWidth(contentWidth.toFloat())
       }
+      Prop("scrollEnabled") { view: SupacodeReviewDiffView, enabled: Boolean ->
+        view.setScrollEnabled(enabled)
+      }
       Prop("initialRowIndex") { view: SupacodeReviewDiffView, initialRowIndex: Double ->
         view.setInitialRowIndex(initialRowIndex)
       }

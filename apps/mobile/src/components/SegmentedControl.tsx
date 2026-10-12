@@ -1,6 +1,13 @@
 import * as Haptics from "expo-haptics";
-import { Platform, Pressable, View } from "react-native";
-import Animated, { Easing, LinearTransition, ReduceMotion } from "react-native-reanimated";
+import { useEffect, useState } from "react";
+import { I18nManager, Platform, Pressable, View } from "react-native";
+import Animated, {
+  Easing,
+  ReduceMotion,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 import { AppText as Text } from "./AppText";
 import { cn } from "../lib/cn";
 import { MaterialSegmentedControl } from "./MaterialSegmentedControl";
@@ -16,12 +23,36 @@ export function SegmentedControl<Value extends number | string>(
     if (value !== props.selected) void Haptics.selectionAsync();
     props.onSelect(value);
   };
+  const [width, setWidth] = useState(0);
+  const index = Math.max(
+    0,
+    props.options.findIndex((option) => option.value === props.selected),
+  );
+  const position = useSharedValue(index);
+  useEffect(() => {
+    position.set(
+      withTiming(index, {
+        duration: 200,
+        easing: Easing.out(Easing.cubic),
+        reduceMotion: ReduceMotion.System,
+      }),
+    );
+  }, [index, position]);
+  const indicatorStyle = useAnimatedStyle(() => ({
+    transform: [
+      {
+        translateX:
+          ((position.value * width) / props.options.length) * (I18nManager.isRTL ? -1 : 1),
+      },
+    ],
+  }));
   if (Platform.OS === "android") {
     return <MaterialSegmentedControl {...props} onSelect={select} />;
   }
   return (
     <View
       accessible={false}
+      onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
       className={cn(
         "flex-row overflow-hidden",
         "rounded-full border-continuous bg-card",
@@ -30,21 +61,8 @@ export function SegmentedControl<Value extends number | string>(
     >
       <Animated.View
         pointerEvents="none"
-        layout={LinearTransition.duration(200)
-          .easing(Easing.out(Easing.cubic))
-          .reduceMotion(ReduceMotion.System)}
         className="absolute inset-y-0 rounded-full bg-secondary"
-        style={{
-          width: `${100 / props.options.length}%`,
-          start: `${
-            (Math.max(
-              0,
-              props.options.findIndex((option) => option.value === props.selected),
-            ) *
-              100) /
-            props.options.length
-          }%`,
-        }}
+        style={[{ width: `${100 / props.options.length}%`, start: 0 }, indicatorStyle]}
       />
       {props.options.map((option) => {
         const active = option.value === props.selected;

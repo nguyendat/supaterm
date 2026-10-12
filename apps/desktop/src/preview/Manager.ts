@@ -25,7 +25,7 @@ import type {
   DesktopPreviewTabDefaults,
   PreviewForwardedShortcut,
 } from "@supacode/contracts";
-import { HostProcessPlatform } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import { matchesKeybindingShortcut } from "@supacode/shared/keybindings";
 import { normalizePreviewUrl } from "@supacode/shared/preview";
 import {
@@ -518,7 +518,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   pictureInPicturePreloadPath: string,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
-  const hostPlatform = yield* HostProcessPlatform;
+  const hostPlatform = yield* HostProcess.Platform;
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
   const parentScope = yield* Scope.Scope;

@@ -33,6 +33,7 @@ import * as DesktopRemoteUpdates from "../updates/DesktopRemoteUpdates.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopSnapShot from "../snapShot/DesktopSnapShot.ts";
 import * as DesktopWslBackend from "../wsl/DesktopWslBackend.ts";
+import * as HostProcess from "@supacode/shared/HostProcess";
 
 const DEFAULT_DESKTOP_BACKEND_PORT = 7373;
 const MAX_TCP_PORT = 65_535;
@@ -277,7 +278,9 @@ const startup = Effect.gen(function* () {
     preReadyElectronOptions.linuxPasswordStoreCommandLine !== null;
   const linuxElectronOptions =
     environment.platform === "linux" && !hasCommandLinePasswordStore
-      ? DesktopPreReadyPlatform.resolveEarlyLinuxElectronOptionsFromProcess()
+      ? DesktopPreReadyPlatform.resolveEarlyLinuxElectronOptionsFromProcess(
+          yield* HostProcess.HomeDirectory,
+        )
       : preReadyElectronOptions.linux;
   if (linuxElectronOptions !== null && !hasCommandLinePasswordStore) {
     if (

@@ -9,6 +9,7 @@ import {
 } from "@supacode/contracts";
 import {
   clearProjectSettingsOverrides,
+  projectSettingsOverridesForWrite,
   resolveProjectSettings,
 } from "@supacode/shared/projectSettings";
 
@@ -68,9 +69,10 @@ export function planMobileScopedSettingsPatch(
       target.environment.serverConfig.environment.capabilities.projectSettingsOverrides !== true
     )
       continue;
-    const current =
-      target.environment.serverConfig.settings.projectSettingsOverrides[target.projectId] ?? {};
-    const next: Record<string, unknown> = { ...current };
+    const next: Record<string, unknown> = projectSettingsOverridesForWrite(
+      target.environment.serverConfig.settings,
+      target.projectId,
+    );
     for (const [key, value] of Object.entries(patch)) {
       // A picker's "Inherit" sends null; for keys whose override cannot
       // store null that means remove the override.
@@ -125,6 +127,11 @@ export function planMobileScopedSettingsClear(
   }
   return [...writes].map(([environmentId, projectSettingsOverrides]) => ({
     environmentId,
-    patch: { projectSettingsOverrides } as ServerSettingsPatch,
+    patch: {
+      projectSettingsOverrides,
+      projectSettingsOverrideRemovals: Object.fromEntries(
+        Object.keys(projectSettingsOverrides).map((projectId) => [projectId, keys]),
+      ),
+    } as ServerSettingsPatch,
   }));
 }

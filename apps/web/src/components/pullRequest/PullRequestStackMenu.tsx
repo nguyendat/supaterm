@@ -20,6 +20,7 @@ import { PullRequestStackHeader } from "./PullRequestStackHeader";
 import { PullRequestGlyph } from "./pullRequestIcons";
 
 export function PullRequestStackMenu({
+  hostLabel,
   stack,
   reference,
   environmentId,
@@ -31,6 +32,8 @@ export function PullRequestStackMenu({
   notice,
   onRetry,
 }: {
+  /** The host's name, which reports what it did with the stack. */
+  hostLabel: string;
   notice?: string | null;
   onRetry?: (() => void) | undefined;
   stack: PullRequestStack;
@@ -103,7 +106,7 @@ export function PullRequestStackMenu({
         title: action === "merge" ? "Stack merge request completed" : "Stack rebased",
         description:
           action === "merge"
-            ? "GitHub merged the stack or added it to its merge queue."
+            ? `${hostLabel} merged the stack or added it to its merge queue.`
             : undefined,
       });
     }

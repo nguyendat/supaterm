@@ -14,7 +14,10 @@ import {
   type ServerSettings,
 } from "@supacode/contracts";
 import { resolveProjectScripts } from "@supacode/shared/projectScripts";
-import { clearProjectSettingsOverrides } from "@supacode/shared/projectSettings";
+import {
+  clearProjectSettingsOverrides,
+  projectSettingsOverridesForWrite,
+} from "@supacode/shared/projectSettings";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import { useRef, useState } from "react";
@@ -120,7 +123,7 @@ export function useProjectScriptSettings(
                             "defaultProjectScripts",
                           ])
                         : {
-                            ...settings.projectSettingsOverrides[project.id],
+                            ...projectSettingsOverridesForWrite(settings, project.id),
                             defaultProjectScripts: nextScripts,
                           },
                   },

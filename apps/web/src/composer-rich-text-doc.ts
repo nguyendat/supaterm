@@ -218,10 +218,15 @@ function textJsonForSpan(text: string, marks: RichTextMark[]): Record<string, un
   return json;
 }
 
+/**
+ * Document content for a prompt. `literalLength` keeps that many leading
+ * characters as plain text, for a paste that continues a path query: markers
+ * inside a path such as `src/__init__.py` must reach file search unstyled.
+ */
 export function buildTiptapContent(
   value: string,
   skillLabelFor: (name: string) => SkillMeta,
-  options?: { styling?: boolean; blocks?: boolean; literalText?: boolean },
+  options?: { styling?: boolean; blocks?: boolean; literalText?: boolean; literalLength?: number },
 ): Record<string, unknown>[] {
   if (options?.literalText) {
     return value.split("\n").map((line) => ({
@@ -241,7 +246,8 @@ export function buildTiptapContent(
   const atoms: InlineJson[] = [];
 
   const atomSources: string[] = [];
-  const text = splitPromptIntoComposerSegments(value)
+  const literal = value.slice(0, options?.literalLength ?? 0);
+  const text = splitPromptIntoComposerSegments(value.slice(literal.length))
     .map((segment) => {
       if (segment.type === "text") return segment.text;
       atoms.push(atomJsonForSegment(segment, skillLabelFor));
@@ -287,6 +293,14 @@ export function buildTiptapContent(
 
   for (let index = 0; index < sourceLines.length; index += 1) {
     const line = sourceLines[index]!;
+    // The rest of the literal's line continues the text before the caret, so
+    // it cannot open a block.
+    if (index === 0 && literal) {
+      entries.push({
+        line: { list: null, inline: [textJsonForSpan(literal, []), ...buildInline(line)] },
+      });
+      continue;
+    }
     const opening = blockSyntax ? parseOpeningFence(line) : null;
     if (!opening) {
       if (blockSyntax && /^([-*_])(?:[ \t]*\1){2,}[ \t]*\r?$/.test(line)) {

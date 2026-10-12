@@ -17,7 +17,6 @@ import {
 import { connectionRouteId } from "../connection/routes.ts";
 import type { PreparedConnection } from "../connection/model.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
-import { environmentEndpointUrl } from "../environment/endpoint.ts";
 import { safeErrorLogAttributes } from "../errors/safeLog.ts";
 import { executeAuthenticatedEnvironmentHttpRequest } from "./environmentHttpAuth.ts";
 import { followStreamInEnvironment } from "./environmentStreams.ts";
@@ -55,7 +54,7 @@ export const fetchEnvironmentSessionState = Effect.fn(
   return yield* executeAuthenticatedEnvironmentHttpRequest({
     ...input,
     group: "auth",
-    url: (httpBaseUrl) => environmentEndpointUrl(httpBaseUrl, "/api/auth/session"),
+    url: (urls) => urls.session(),
     timeoutMs: input.timeoutMs ?? DEFAULT_SESSION_STATE_TIMEOUT_MS,
     request: ({ client, headers }) => client.session({ headers }),
   });

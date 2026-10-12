@@ -9,6 +9,7 @@ import {
 } from "@supacode/contracts";
 import { MuseSettings } from "@supacode/provider-muse/settings";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
@@ -16,6 +17,7 @@ import * as TestProviderHost from "@supacode/provider-testing/TestProviderHost";
 import {
   museInitializeParams,
   museServeArgs,
+  museWorkspaceRoot,
   type MuseSdkHost,
   type MuseSdkHostOptions,
 } from "@supacode/provider-muse/testing";
@@ -23,6 +25,7 @@ import * as IdAllocator from "@supacode/provider-core/server/IdAllocator";
 import * as ProviderAdapterRegistry from "../ProviderAdapterRegistry.ts";
 import * as ProviderContinuationRequests from "@supacode/provider-core/server/ProviderContinuationRequests";
 import type { OrchestratorV2ProviderReplayHarness } from "../testkit/ProviderReplayHarness.ts";
+import { materializeReplayTranscriptWorkspace } from "@supacode/provider-testing/replayTranscript";
 import { makeMuseAdapterV2 } from "@supacode/provider-muse/server";
 
 export const MUSE_PROVIDER_KIND = "muse";
@@ -433,6 +436,35 @@ export function layer(input: {
     ),
   );
 }
+
+/**
+ * Fills a recording's `<workspace>` with what the adapter sends on this host:
+ * the canonical path (macOS /var -> /private/var), which `turn/start` names in
+ * museWorkspaceRoot's form (verbatim on Windows).
+ */
+export const materializeMuseReplayWorkspace = Effect.fn("materializeMuseReplayWorkspace")(
+  function* (transcript: ProviderReplayTranscript, workspace: string) {
+    const canonical = yield* FileSystem.FileSystem.pipe(
+      Effect.flatMap((fs) => fs.realPath(workspace)),
+      Effect.provide(NodeServices.layer),
+    );
+    const plain = materializeReplayTranscriptWorkspace(transcript, canonical);
+    const turnStarts = materializeReplayTranscriptWorkspace(
+      transcript,
+      yield* museWorkspaceRoot(canonical),
+    );
+    return {
+      ...plain,
+      entries: plain.entries.map((entry, index) =>
+        entry.type === "expect_outbound" &&
+        isRecord(entry.frame) &&
+        entry.frame.method === "turn/start"
+          ? turnStarts.entries[index]!
+          : entry,
+      ),
+    };
+  },
+);
 
 export const MuseOrchestratorReplayHarness: OrchestratorV2ProviderReplayHarness<
   MuseReplayTranscript,

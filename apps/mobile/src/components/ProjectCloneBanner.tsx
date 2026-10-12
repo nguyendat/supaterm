@@ -4,8 +4,9 @@ import {
   type ProjectCloneSnapshot,
 } from "@supacode/contracts";
 import type { ComponentProps } from "react";
-import { ActivityIndicator, Pressable, View } from "react-native";
+import { Pressable, View } from "react-native";
 
+import { AppActivityIndicator } from "./AppActivityIndicator";
 import { cn } from "../lib/cn";
 import { useInlineConfirm } from "../lib/useInlineConfirm";
 import { AppText as Text } from "./AppText";
@@ -27,7 +28,7 @@ export function ProjectCloneBanner(props: {
   if (clone.phase === "running") {
     return (
       <View className="flex-row items-center gap-3 rounded-2xl border border-border bg-card px-3.5 py-3">
-        <ActivityIndicator size="small" />
+        <AppActivityIndicator size="small" />
         <View className="min-w-0 flex-1">
           <Text className="font-supacode-medium text-sm" numberOfLines={1}>
             Cloning {name}

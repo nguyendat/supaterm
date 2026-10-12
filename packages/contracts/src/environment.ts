@@ -127,6 +127,9 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   questionAutoDismiss: Schema.optionalKey(Schema.Boolean),
   questionAutoDismissPause: Schema.optionalKey(Schema.Boolean),
   storageCleanup: Schema.optionalKey(Schema.Boolean),
+  storageCleanupRun: Schema.optionalKey(Schema.Boolean),
+  /** Server checks OTLP endpoints for the telemetry export settings. */
+  otlpEndpointCheck: Schema.optionalKey(Schema.Boolean),
   projectWorktreeCleanup: Schema.optionalKey(Schema.Boolean),
   /** Server honors the `worktreesDirectory` setting. */
   worktreesDirectory: Schema.optionalKey(Schema.Boolean),
@@ -134,6 +137,15 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   threadRestartContinuation: Schema.optionalKey(Schema.Boolean),
   /** Server resolves `projectSettingsOverrides`; older servers ignore the key. */
   projectSettingsOverrides: Schema.optionalKey(Schema.Boolean),
+  /** Server resolves a project's `providerInstances` override entry. Older
+      servers decode the key away (unknown fields are stripped, not
+      rejected), so the per-project provider switch would silently do
+      nothing; clients hide it instead of sending a patch that goes nowhere. */
+  projectProviderInstanceOverrides: Schema.optionalKey(Schema.Boolean),
+  /** Server stores model favorites, hidden models and model order. Older servers decode those
+      writes away and still broadcast a settings change, so clients keep the preferences on the
+      device for them and never send the migration. */
+  modelPreferences: Schema.optionalKey(Schema.Boolean),
   /** Server understands thread.snooze / thread.unsnooze commands. Same
       version-skew contract as threadSettlement. */
   threadSnooze: Schema.optionalKey(Schema.Boolean),

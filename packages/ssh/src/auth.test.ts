@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import { HostProcessPlatform } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 
 import {
   buildSshAskpassHelperDescriptor,
@@ -53,7 +53,7 @@ describe("ssh auth", () => {
         'printf "%s\\n" "$SUPACODE_SSH_AUTH_SECRET"',
       );
     }).pipe(
-      Effect.provide(Layer.merge(NodeServices.layer, Layer.succeed(HostProcessPlatform, "linux"))),
+      Effect.provide(Layer.merge(NodeServices.layer, Layer.succeed(HostProcess.Platform, "linux"))),
       Effect.scoped,
     ),
   );
@@ -64,7 +64,7 @@ describe("ssh auth", () => {
         directory: "C:\\temp\\supacode-ssh-askpass",
       }).pipe(
         Effect.provide(
-          Layer.merge(NodeServices.layer, Layer.succeed(HostProcessPlatform, "win32")),
+          Layer.merge(NodeServices.layer, Layer.succeed(HostProcess.Platform, "win32")),
         ),
       );
 

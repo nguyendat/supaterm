@@ -1,5 +1,6 @@
-import { ActivityIndicator, Platform, StatusBar, View } from "react-native";
+import { Platform, StatusBar, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { AppActivityIndicator } from "./AppActivityIndicator";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 
 import { AppText as Text } from "./AppText";
@@ -7,6 +8,8 @@ import { BrandMark } from "./BrandMark";
 
 export function LoadingScreen(props: {
   readonly message: string;
+  /** Let the enclosing pane supply the background and top inset. */
+  readonly embedded?: boolean;
   readonly messagePlacement?: "above-spinner" | "below-spinner";
 }) {
   const { themeAppearance: colorScheme } = useAppearancePreferences();
@@ -14,7 +17,10 @@ export function LoadingScreen(props: {
   const messagePlacement = props.messagePlacement ?? "below-spinner";
 
   return (
-    <View className="flex-1 bg-screen" style={{ paddingTop: insets.top }}>
+    <View
+      className={props.embedded ? "flex-1" : "flex-1 bg-screen"}
+      style={{ paddingTop: props.embedded ? 0 : insets.top }}
+    >
       {Platform.OS === "android" ? (
         <StatusBar barStyle={colorScheme === "dark" ? "light-content" : "dark-content"} />
       ) : null}
@@ -23,7 +29,7 @@ export function LoadingScreen(props: {
         {messagePlacement === "above-spinner" ? (
           <Text className="font-supacode-bold text-lg text-foreground">{props.message}</Text>
         ) : null}
-        <ActivityIndicator size="large" />
+        <AppActivityIndicator size="large" />
         {messagePlacement === "below-spinner" ? (
           <Text className="font-supacode-bold text-lg text-foreground">{props.message}</Text>
         ) : null}

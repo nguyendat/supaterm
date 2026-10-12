@@ -1,4 +1,4 @@
-import { HostProcessPlatform } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -28,6 +28,12 @@ const OpenCodeServerEntry = Schema.Struct({
   /** Linux `/proc/<pid>/stat` start ticks, or macOS `ps` lstart (whole seconds). */
   startTime: Schema.String,
   command: Schema.String,
+  /**
+   * The server's argv after the binary. The agent wrapper execs into the server, so the pid
+   * recorded at spawn keeps its start time but may show the wrapper's command line; only its
+   * ending has to match. Entries written before this field compare the whole command line.
+   */
+  args: Schema.optionalKey(Schema.Array(Schema.String)),
   port: Schema.Int,
   /** Entries copied along with a state directory are dropped, never acted on. */
   stateDir: Schema.String,
@@ -119,7 +125,7 @@ export const make = Effect.fn("OpenCodeServerLedger.make")(function* (input: {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const platform = yield* HostProcessPlatform;
+  const platform = yield* HostProcess.Platform;
   const directory = path.join(input.stateDir, ENTRY_DIRECTORY);
   // Windows servers are not detached and are never recorded.
   const recordable = platform === "linux" || platform === "darwin";
@@ -242,6 +248,7 @@ export const make = Effect.fn("OpenCodeServerLedger.make")(function* (input: {
         pid: member.pid,
         startTime: member.startTime,
         command: member.command,
+        args: server.args,
         port: server.port,
         stateDir: input.stateDir,
         owner,
@@ -269,7 +276,7 @@ export const make = Effect.fn("OpenCodeServerLedger.make")(function* (input: {
     );
 
   // Signals only a group whose recorded member still has the same pid, start
-  // time, group, and full command line, so a recycled pid is never touched.
+  // time, group, and server command line, so a recycled pid is never touched.
   const stopOrphan = (entry: OpenCodeServerEntry) =>
     Effect.gen(function* () {
       const observed = yield* observe(entry.pid);
@@ -278,7 +285,9 @@ export const make = Effect.fn("OpenCodeServerLedger.make")(function* (input: {
         observed.zombie ||
         observed.startTime !== entry.startTime ||
         observed.pgid !== entry.pgid ||
-        observed.command !== entry.command
+        (entry.args === undefined
+          ? observed.command !== entry.command
+          : !observed.command.endsWith(` ${entry.args.join(" ")}`))
       ) {
         return;
       }

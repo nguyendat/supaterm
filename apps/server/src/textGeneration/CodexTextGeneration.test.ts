@@ -266,6 +266,34 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
     ),
   );
 
+  it.effect("investigates a review guide checkout as an untrusted project", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const checkout = yield* fs.makeTempDirectoryScoped({ prefix: "supacode-codex-checkout-" });
+      const canonicalCheckout = yield* fs.realPath(checkout);
+      return yield* withFakeCodexEnv(
+        {
+          output: JSON.stringify({ stops: [] }),
+          requireArg: `--config projects={${JSON.stringify(canonicalCheckout)}={trust_level="untrusted"}}`,
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const generated = yield* textGeneration.generateReviewGuide({
+              cwd: checkout,
+              number: 7,
+              title: "Add a project setting",
+              description: "",
+              baseBranch: "main",
+              baseCommit: "0000000000000000000000000000000000000000",
+              settledReview: "",
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            });
+            expect(generated.stops).toEqual([]);
+          }),
+      );
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("passes exec-safe launch args into codex exec", () =>
     withFakeCodexEnv(
       {

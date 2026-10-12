@@ -16,7 +16,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeOS from "node:os";
 import * as NodeReadlinePromises from "node:readline/promises";
 
-import { HostProcessArchitecture, HostProcessPlatform } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import { isCommandAvailable, resolveSpawnCommand } from "@supacode/shared/shell";
 import * as Config from "effect/Config";
 import * as Console from "effect/Console";
@@ -194,7 +194,7 @@ export const triageCommand = Command.make("triage", {
         releaseTag: /^[^-+]+-(?:nightly|preview)\./.test(version)
           ? `v${version} (prerelease build; if this tag does not exist, clone main)`
           : `v${version}`,
-        os: `${yield* HostProcessPlatform} ${yield* HostProcessArchitecture} (${NodeOS.release()})`,
+        os: `${yield* HostProcess.Platform} ${yield* HostProcess.Architecture} (${NodeOS.release()})`,
         nodeVersion: process.version,
         launchedAs: flags.print
           ? `${cliCommand} --print, run by an agent; ask the user how they installed Supacode`

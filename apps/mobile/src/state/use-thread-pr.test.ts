@@ -1,3 +1,4 @@
+import { SourceControlProviderKind } from "@supacode/contracts";
 import { ProjectId, type ThreadPullRequestLink, type VcsStatusResult } from "@supacode/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -28,7 +29,7 @@ describe("presentThreadPr", () => {
   it("uses merge-request terminology for GitLab", () => {
     expect(
       presentThreadPr(pullRequest, {
-        kind: "gitlab",
+        kind: SourceControlProviderKind.make("gitlab"),
         name: "GitLab",
         baseUrl: "https://gitlab.com",
       }),

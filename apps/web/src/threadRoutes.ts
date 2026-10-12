@@ -1,4 +1,5 @@
 import { scopeThreadRef } from "@supacode/client-runtime/environment";
+import type { EnvironmentShellStatus } from "@supacode/client-runtime/state/shell";
 import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@supacode/contracts";
 import type { DraftId } from "./composerDraftStore";
 
@@ -20,6 +21,12 @@ type DraftThreadRouteState = {
 
 export type ThreadRouteRenderState = "loading" | "ready" | "missing";
 
+export function isThreadRouteSnapshotAuthoritative(
+  status: EnvironmentShellStatus | undefined,
+): boolean {
+  return status === "live";
+}
+
 export function resolveThreadRouteRenderState(input: {
   bootstrapComplete: boolean;
   serverThreadExists: boolean;
@@ -29,16 +36,16 @@ export function resolveThreadRouteRenderState(input: {
   outboxLoaded?: boolean;
 }): ThreadRouteRenderState {
   if (input.pendingThreadExists) return "ready";
+  if (input.draftThreadExists || (input.serverThreadExists && !input.serverThreadDeleted)) {
+    return "ready";
+  }
   if (!input.bootstrapComplete) {
     return "loading";
-  }
-  if (input.draftThreadExists) {
-    return "ready";
   }
   if (input.serverThreadDeleted) {
     return "missing";
   }
-  return input.serverThreadExists ? "ready" : input.outboxLoaded === false ? "loading" : "missing";
+  return input.outboxLoaded === false ? "loading" : "missing";
 }
 
 export function buildThreadRouteParams(ref: ScopedThreadRef): {

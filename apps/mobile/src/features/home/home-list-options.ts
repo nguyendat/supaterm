@@ -16,6 +16,7 @@ import type { HomeProjectSortOrder } from "./homeThreadList";
 
 export interface HomeListOptions {
   readonly selectedEnvironmentId: EnvironmentId | null;
+  readonly selectedProjectKey: string | null;
   readonly projectSortOrder: HomeProjectSortOrder;
 }
 
@@ -26,6 +27,7 @@ export interface ResolvedHomeListOptions extends HomeListOptions {
 function defaultHomeListOptions(): HomeListOptions {
   return {
     selectedEnvironmentId: null,
+    selectedProjectKey: null,
     projectSortOrder:
       DEFAULT_SIDEBAR_PROJECT_SORT_ORDER === "manual"
         ? "updated_at"
@@ -81,6 +83,12 @@ export function useHomeListOptions(availableEnvironmentIds: ReadonlySet<Environm
     },
     [setOptions],
   );
+  const setSelectedProjectKey = useCallback(
+    (value: string | null) => {
+      setOptions((current) => ({ ...current, selectedProjectKey: value }));
+    },
+    [setOptions],
+  );
   const setProjectSortOrder = useCallback(
     (value: HomeProjectSortOrder) => {
       setOptions((current) => ({ ...current, projectSortOrder: value }));
@@ -90,6 +98,7 @@ export function useHomeListOptions(availableEnvironmentIds: ReadonlySet<Environm
   return {
     options: resolvedOptions,
     setSelectedEnvironmentId,
+    setSelectedProjectKey,
     setProjectSortOrder,
   } as const;
 }

@@ -73,10 +73,14 @@ function PopoverPopup({
         alignOffset={alignOffset}
         anchor={anchor}
         collisionAvoidance={collisionAvoidance}
+        // A panel's card already sits inside its own padding, so the panel can reach the edge.
+        collisionPadding={variant === "panel" ? 0 : undefined}
         className={cn(
           "h-(--positioner-height) w-(--positioner-width) max-w-(--available-width) transition-transform data-instant:transition-none motion-reduce:transition-none",
           variant === "panel"
-            ? "z-(--z-sheet) w-[min(var(--thread-details-panel-width),var(--anchor-width))] transition-none"
+            ? // The card inside is the panel width, or the anchor less 12px per side; the viewport
+              // pads it by --spacing(2) per side.
+              "z-(--z-sheet) w-[min(calc(var(--thread-details-panel-width)+--spacing(4)),calc(var(--anchor-width)---spacing(2)))] transition-none"
             : "z-[130]",
         )}
         data-slot="popover-positioner"

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObje
 import { flushSync } from "react-dom";
 
 import { EASE_DRAWER, animationsSettled, prefersReducedMotion } from "~/lib/motion";
+import { observeResize } from "~/lib/observeResize";
 
 export const COMPOSER_ATTACHMENT_PRESENCE_CLASS =
   "transition-[opacity,scale] duration-200 ease-drawer data-enter:starting:scale-95 data-enter:starting:opacity-0 data-ending-style:pointer-events-none data-ending-style:scale-95 data-ending-style:opacity-0 data-ending-style:duration-150 data-ending-style:ease-in motion-reduce:transition-none";
@@ -54,13 +55,11 @@ export function useAttachmentTrayMotion(
   const settledHeightRef = useRef<number | null>(null);
   useLayoutEffect(() => {
     const element = trayRef.current;
-    if (!element || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
+    if (!element) return;
+    return observeResize(element, () => {
       if (element.getAnimations().length > 0) return;
       settledHeightRef.current = element.getBoundingClientRect().height;
     });
-    observer.observe(element);
-    return () => observer.disconnect();
   }, []);
   useLayoutEffect(() => {
     const element = trayRef.current;

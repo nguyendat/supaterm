@@ -1,18 +1,28 @@
+import type { ModelPreferences } from "@supacode/contracts/settings";
 import {
+  DEFAULT_MODEL_BY_PROVIDER,
+  DEFAULT_TEXT_GENERATION_MODEL,
+  DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  defaultInstanceIdForDriver,
   isProviderAvailable,
   isUnconfiguredDefaultInstanceEnabled,
+  resolveProjectProviderInstanceEnabled,
   resolveProviderInstanceEnabled,
   isProviderTextGenerationCapable,
   type ModelSelection,
   type ProjectId,
   type ProjectScopedServerSettingKey,
   type ProjectSettingsOverrides,
+  type ProjectSettingsOverridesPatchEntry,
+  ProviderDriverKind,
+  ProviderInstanceId,
   type ServerProvider,
   ServerSettings,
   type ServerSettingsPatch,
 } from "@supacode/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
 import { deepMerge } from "./Struct.ts";
 import { fromLenientJson } from "./schemaJson.ts";
 import { createModelSelection } from "./model.ts";
@@ -70,12 +80,74 @@ export function isModelSelectionProviderEnabled(
   return isUnconfiguredDefaultInstanceEnabled(selection.instanceId);
 }
 
+const TEXT_GENERATION_FALLBACK_DRIVERS = [
+  "codex",
+  "claudeAgent",
+  "cursor",
+  "grok",
+  "muse",
+  "pi",
+  "opencode",
+  "antigravity",
+].map((driver) => ProviderDriverKind.make(driver));
+
+/**
+ * The text generation model on the first instance `isEnabled` accepts: the
+ * built-in default instances in preference order, then, when
+ * `includeConfiguredInstances` is set, configured instances of those
+ * drivers. `null` when none is.
+ *
+ * `includeConfiguredInstances` is for the project-scoped caller only: a
+ * project that disabled every built-in instance should still be able to
+ * fall back to one it configured itself. The machine-level caller leaves it
+ * unset, since widening the candidates there would change behavior for
+ * every user regardless of project scope.
+ */
+export function fallbackTextGenerationModelSelection(
+  providerInstances: ServerSettings["providerInstances"],
+  isEnabled: (instanceId: ProviderInstanceId, driver: ProviderDriverKind) => boolean,
+  options?: { readonly includeConfiguredInstances?: boolean },
+): ModelSelection | null {
+  const candidates = [
+    ...TEXT_GENERATION_FALLBACK_DRIVERS.map(
+      (driver) => [defaultInstanceIdForDriver(driver), driver] as const,
+    ),
+    ...(options?.includeConfiguredInstances === true
+      ? Object.entries(providerInstances).flatMap(([instanceId, instance]) =>
+          TEXT_GENERATION_FALLBACK_DRIVERS.includes(instance.driver)
+            ? [[ProviderInstanceId.make(instanceId), instance.driver] as const]
+            : [],
+        )
+      : []),
+  ];
+  const match = candidates.find(([instanceId, driver]) => isEnabled(instanceId, driver));
+  if (match === undefined) return null;
+  const [instanceId, driver] = match;
+  return {
+    instanceId,
+    model:
+      DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[driver] ??
+      DEFAULT_MODEL_BY_PROVIDER[driver] ??
+      DEFAULT_TEXT_GENERATION_MODEL,
+  };
+}
+
+/**
+ * `projectId` has no default: a caller that forgets it would otherwise fall
+ * back to the machine's own writer choice, silently ignoring a project that
+ * turned the writer's instance off. Pass `null` explicitly outside a
+ * project's scope.
+ */
 export function resolveSourceControlWriterModelSelection(
   settings: ServerSettings,
-  providers?: ReadonlyArray<ServerProvider>,
+  providers: ReadonlyArray<ServerProvider> | undefined,
+  projectId: ProjectId | null,
 ): ModelSelection {
   const selection = settings.sourceControlWriterModelSelection;
-  if (!selection || !isModelSelectionProviderEnabled(settings, selection)) {
+  if (
+    !selection ||
+    !resolveProjectProviderInstanceEnabled(settings, projectId, selection.instanceId)
+  ) {
     return settings.textGenerationModelSelection;
   }
   if (providers === undefined) {
@@ -88,6 +160,33 @@ export function resolveSourceControlWriterModelSelection(
     isProviderTextGenerationCapable(provider)
     ? selection
     : settings.textGenerationModelSelection;
+}
+
+/**
+ * The model that writes review guides: its own setting when that provider can still run it,
+ * otherwise whatever writes source control text.
+ */
+export function resolveReviewGuideModelSelection(
+  settings: ServerSettings,
+  providers: ReadonlyArray<ServerProvider> | undefined,
+  projectId: ProjectId | null,
+): ModelSelection {
+  const selection = settings.reviewGuideModelSelection;
+  if (
+    selection &&
+    resolveProjectProviderInstanceEnabled(settings, projectId, selection.instanceId)
+  ) {
+    const provider = providers?.find((candidate) => candidate.instanceId === selection.instanceId);
+    if (
+      providers === undefined ||
+      (provider?.enabled === true &&
+        isProviderAvailable(provider) &&
+        isProviderTextGenerationCapable(provider))
+    ) {
+      return selection;
+    }
+  }
+  return resolveSourceControlWriterModelSelection(settings, providers, projectId);
 }
 
 export interface PersistedServerObservabilitySettings {
@@ -167,6 +266,63 @@ function mergeSettingsEntries<Value>(
   return Object.fromEntries(next);
 }
 
+/** Override keys added after clients already round-tripped a project's whole entry. */
+const OVERRIDE_KEYS_OLDER_CLIENTS_OMIT = [
+  "providerInstances",
+  "reviewGuideModelSelection",
+  "reviewGuideInstructions",
+] as const;
+
+function withStoredWorktreeKeepWhen(
+  incoming: NonNullable<ProjectSettingsOverridesPatchEntry["worktreeCleanup"]> | null,
+  stored: ProjectSettingsOverrides["worktreeCleanup"],
+): NonNullable<ProjectSettingsOverrides["worktreeCleanup"]> | null {
+  if (incoming === null || incoming.mode === "off") return incoming;
+  const worktreeKeepWhen =
+    incoming.rules.worktreeKeepWhen ??
+    (stored?.mode === "custom" ? stored.rules.worktreeKeepWhen : "uncommitted-changes");
+  return { mode: "custom", rules: { ...incoming.rules, worktreeKeepWhen } };
+}
+
+/**
+ * `projectSettingsOverrides` entries otherwise replace whole (see the field's
+ * doc comment in contracts), but some keys were added after clients already
+ * round-trip a project's entry on every edit. A client built before one of
+ * them sends an entry that never mentions it, and a whole replace would
+ * silently wipe it. When an incoming entry omits such a key, keep what is
+ * stored; a client that means to clear one says so explicitly, with
+ * `providerInstances: {}` or by listing the key in `removals`.
+ */
+function mergeProjectSettingsOverridesPatch(
+  current: Readonly<Record<string, ProjectSettingsOverrides>>,
+  patch: Readonly<Record<string, ProjectSettingsOverridesPatchEntry | null>>,
+  removals: Readonly<Record<string, ReadonlyArray<ProjectScopedServerSettingKey>>>,
+): Record<string, ProjectSettingsOverrides> {
+  const next = new Map(Object.entries(current));
+  for (const [projectId, entry] of Object.entries(patch)) {
+    if (entry === null) {
+      next.delete(projectId);
+      continue;
+    }
+    const stored = current[projectId];
+    const { worktreeCleanup, ...rest } = entry;
+    next.set(projectId, {
+      ...(stored === undefined ? {} : Struct.pick(stored, OVERRIDE_KEYS_OLDER_CLIENTS_OMIT)),
+      ...rest,
+      ...(worktreeCleanup === undefined
+        ? {}
+        : {
+            worktreeCleanup: withStoredWorktreeKeepWhen(worktreeCleanup, stored?.worktreeCleanup),
+          }),
+    });
+  }
+  for (const [projectId, keys] of Object.entries(removals)) {
+    const entry = next.get(projectId);
+    if (entry !== undefined) next.set(projectId, Struct.omit(entry, keys));
+  }
+  return Object.fromEntries(next);
+}
+
 /**
  * Derived views of `projectSettingsOverrides` for clients that still read
  * the legacy per-key maps. Recomputed on every patch and load so they
@@ -220,9 +376,7 @@ function translateLegacyProjectOverridePatch(
   }
   const currentEntries: Readonly<Record<string, ProjectSettingsOverrides>> =
     current.projectSettingsOverrides;
-  const entries = new Map<string, ProjectSettingsOverrides | null>(
-    Object.entries(rest.projectSettingsOverrides ?? {}),
-  );
+  const entries = new Map<string, ProjectSettingsOverrides | null>();
   // A canonical entry in the same patch is the newer representation; a legacy
   // map must not resurrect a key that entry deliberately omits.
   const canonicalProjectIds = new Set(Object.keys(rest.projectSettingsOverrides ?? {}));
@@ -249,7 +403,7 @@ function translateLegacyProjectOverridePatch(
   applyKey(projectScriptOverrides, "defaultProjectScripts");
   return {
     ...rest,
-    projectSettingsOverrides: Object.fromEntries(entries),
+    projectSettingsOverrides: { ...rest.projectSettingsOverrides, ...Object.fromEntries(entries) },
   } as ServerSettingsPatch;
 }
 
@@ -260,6 +414,11 @@ export function applyServerSettingsPatch(
   const patch = translateLegacyProjectOverridePatch(current, rawPatch);
   const selectionPatch = patch.textGenerationModelSelection;
   const {
+    migrateModelPreferences,
+    setModelFavorites,
+    setModelsHidden,
+    setProviderModelOrder,
+    providerModelPreferences,
     automaticGitFetchInterval,
     providerHealthRefreshInterval,
     backgroundActivityProfile,
@@ -267,10 +426,12 @@ export function applyServerSettingsPatch(
     worktreeCleanup: worktreeCleanupPatch,
     // Merged per entry below; its `null` removals must not reach deepMerge.
     usageLimitSources: usageLimitSourcesPatch,
+    sourceControlHosts: sourceControlHostsPatch,
     usagePriceOverrides: usagePriceOverridesPatch,
     usageModelAliases: usageModelAliasesPatch,
     // Entry replacement: deepMerge would keep keys the client meant to clear.
     projectSettingsOverrides: projectSettingsOverridesPatch,
+    projectSettingsOverrideRemovals,
     // Already translated into `projectSettingsOverrides` above; the legacy
     // maps are derived views and must never be merged directly.
     projectAgentBrowserAccessOverrides: _legacyBrowserAccess,
@@ -313,9 +474,56 @@ export function applyServerSettingsPatch(
             },
           }
         : undefined;
+  const initialFavorites =
+    patch.favorites ?? current.favorites ?? migrateModelPreferences?.favorites ?? null;
+  let favorites = initialFavorites;
+  if (setModelFavorites !== undefined) {
+    let edited = [...(initialFavorites ?? [])];
+    for (const change of setModelFavorites) {
+      const matches = (favorite: ModelPreferences["favorites"][number]) =>
+        favorite.provider === change.provider && favorite.model === change.model;
+      if (!change.favorite) {
+        edited = edited.filter((favorite) => !matches(favorite));
+      } else if (!edited.some(matches)) {
+        edited.push({ provider: change.provider, model: change.model });
+      }
+    }
+    favorites = edited;
+  }
+  const initialModelPreferences =
+    providerModelPreferences ??
+    current.providerModelPreferences ??
+    migrateModelPreferences?.providerModelPreferences ??
+    null;
+  let nextModelPreferences = initialModelPreferences;
+  if ((setModelsHidden?.length ?? 0) > 0 || setProviderModelOrder !== undefined) {
+    const edited: Record<
+      ProviderInstanceId,
+      ModelPreferences["providerModelPreferences"][ProviderInstanceId]
+    > = { ...initialModelPreferences };
+    for (const change of setModelsHidden ?? []) {
+      const preferences = edited[change.provider] ?? { hiddenModels: [], modelOrder: [] };
+      const hiddenModels = preferences.hiddenModels.filter((model) => model !== change.model);
+      if (change.hidden) hiddenModels.push(change.model);
+      edited[change.provider] = { ...preferences, hiddenModels };
+    }
+    if (setProviderModelOrder !== undefined) {
+      const preferences = edited[setProviderModelOrder.provider] ?? {
+        hiddenModels: [],
+        modelOrder: [],
+      };
+      edited[setProviderModelOrder.provider] = {
+        ...preferences,
+        modelOrder: [...setProviderModelOrder.modelOrder],
+      };
+    }
+    nextModelPreferences = edited;
+  }
   const next = deepMerge(current, patchForMerge);
   const nextWithReplacementsBase = {
     ...next,
+    favorites,
+    providerModelPreferences: nextModelPreferences,
     ...(worktreeCleanupPatch === undefined
       ? {}
       : {
@@ -324,6 +532,7 @@ export function applyServerSettingsPatch(
               ? {
                   mode: "custom" as const,
                   rules: {
+                    worktreeKeepWhen: next.storageCleanup.worktreeKeepWhen,
                     worktreeAfterDays: next.storageCleanup.worktreeAfterDays,
                     worktreeOnMerge: next.storageCleanup.worktreeOnMerge,
                     worktreeOnDelete: next.storageCleanup.worktreeOnDelete,
@@ -366,15 +575,29 @@ export function applyServerSettingsPatch(
           ],
         }
       : {}),
-    // Host replacement: deepMerge would keep a cleared account pin.
-    ...(patch.github?.hosts !== undefined
-      ? { github: { ...next.github, hosts: patch.github.hosts } }
+    // Per host, a patched field replaces the saved one: deepMerge would keep a cleared account pin.
+    ...(sourceControlHostsPatch !== undefined
+      ? {
+          sourceControlHosts: {
+            ...current.sourceControlHosts,
+            ...Object.fromEntries(
+              Object.entries(sourceControlHostsPatch).map(([kind, fields]) => [
+                kind,
+                { ...current.sourceControlHosts[kind], ...fields },
+              ]),
+            ),
+          },
+        }
       : {}),
-    ...(projectSettingsOverridesPatch !== undefined
+    ...(projectSettingsOverridesPatch !== undefined || projectSettingsOverrideRemovals !== undefined
       ? {
           projectSettingsOverrides: Object.fromEntries(
             Object.entries(
-              mergeSettingsEntries(current.projectSettingsOverrides, projectSettingsOverridesPatch),
+              mergeProjectSettingsOverridesPatch(
+                current.projectSettingsOverrides,
+                projectSettingsOverridesPatch ?? {},
+                projectSettingsOverrideRemovals ?? {},
+              ),
             ).filter(([, entry]) => Object.keys(entry).length > 0),
           ),
         }
@@ -412,6 +635,9 @@ export function applyServerSettingsPatch(
     ...(patch.sourceControlWriterModelSelection !== undefined
       ? { sourceControlWriterModelSelection: patch.sourceControlWriterModelSelection }
       : {}),
+    ...(patch.reviewGuideModelSelection !== undefined
+      ? { reviewGuideModelSelection: patch.reviewGuideModelSelection }
+      : {}),
     ...(automaticGitFetchInterval !== undefined ? { automaticGitFetchInterval } : {}),
     ...(providerHealthRefreshInterval !== undefined ? { providerHealthRefreshInterval } : {}),
   };
@@ -446,4 +672,40 @@ export function applyServerSettingsPatch(
     ...nextWithReplacements,
     textGenerationModelSelection: createModelSelection(instanceId, model, options),
   };
+}
+
+/** Resolve legacy local preferences only until the environment has a saved value. */
+export function resolveModelPreferences(
+  settings: Pick<ServerSettings, "favorites" | "providerModelPreferences">,
+  legacy: Partial<ModelPreferences> = {},
+): ModelPreferences {
+  return {
+    favorites: settings.favorites ?? legacy.favorites ?? [],
+    providerModelPreferences:
+      settings.providerModelPreferences ?? legacy.providerModelPreferences ?? {},
+  };
+}
+
+/** Empty legacy values do not claim ownership before another client can migrate its saved list. */
+export function modelPreferencesMigrationPatch(
+  settings: Pick<ServerSettings, "favorites" | "providerModelPreferences">,
+  legacy: Partial<ModelPreferences>,
+): ServerSettingsPatch | null {
+  const favorites =
+    settings.favorites === null && (legacy.favorites?.length ?? 0) > 0
+      ? legacy.favorites
+      : undefined;
+  const providerModelPreferences =
+    settings.providerModelPreferences === null &&
+    Object.keys(legacy.providerModelPreferences ?? {}).length > 0
+      ? legacy.providerModelPreferences
+      : undefined;
+  return favorites === undefined && providerModelPreferences === undefined
+    ? null
+    : {
+        migrateModelPreferences: {
+          ...(favorites === undefined ? {} : { favorites }),
+          ...(providerModelPreferences === undefined ? {} : { providerModelPreferences }),
+        },
+      };
 }

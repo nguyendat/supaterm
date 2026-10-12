@@ -38,6 +38,7 @@ import {
   resolveSidebarV2TopStatus,
   resolveThreadLastVisitedAt,
   resolveThreadStatusPill,
+  pullRequestMatchesSearchQuery,
   shouldClearThreadSelectionOnMouseDown,
   shouldShowSidebarV2Duration,
   shouldRecedeSidebarThread,
@@ -996,6 +997,27 @@ describe("resolveSidebarThreadStatus", () => {
     expect(shouldShowSidebarV2Duration("waiting")).toBe(true);
     expect(shouldShowSidebarV2Duration("working")).toBe(true);
     expect(shouldShowSidebarV2Duration("ready")).toBe(false);
+  });
+});
+
+describe("pullRequestMatchesSearchQuery", () => {
+  const branchPullRequest = {
+    projectId: ProjectId.make("project"),
+    repository: "supabitapp/supacode-next",
+    number: 123,
+    url: "https://github.com/supabitapp/supacode-next/pull/123",
+  };
+
+  it("matches when every query token appears in the PR's terms", () => {
+    expect(pullRequestMatchesSearchQuery({ branchPullRequest }, "123")).toBe(true);
+    expect(
+      pullRequestMatchesSearchQuery({ branchPullRequest }, "supabitapp/supacode-next #123"),
+    ).toBe(true);
+  });
+
+  it("rejects queries with a token the PR does not carry, and blank queries", () => {
+    expect(pullRequestMatchesSearchQuery({ branchPullRequest }, "rebase 123")).toBe(false);
+    expect(pullRequestMatchesSearchQuery({ branchPullRequest }, "   ")).toBe(false);
   });
 });
 

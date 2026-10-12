@@ -51,6 +51,7 @@ const QueuedThreadCreationSchema = Schema.Struct({
   useDefaultBranch: Schema.optional(Schema.Literal(true)),
   worktreePath: Schema.NullOr(Schema.String),
   startFromOrigin: Schema.optional(Schema.Boolean),
+  pullRequestReference: Schema.optional(Schema.String),
 });
 
 const QueuedThreadMessageSchema = Schema.Struct({
@@ -84,6 +85,7 @@ export interface QueuedThreadCreation {
   readonly useDefaultBranch?: true;
   readonly worktreePath: string | null;
   readonly startFromOrigin?: boolean;
+  readonly pullRequestReference?: string;
 }
 
 export interface QueuedThreadMessage {
@@ -165,7 +167,8 @@ export function isQueuedThreadCreationSendable(message: QueuedThreadMessage): bo
   if (!message.creation) {
     return false;
   }
-  if (message.text.trim().length === 0 || message.modelSelection === undefined) {
+  const hasContent = message.text.trim().length > 0 || message.attachments.length > 0;
+  if (!hasContent || message.modelSelection === undefined) {
     return false;
   }
   return (

@@ -6,6 +6,7 @@ import { DraftId } from "./composerDraftStore";
 import {
   buildDraftThreadRouteParams,
   buildThreadRouteParams,
+  isThreadRouteSnapshotAuthoritative,
   resolveActiveThreadRouteRef,
   resolveThreadRouteRenderState,
   resolveThreadRouteRef,
@@ -13,6 +14,13 @@ import {
 } from "./threadRoutes";
 
 describe("threadRoutes", () => {
+  it("does not treat cached thread lists as authoritative for deep links", () => {
+    expect(isThreadRouteSnapshotAuthoritative("empty")).toBe(false);
+    expect(isThreadRouteSnapshotAuthoritative("cached")).toBe(false);
+    expect(isThreadRouteSnapshotAuthoritative("synchronizing")).toBe(false);
+    expect(isThreadRouteSnapshotAuthoritative("live")).toBe(true);
+  });
+
   it("builds canonical thread route params from a scoped ref", () => {
     const ref = scopeThreadRef("env-1" as never, ThreadId.make("thread-1"));
 
@@ -148,6 +156,24 @@ describe("threadRoutes", () => {
       }),
     ).toBe("loading");
   });
+  it.each([
+    { status: "cached", source: "server thread" },
+    { status: "synchronizing", source: "server thread" },
+    { status: "cached", source: "draft" },
+    { status: "synchronizing", source: "draft" },
+  ] as const)(
+    "keeps available $source visible while the shell is $status",
+    ({ status, source }) => {
+      expect(
+        resolveThreadRouteRenderState({
+          bootstrapComplete: isThreadRouteSnapshotAuthoritative(status),
+          serverThreadExists: source === "server thread",
+          serverThreadDeleted: false,
+          draftThreadExists: source === "draft",
+        }),
+      ).toBe("ready");
+    },
+  );
 
   it("distinguishes bootstrap loading from a missing thread", () => {
     expect(
@@ -177,5 +203,16 @@ describe("threadRoutes", () => {
         draftThreadExists: false,
       }),
     ).toBe("missing");
+  });
+
+  it("waits for the live shell before redirecting a deleted thread", () => {
+    expect(
+      resolveThreadRouteRenderState({
+        bootstrapComplete: isThreadRouteSnapshotAuthoritative("cached"),
+        serverThreadExists: true,
+        serverThreadDeleted: true,
+        draftThreadExists: false,
+      }),
+    ).toBe("loading");
   });
 });

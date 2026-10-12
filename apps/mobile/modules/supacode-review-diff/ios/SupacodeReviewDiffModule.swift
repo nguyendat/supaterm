@@ -5,6 +5,14 @@ public class SupacodeReviewDiffModule: Module {
     Name("SupacodeReviewDiffSurface")
 
     View(SupacodeReviewDiffView.self) {
+      Prop("contentInsetTop") { (view: SupacodeReviewDiffView, value: Double) in
+        view.setContentInsetTop(CGFloat(value))
+      }
+
+      Prop("contentInsetBottom") { (view: SupacodeReviewDiffView, value: Double) in
+        view.setContentInsetBottom(CGFloat(value))
+      }
+
       Prop("tokensResetKey") { (view: SupacodeReviewDiffView, tokensResetKey: String) in
         view.setTokensResetKey(tokensResetKey)
       }
@@ -49,16 +57,20 @@ public class SupacodeReviewDiffModule: Module {
         view.setContentWidth(CGFloat(contentWidth))
       }
 
-      Prop("contentInsetTop") { (view: SupacodeReviewDiffView, inset: Double) in
-        view.setContentInsetTop(CGFloat(inset))
-      }
-
-      Prop("contentInsetBottom") { (view: SupacodeReviewDiffView, inset: Double) in
-        view.setContentInsetBottom(CGFloat(inset))
-      }
-
       Prop("initialRowIndex") { (view: SupacodeReviewDiffView, initialRowIndex: Double) in
         view.setInitialRowIndex(initialRowIndex)
+      }
+
+      Prop("scrollEnabled") { (view: SupacodeReviewDiffView, enabled: Bool) in
+        view.setScrollEnabled(enabled)
+      }
+
+      Prop("bounces") { (view: SupacodeReviewDiffView, bounces: Bool) in
+        view.setBounces(bounces)
+      }
+
+      Prop("refreshEnabled") { (view: SupacodeReviewDiffView, enabled: Bool) in
+        view.setRefreshEnabled(enabled)
       }
 
       Prop("refreshing") { (view: SupacodeReviewDiffView, refreshing: Bool) in

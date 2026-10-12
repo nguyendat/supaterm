@@ -6,7 +6,7 @@ import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NetService from "@supacode/shared/Net";
 import { resolveGitWorktreePath, resolveWorktreeSupacodeHome } from "@supacode/shared/devHome";
-import { HostProcessEnvironment, HostProcessWorkingDirectory } from "@supacode/shared/hostProcess";
+import * as HostProcess from "@supacode/shared/HostProcess";
 import { resolveSpawnCommand } from "@supacode/shared/shell";
 import { resolveDefaultSupacodeHome } from "@supacode/shared/supacodeHome";
 import * as Config from "effect/Config";
@@ -646,7 +646,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       return yield* new DevRunnerHostNotProxiableError({ mode: input.mode, host: input.host });
     }
 
-    const worktreePath = yield* resolveGitWorktreePath(yield* HostProcessWorkingDirectory);
+    const worktreePath = yield* resolveGitWorktreePath(yield* HostProcess.WorkingDirectory);
 
     const { offset, source } = yield* resolveOffset({
       portOffset,
@@ -664,11 +664,11 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       checkPortAvailability: makeDefaultCheckPortAvailability(input.host),
     });
 
-    const hostEnvironment = yield* HostProcessEnvironment;
+    const hostEnvironment = yield* HostProcess.Environment;
     // A dev server started inside a worktree defaults to that worktree's own
     // (gitignored) `.supacode` — see @supacode/shared/devHome for why this must
     // outrank an ambient SUPACODE_HOME. `--home-dir` still wins.
-    const worktreeHome = yield* resolveWorktreeSupacodeHome(yield* HostProcessWorkingDirectory);
+    const worktreeHome = yield* resolveWorktreeSupacodeHome(yield* HostProcess.WorkingDirectory);
     // Trim before choosing: `--home-dir ""` is not a selection, and treating it
     // as one would skip the worktree default and land on the shared home —
     // exactly the outcome this precedence exists to prevent.

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Platform, useWindowDimensions } from "react-native";
 
 import type { EnvironmentThreadShell } from "@supacode/client-runtime/state/shell";
+import { resolveScratchProjectScopeKey } from "@supacode/client-runtime/state/project-grouping";
 
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
 import { useProjects } from "../../state/entities";
@@ -30,6 +31,7 @@ import { buildHomeProjectScopes } from "./homeThreadList";
 import { usePendingTaskListActions } from "./usePendingTaskListActions";
 import { useThreadListActions } from "./useThreadListActions";
 import { getConnectionAwareBrandHeaderOptions } from "./WorkspaceConnectionTitle";
+import { useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
 
 /* ─── Route screen ───────────────────────────────────────────────────── */
 
@@ -38,7 +40,8 @@ export function HomeRouteScreen() {
   const nativePrimaryColumn = use(NativePrimaryColumnContext);
   const columnMetrics = useNativeColumnLayoutMetrics();
   const headerWidth = nativePrimaryColumn ? (columnMetrics?.width ?? windowWidth) : windowWidth;
-  const { layout, panes } = useAdaptiveWorkspaceLayout();
+  const { layout, panes, primarySidebarSearchQuery, setPrimarySidebarSearchQuery } =
+    useAdaptiveWorkspaceLayout();
   const projects = useProjects();
 
   const visible = useHomeRouteVisible();
@@ -49,7 +52,23 @@ export function HomeRouteScreen() {
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const navigation = useNavigation();
-  const [searchQuery, setSearchQuery] = useState("");
+  const workspace = useWorkspaceTabs();
+  const [localSearchQuery, setLocalSearchQuery] = useState("");
+  const workspaceSearchQuery = workspace?.state.tabs.threads.query;
+  const searchQuery =
+    workspaceSearchQuery ??
+    (Platform.OS === "android" ? primarySidebarSearchQuery : localSearchQuery);
+  const setSearchQuery = (query: string) => {
+    if (workspace) workspace.dispatch({ type: "query", query, tab: "threads" });
+    else if (Platform.OS === "android") setPrimarySidebarSearchQuery(query);
+    else setLocalSearchQuery(query);
+  };
+  // Android's split view searches with the sidebar's query, so a phone carries its search into it.
+  useEffect(() => {
+    if (Platform.OS === "android" && workspaceSearchQuery !== undefined) {
+      setPrimarySidebarSearchQuery(workspaceSearchQuery);
+    }
+  }, [setPrimarySidebarSearchQuery, workspaceSearchQuery]);
   const handleSelectThread = useHomeThreadSelection();
   const startNewTask = useStartNewTask();
   const handleNewThreadOnBranch = useCallback(
@@ -107,10 +126,22 @@ export function HomeRouteScreen() {
     () => new Set(environments.map((environment) => environment.environmentId)),
     [environments],
   );
-  const { options: listOptions, setSelectedEnvironmentId } =
-    useHomeListOptions(availableEnvironmentIds);
+  const {
+    options: listOptions,
+    setSelectedEnvironmentId,
+    setSelectedProjectKey,
+  } = useHomeListOptions(availableEnvironmentIds);
   const selectedEnvironmentId = listOptions.selectedEnvironmentId;
-  const [selectedProjectKey, setSelectedProjectKey] = useState<string | null>(null);
+  const projectScopeKey = listOptions.selectedProjectKey;
+  const selectedProjectKey = resolveScratchProjectScopeKey(projectScopeKey, projects, {
+    sidebarProjectGroupingMode: listOptions.projectGroupingMode,
+    sidebarProjectGroupingOverrides: {},
+  });
+  useEffect(() => {
+    if (selectedProjectKey !== projectScopeKey) {
+      setSelectedProjectKey(selectedProjectKey);
+    }
+  }, [projectScopeKey, selectedProjectKey, setSelectedProjectKey]);
   const projectFilterOptions = useMemo(
     () =>
       buildHomeProjectScopes({
@@ -123,12 +154,14 @@ export function HomeRouteScreen() {
       })),
     [listOptions.projectGroupingMode, projects, selectedEnvironmentId],
   );
-  if (
-    selectedProjectKey !== null &&
-    !projectFilterOptions.some((project) => project.key === selectedProjectKey)
-  ) {
-    setSelectedProjectKey(null);
-  }
+  useEffect(() => {
+    if (
+      selectedProjectKey !== null &&
+      !projectFilterOptions.some((project) => project.key === selectedProjectKey)
+    ) {
+      setSelectedProjectKey(null);
+    }
+  }, [projectFilterOptions, selectedProjectKey, setSelectedProjectKey]);
 
   // In split layouts the persistent sidebar IS the thread list — Home becomes
   // an empty detail pane so selecting a thread never transitions layouts.
@@ -139,7 +172,15 @@ export function HomeRouteScreen() {
           options={
             Platform.OS === "android"
               ? { headerShown: false }
-              : { title: "", headerTitle: "", unstable_headerLeftItems: () => [] }
+              : {
+                  title: "",
+                  headerTitle: "",
+                  unstable_headerLeftItems: () => [],
+                  // Options survive layout changes; search and settings now belong to the sidebar.
+                  headerSearchBarOptions: undefined,
+                  unstable_headerRightItems: () => [],
+                  unstable_headerToolbarItems: () => [],
+                }
           }
         />
         {Platform.OS === "ios" ? (
@@ -171,30 +212,33 @@ export function HomeRouteScreen() {
   }
 
   return (
-    <AndroidHomeFabLayout onStartNewTask={startNewTask}>
+    <AndroidHomeFabLayout disabled={workspace !== null} onStartNewTask={startNewTask}>
       <>
         {/* Restore the header after leaving split view; screen options are
             shallow-merged. Connection status appears beneath the brand
             while an environment reconnects. */}
-        <NativeStackScreenOptions
-          optionsVersion={headerWidth}
-          options={{
-            ...getConnectionAwareBrandHeaderOptions({
-              headerWidth,
-              trailingItemCount:
-                nativePrimaryColumn && Platform.OS === "ios" && Platform.isPad ? 2 : 1,
-              onOpenEnvironments: () =>
-                navigation.navigate("SettingsSheet", {
-                  screen: "SettingsContent",
-                  params: { screen: "SettingsEnvironments" },
-                }),
-            }),
-            headerShown: true,
-            // The list has a clipped viewport outside the native bars.
-            scrollEdgeEffects: { top: "hidden", bottom: "hidden" },
-          }}
-        />
+        {workspace !== null && Platform.OS === "ios" ? null : (
+          <NativeStackScreenOptions
+            optionsVersion={headerWidth}
+            options={{
+              ...getConnectionAwareBrandHeaderOptions({
+                headerWidth,
+                trailingItemCount:
+                  nativePrimaryColumn && Platform.OS === "ios" && Platform.isPad ? 2 : 1,
+                onOpenEnvironments: () =>
+                  navigation.navigate("SettingsSheet", {
+                    screen: "SettingsContent",
+                    params: { screen: "SettingsEnvironments" },
+                  }),
+              }),
+              headerShown: true,
+              // The list has a clipped viewport outside the native bars.
+              scrollEdgeEffects: { top: "hidden", bottom: "hidden" },
+            }}
+          />
+        )}
         <HomeHeader
+          usesWorkspaceToolbar={workspace !== null}
           environments={environments}
           projects={projectFilterOptions}
           searchQuery={searchQuery}

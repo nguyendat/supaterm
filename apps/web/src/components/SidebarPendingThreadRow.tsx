@@ -24,7 +24,7 @@ export const SidebarPendingThreadRow = memo(function SidebarPendingThreadRow(pro
         aria-label={`${creation.title}, ${status}`}
         aria-current={props.active ? "page" : undefined}
         className={cn(
-          "flex h-12 w-full cursor-pointer flex-col justify-center gap-0.5 rounded-md px-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "flex h-12 w-full cursor-pointer flex-col justify-center gap-0.5 rounded-md px-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
           props.active ? "bg-sidebar-row-active" : "hover:bg-sidebar-row-hover",
         )}
         onClick={() =>
