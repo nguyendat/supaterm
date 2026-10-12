@@ -1,6 +1,12 @@
 import { useId, useState, type ReactNode } from "react";
 import { Platform, View } from "react-native";
-import { FormSheet, Screen, ScreenStack, ScreenStackHeaderConfig } from "react-native-screens";
+import {
+  FormSheet,
+  Screen,
+  ScreenStack,
+  ScreenStackHeaderConfig,
+  type FormSheetProps,
+} from "react-native-screens";
 import { useResolveClassNames, withUniwind } from "uniwind";
 
 import { AndroidSheetHeader } from "./AndroidScreenHeader";
@@ -18,6 +24,8 @@ export function AppSheet(props: {
   readonly title: string;
   readonly children: ReactNode;
   readonly onClose: () => void;
+  readonly detents?: FormSheetProps["detents"];
+  readonly dismissAction?: "done" | "cancel";
 }) {
   const containerStyle = useResolveClassNames("bg-sheet");
   const screenId = useId();
@@ -27,7 +35,7 @@ export function AppSheet(props: {
   return (
     <FormSheet
       isOpen={isOpen}
-      detents={[0.5, 0.9]}
+      detents={props.detents ?? [0.5, 0.9]}
       prefersGrabberVisible
       nativeContainerStyle={containerStyle}
       onDismiss={props.onClose}
@@ -58,8 +66,8 @@ export function AppSheet(props: {
                 headerRightBarButtonItems={[
                   {
                     type: "button",
-                    title: "Done",
-                    variant: "done",
+                    title: props.dismissAction === "cancel" ? "Cancel" : "Done",
+                    variant: props.dismissAction === "cancel" ? "plain" : "done",
                     accessibilityLabel: `Close ${props.title}`,
                     identifier: `app-sheet-done-${screenId}`,
                     onPress: close,
