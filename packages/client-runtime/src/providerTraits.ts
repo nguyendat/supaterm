@@ -7,6 +7,21 @@ import {
 
 type SelectDescriptor = Extract<ProviderOptionDescriptor, { type: "select" }>;
 
+export function replaceDescriptorCurrentValue(
+  descriptors: readonly ProviderOptionDescriptor[],
+  descriptorId: string,
+  currentValue: string | boolean | undefined,
+) {
+  return descriptors.map((descriptor) => {
+    if (descriptor.id !== descriptorId) return descriptor;
+    if (descriptor.type === "boolean" && typeof currentValue === "boolean")
+      return { ...descriptor, currentValue };
+    if (descriptor.type === "select" && typeof currentValue === "string")
+      return { ...descriptor, currentValue };
+    return descriptor;
+  });
+}
+
 export function resolveProviderPromptEffortState(
   descriptor: SelectDescriptor | null,
   prompt: string,

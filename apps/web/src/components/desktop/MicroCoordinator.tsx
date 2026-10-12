@@ -5,14 +5,19 @@ import type { ScopedThreadRef } from "@supacode/contracts";
 import { isEnvironmentConnected } from "@supacode/client-runtime/connection";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { useThreadRefs, useThreadShell } from "../../state/entities";
+import { environmentCatalog } from "../../connection/catalog";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
+import { readThreadShell, useThreadShell } from "../../state/entities";
 import { useEnvironmentPresentation } from "../../state/presentation";
 import { buildThreadRouteParams } from "../../threadRoutes";
 
 function MicroSlot({ slot, threadRef }: { slot: number; threadRef: ScopedThreadRef | null }) {
   const thread = useThreadShell(threadRef);
   const { presentation } = useEnvironmentPresentation(threadRef?.environmentId ?? null);
-  const status = resolveMicroThreadStatus(thread, isEnvironmentConnected(presentation));
+  const status = resolveMicroThreadStatus(
+    thread,
+    presentation?.entry.enabled === true && isEnvironmentConnected(presentation),
+  );
   useEffect(() => {
     getMicroController().setSlotStatus(slot, status);
   }, [slot, status]);
@@ -22,20 +27,20 @@ function MicroSlot({ slot, threadRef }: { slot: number; threadRef: ScopedThreadR
 
 export function MicroCoordinator() {
   const snapshot = useMicro();
-  const refs = useThreadRefs();
   const navigate = useNavigate();
   useMicroActions((action) => {
     if (action.type !== "thread") return;
     const assignment = snapshot.config.slots[action.slot];
-    const ref =
+    const catalog = appAtomRegistry.get(environmentCatalog.catalogValueAtom);
+    if (
       assignment &&
-      refs.find(
-        (candidate) =>
-          candidate.environmentId === assignment.environmentId &&
-          candidate.threadId === assignment.threadId,
-      );
-    if (ref)
-      void navigate({ to: "/$environmentId/$threadId", params: buildThreadRouteParams(ref) });
+      catalog.entries.get(assignment.environmentId)?.enabled &&
+      readThreadShell(assignment)
+    )
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(assignment),
+      });
     else void navigate({ to: "/settings/micro" });
   });
   useEffect(() => {
@@ -46,18 +51,6 @@ export function MicroCoordinator() {
   }, []);
   if (snapshot.phase !== "connected") return null;
   return MICRO_SLOTS.map((slot) => (
-    <MicroSlot
-      key={slot}
-      slot={slot}
-      threadRef={
-        snapshot.config.slots[slot]
-          ? (refs.find(
-              (ref) =>
-                ref.environmentId === snapshot.config.slots[slot]?.environmentId &&
-                ref.threadId === snapshot.config.slots[slot]?.threadId,
-            ) ?? null)
-          : null
-      }
-    />
+    <MicroSlot key={slot} slot={slot} threadRef={snapshot.config.slots[slot] ?? null} />
   ));
 }

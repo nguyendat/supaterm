@@ -4406,15 +4406,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [phase, settings.followUpBehavior, submitComposer]);
   useMicroComposer({
     provider: selectedProvider,
-    descriptors: getProviderOptionDescriptors({
-      caps: getProviderModelCapabilities(
-        selectedProviderModels,
-        selectedModel,
-        selectedProvider,
-        settings.planModeEnabled,
-      ),
-      selections: selectedModelOptionsForDispatch,
-    }),
+    readDescriptors: () =>
+      getProviderOptionDescriptors({
+        caps: getProviderModelCapabilities(
+          selectedProviderModels,
+          selectedModel,
+          selectedProvider,
+          settings.planModeEnabled,
+        ),
+        selections: selectedModelOptionsForDispatch,
+      }),
     prompt,
     writeOptions: (options) =>
       useComposerDraftStore

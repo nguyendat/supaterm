@@ -2,22 +2,6 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type { RpcMessage } from "./protocol.ts";
 
-export const MICRO_ACTIONS = {
-  fast: "Fast mode",
-  approve: "Approve",
-  reject: "Reject",
-  fork: "Fork",
-  send: "Send",
-  focus: "Focus composer",
-  effortMenu: "Reasoning effort menu",
-} as const;
-export type MicroMappedAction = keyof typeof MICRO_ACTIONS;
-export type MicroAction =
-  | { type: MicroMappedAction }
-  | { type: "thread"; slot: number }
-  | { type: "effort"; direction: 1 | -1 }
-  | { type: "joystick"; direction: "up" | "right" | "down" | "left" };
-
 export const MicroMappedActionSchema = Schema.Literals([
   "fast",
   "approve",
@@ -27,6 +11,22 @@ export const MicroMappedActionSchema = Schema.Literals([
   "focus",
   "effortMenu",
 ]);
+export type MicroMappedAction = typeof MicroMappedActionSchema.Type;
+export const MICRO_ACTIONS = {
+  fast: "Fast mode",
+  approve: "Approve",
+  reject: "Reject",
+  fork: "Fork",
+  send: "Send",
+  focus: "Focus composer",
+  effortMenu: "Reasoning effort menu",
+} as const satisfies Readonly<Record<MicroMappedAction, string>>;
+export type MicroAction =
+  | { type: MicroMappedAction }
+  | { type: "thread"; slot: number }
+  | { type: "effort"; direction: 1 | -1 }
+  | { type: "joystick"; direction: "up" | "right" | "down" | "left" };
+
 const KeyAction = Schema.optional(Schema.NullOr(MicroMappedActionSchema));
 export const MicroKeyBindingsSchema = Schema.Struct({
   ACT06: KeyAction,

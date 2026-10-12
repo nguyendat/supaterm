@@ -2,6 +2,7 @@
 
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import { ScopedThreadRef } from "@supacode/contracts";
 import {
   MicroInput,
   MicroKeyBindingsSchema,
@@ -29,13 +30,8 @@ import {
   type RpcMessage,
 } from "./protocol.ts";
 
-const ThreadAssignment = Schema.Struct({
-  environmentId: Schema.NonEmptyString,
-  threadId: Schema.NonEmptyString,
-});
-export type ThreadAssignment = typeof ThreadAssignment.Type;
 const Config = Schema.Struct({
-  slots: Schema.Array(Schema.NullOr(ThreadAssignment)).check(Schema.isMaxLength(MICRO_SLOT_COUNT)),
+  slots: Schema.Array(Schema.NullOr(ScopedThreadRef)).check(Schema.isMaxLength(MICRO_SLOT_COUNT)),
   microphone: Schema.NullOr(MicroMappedActionSchema),
   keyBindings: Schema.optional(MicroKeyBindingsSchema),
 });
@@ -122,7 +118,7 @@ export class MicroController {
     };
   };
 
-  assign(slot: number, assignment: ThreadAssignment | null): void {
+  assign(slot: number, assignment: ScopedThreadRef | null): void {
     if (!Number.isInteger(slot) || slot < 0 || slot >= MICRO_SLOT_COUNT) return;
     const slots = this.snapshot.config.slots.map((existing, index) =>
       index === slot ? assignment : existing,
@@ -311,16 +307,12 @@ export class MicroController {
     return task;
   }
 
-  setStatuses(statuses: readonly MicroThreadStatus[]): void {
-    this.desired = Array.from({ length: MICRO_SLOT_COUNT }, (_, i) => statuses[i] ?? "unavailable");
-    this.flushLighting();
-  }
-
   setSlotStatus(slot: number, status: MicroThreadStatus): void {
     if (slot < 0 || slot >= MICRO_SLOT_COUNT || this.desired[slot] === status) return;
     const statuses = [...this.desired];
     statuses[slot] = status;
-    this.setStatuses(statuses);
+    this.desired = statuses;
+    this.flushLighting();
   }
 
   private flushLighting(): void {

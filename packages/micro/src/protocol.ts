@@ -5,8 +5,8 @@ export const MICRO_VENDOR_ID = 0x303a;
 export const MICRO_PRODUCT_ID = 0x8360;
 export const MICRO_USAGE_PAGE = 0xff00;
 export const MICRO_REPORT_ID = 6;
-export const MICRO_SLOT_COUNT = 6;
 export const MICRO_SLOTS = [0, 1, 2, 3, 4, 5] as const;
+export const MICRO_SLOT_COUNT = MICRO_SLOTS.length;
 
 const RpcMessage = Schema.Struct({
   method: Schema.optional(Schema.String),

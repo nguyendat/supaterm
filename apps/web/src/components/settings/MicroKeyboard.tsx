@@ -1,4 +1,5 @@
 import type { MicroConfig } from "@supacode/micro/controller";
+import type { ScopedThreadRef } from "@supacode/contracts";
 import { MICRO_ACTIONS, resolveMicroKeyAction, type MicroCommandKey } from "@supacode/micro/input";
 import { MICRO_SLOTS } from "@supacode/micro/protocol";
 import { resolveMicroThreadStatus } from "@supacode/micro/status";
@@ -6,7 +7,6 @@ import { isEnvironmentConnected } from "@supacode/client-runtime/connection";
 import { MoveIcon, MicIcon } from "lucide-react";
 import { useThreadShell } from "../../state/entities";
 import { useEnvironmentPresentation } from "../../state/presentation";
-import type { MicroThreadChoice } from "./MicroKeyEditor";
 import { MicroKeycap, microActionKeycap } from "./MicroKeycap";
 
 export type MicroEditTarget =
@@ -17,23 +17,26 @@ export type MicroEditTarget =
 
 function AgentKey({
   slot,
-  choice,
-  assigned,
+  threadRef,
   onEdit,
 }: {
   readonly slot: number;
-  readonly choice: MicroThreadChoice | undefined;
-  readonly assigned: boolean;
+  readonly threadRef: ScopedThreadRef | null;
   readonly onEdit: (target: MicroEditTarget) => void;
 }) {
-  const thread = useThreadShell(choice?.ref ?? null);
-  const { presentation } = useEnvironmentPresentation(choice?.ref.environmentId ?? null);
-  const status = resolveMicroThreadStatus(thread, isEnvironmentConnected(presentation));
-  const title = choice?.title ?? (assigned ? "Unavailable" : "Unassigned");
+  const thread = useThreadShell(threadRef);
+  const { presentation } = useEnvironmentPresentation(threadRef?.environmentId ?? null);
+  const status = resolveMicroThreadStatus(
+    thread,
+    presentation?.entry.enabled === true && isEnvironmentConnected(presentation),
+  );
+  const availableThread =
+    presentation?.entry.enabled && thread?.archivedAt === null ? thread : null;
+  const title = availableThread?.title ?? (threadRef ? "Unavailable" : "Unassigned");
   return (
     <MicroKeycap
       label={"Assign Agent Key " + (slot + 1) + ": " + title}
-      caption={choice ? slot + 1 + " · " + title : String(slot + 1)}
+      caption={availableThread ? slot + 1 + " · " + title : String(slot + 1)}
       led={status}
       onClick={() => onEdit({ kind: "agent", slot })}
     />
@@ -42,29 +45,14 @@ function AgentKey({
 
 export function MicroKeyboard({
   config,
-  choices,
   onEdit,
 }: {
   readonly config: MicroConfig;
-  readonly choices: readonly MicroThreadChoice[];
   readonly onEdit: (target: MicroEditTarget) => void;
 }) {
-  const agentKey = (slot: number) => {
-    const assignment = config.slots[slot];
-    return (
-      <AgentKey
-        key={slot}
-        slot={slot}
-        assigned={assignment != null}
-        choice={choices.find(
-          (choice) =>
-            choice.ref.environmentId === assignment?.environmentId &&
-            choice.ref.threadId === assignment?.threadId,
-        )}
-        onEdit={onEdit}
-      />
-    );
-  };
+  const agentKey = (slot: number) => (
+    <AgentKey key={slot} slot={slot} threadRef={config.slots[slot] ?? null} onEdit={onEdit} />
+  );
   const commandKey = (key: MicroCommandKey, dial = false) => {
     const action = resolveMicroKeyAction(key, config.keyBindings);
     const keycap = microActionKeycap(action);

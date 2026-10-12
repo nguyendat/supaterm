@@ -1,8 +1,6 @@
 import { getMicroController, useMicro } from "@supacode/micro/react";
 import { MICRO_ACTIONS, type MicroMappedAction } from "@supacode/micro/input";
-import { useMemo, useState } from "react";
-import { useThreadShells } from "../../state/entities";
-import { useEnvironments } from "../../state/environments";
+import { useState } from "react";
 import { InlineConfirmButton } from "../InlineConfirm";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -22,27 +20,8 @@ const CONNECTION_LABELS = {
 
 export function MicroSettings() {
   const snapshot = useMicro();
-  const threads = useThreadShells();
-  const { environments } = useEnvironments();
   const micro = getMicroController();
   const [editing, setEditing] = useState<MicroEditTarget | null>(null);
-  const choices = useMemo(
-    () =>
-      threads
-        .filter((thread) => thread.archivedAt === null)
-        .map((thread) => ({
-          ref: { environmentId: thread.environmentId, threadId: thread.id },
-          value: JSON.stringify([thread.environmentId, thread.id]),
-          title: thread.title,
-          label:
-            thread.title +
-            " · " +
-            (environments.find((environment) => environment.environmentId === thread.environmentId)
-              ?.label ?? "Environment"),
-        }))
-        .sort((a, b) => a.label.localeCompare(b.label)),
-    [threads, environments],
-  );
   const save = (operation: () => void) => {
     try {
       operation();
@@ -120,7 +99,7 @@ export function MicroSettings() {
           />
         }
       >
-        <MicroKeyboard config={snapshot.config} choices={choices} onEdit={setEditing} />
+        <MicroKeyboard config={snapshot.config} onEdit={setEditing} />
         <p className="px-4 pt-3 text-xs text-muted-foreground">
           Click a key to change its assignment. The six Agent Keys keep their assigned threads.
         </p>
@@ -171,7 +150,6 @@ export function MicroSettings() {
         <MicroKeyEditor
           target={editing}
           config={snapshot.config}
-          choices={choices}
           onSave={saveKey}
           onClose={() => setEditing(null)}
         />

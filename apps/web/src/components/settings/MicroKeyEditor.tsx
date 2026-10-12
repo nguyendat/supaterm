@@ -1,12 +1,15 @@
 import type { ScopedThreadRef } from "@supacode/contracts";
-import type { MicroConfig, ThreadAssignment } from "@supacode/micro/controller";
+import { scopedThreadKey } from "@supacode/client-runtime/environment";
+import type { MicroConfig } from "@supacode/micro/controller";
 import {
   MICRO_ACTIONS,
   resolveMicroKeyAction,
   type MicroMappedAction,
   type MicroCommandKey,
 } from "@supacode/micro/input";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useThreadShells } from "../../state/entities";
+import { useEnvironments } from "../../state/environments";
 import { normalizeSearchText } from "../../lib/utils";
 import { Button } from "../ui/button";
 import {
@@ -23,15 +26,8 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import type { MicroEditTarget } from "./MicroKeyboard";
 import { MicroKeycap, microActionKeycap } from "./MicroKeycap";
 
-export interface MicroThreadChoice {
-  readonly ref: ScopedThreadRef;
-  readonly value: string;
-  readonly title: string;
-  readonly label: string;
-}
-
 export type MicroKeyUpdate =
-  | { readonly kind: "agent"; readonly slot: number; readonly assignment: ThreadAssignment | null }
+  | { readonly kind: "agent"; readonly slot: number; readonly assignment: ScopedThreadRef | null }
   | {
       readonly kind: "command";
       readonly key: MicroCommandKey;
@@ -56,24 +52,42 @@ const JOYSTICK_CONTROLS = [
 export function MicroKeyEditor({
   target,
   config,
-  choices,
   onSave,
   onClose,
 }: {
   readonly target: MicroEditTarget;
   readonly config: MicroConfig;
-  readonly choices: readonly MicroThreadChoice[];
   readonly onSave: (update: MicroKeyUpdate) => boolean;
   readonly onClose: () => void;
 }) {
+  const threads = useThreadShells(target.kind === "agent");
+  const { environments } = useEnvironments();
+  const choices = useMemo(
+    () =>
+      threads
+        .filter((thread) => thread.archivedAt === null)
+        .map((thread) => {
+          const ref = { environmentId: thread.environmentId, threadId: thread.id };
+          return {
+            ref,
+            value: scopedThreadKey(ref),
+            label:
+              thread.title +
+              " · " +
+              (environments.find(
+                (environment) => environment.environmentId === thread.environmentId,
+              )?.label ?? "Environment"),
+          };
+        })
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [threads, environments],
+  );
   const [action, setAction] = useState<MicroMappedAction | null>(() => {
     if (target.kind === "command") return resolveMicroKeyAction(target.key, config.keyBindings);
     return config.microphone;
   });
   const assignment = target.kind === "agent" ? config.slots[target.slot] : null;
-  const [threadValue, setThreadValue] = useState(
-    assignment ? JSON.stringify([assignment.environmentId, assignment.threadId]) : "none",
-  );
+  const [threadValue, setThreadValue] = useState(assignment ? scopedThreadKey(assignment) : "none");
   const [query, setQuery] = useState("");
   const selectedThread = choices.find((choice) => choice.value === threadValue);
   const normalizedQuery = normalizeSearchText(query);

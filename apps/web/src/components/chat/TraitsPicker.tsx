@@ -15,6 +15,7 @@ import {
   normalizeModelSlug,
 } from "@supacode/shared/model";
 import {
+  replaceDescriptorCurrentValue,
   resolveProviderPromptEffortState,
   resolveProviderSelectChange,
 } from "@supacode/client-runtime/provider-traits";
@@ -104,26 +105,6 @@ function DefaultBadge() {
     <Badge variant="outline" size="sm" className="min-w-0">
       Default
     </Badge>
-  );
-}
-
-function replaceDescriptorCurrentValue(
-  descriptors: ReadonlyArray<ProviderOptionDescriptor>,
-  descriptorId: string,
-  currentValue: string | boolean | undefined,
-): ReadonlyArray<ProviderOptionDescriptor> {
-  return descriptors.map((descriptor) =>
-    descriptor.id !== descriptorId
-      ? descriptor
-      : descriptor.type === "boolean"
-        ? {
-            ...descriptor,
-            ...(typeof currentValue === "boolean" ? { currentValue } : {}),
-          }
-        : {
-            ...descriptor,
-            ...(typeof currentValue === "string" ? { currentValue } : {}),
-          },
   );
 }
 

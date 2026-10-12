@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { EnvironmentId, ThreadId } from "@supacode/contracts";
 import { MicroController } from "./controller.ts";
 import type {
   MicroHid,
@@ -174,7 +175,10 @@ describe("Micro connection lifecycle", () => {
       },
     };
     const micro = new MicroController(null, storage);
-    micro.assign(4, { environmentId: "remote", threadId: "thread-9" });
+    micro.assign(4, {
+      environmentId: EnvironmentId.make("remote"),
+      threadId: ThreadId.make("thread-9"),
+    });
     micro.setMicrophone("focus");
     micro.setKeyAction("ACT07", "send");
     micro.setKeyAction("ACT08", null);
