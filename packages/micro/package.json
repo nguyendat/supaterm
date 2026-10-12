@@ -1,0 +1,33 @@
+{
+  "name": "@supacode/micro",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./controller": "./src/controller.ts",
+    "./hid": "./src/hid.ts",
+    "./input": "./src/input.ts",
+    "./protocol": "./src/protocol.ts",
+    "./status": "./src/status.ts",
+    "./react": "./src/react.ts",
+    "./composer": "./src/composer.ts",
+    "./electron": "./src/electron.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vp test run --config ../../vite.config.ts --dir ."
+  },
+  "dependencies": {
+    "@supacode/client-runtime": "workspace:*",
+    "@supacode/contracts": "workspace:*",
+    "@supacode/shared": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@types/react": "~19.3.0",
+    "electron": "44.5.1",
+    "vite-plus": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "^19.3.0"
+  }
+}

@@ -3,6 +3,21 @@
 Customize shortcuts in **Settings → Keybindings** on web and desktop. That page
 also lists the command IDs and defaults available in your version.
 
+## Micro controller
+
+Connect a Codex Micro in **Settings → General → Micro controller** on desktop
+or a browser with WebHID support. Assign each Agent Key to a thread; assignments
+stay fixed when the sidebar order changes and can include remote environments.
+Dark keys indicate unassigned or unavailable threads. Use **Disconnect** to
+release the device. If connection fails, release the Micro in other applications
+and try again.
+
+The command keys toggle Fast mode, approve or reject the pending request, fork
+the current response, and send the composer. Turn the dial to change the next
+prompt's reasoning effort. Fast mode and effort use the selected model's
+supported options. The wide microphone key starts unassigned; choose an action
+for it in the same settings section. Voice recording is not available there.
+
 ## Composer controls
 
 In **Settings → General → Send shortcut**, choose whether Enter sends, requires

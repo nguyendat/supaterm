@@ -1,6 +1,9 @@
 import { formatProviderSkillDisplayName } from "@supacode/shared/inlineSkills";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { runtimeModeConfig, runtimeModeOptions as runtimeModes } from "./runtimeModeConfig";
+import { useMicroComposer } from "@supacode/micro/composer";
+import { getProviderOptionDescriptors } from "@supacode/shared/model";
+import { getProviderModelCapabilities } from "../../providerModels";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useRightPanelStore } from "~/rightPanelStore";
@@ -4401,6 +4404,34 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }),
     );
   }, [phase, settings.followUpBehavior, submitComposer]);
+  useMicroComposer({
+    provider: selectedProvider,
+    descriptors: getProviderOptionDescriptors({
+      caps: getProviderModelCapabilities(
+        selectedProviderModels,
+        selectedModel,
+        selectedProvider,
+        settings.planModeEnabled,
+      ),
+      selections: selectedModelOptionsForDispatch,
+    }),
+    prompt,
+    writeOptions: (options) =>
+      useComposerDraftStore
+        .getState()
+        .setProviderModelOptions(composerDraftTarget, selectedProvider, options, {
+          instanceId: selectedInstanceId,
+          model: selectedModel,
+          persistSticky: true,
+        }),
+    writePrompt: setPromptFromTraits,
+    submit: submitCitationAndSend,
+    focus: focusComposer,
+    openControl: (command) => {
+      if (command === "modelPicker.toggle") openModelPicker();
+      else composerRef.current?.openControl(command);
+    },
+  });
   const compactThreadContext = useCallback(() => {
     if (
       !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope) ||

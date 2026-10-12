@@ -94,6 +94,7 @@ function makeFakeBrowserWindow() {
     send: vi.fn(),
     setBackgroundThrottling: vi.fn(),
     setWindowOpenHandler: vi.fn(),
+    session: new NodeEvents.EventEmitter(),
     toggleDevTools: vi.fn(),
   };
 

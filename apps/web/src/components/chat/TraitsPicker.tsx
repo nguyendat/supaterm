@@ -8,14 +8,16 @@ import {
   type ServerProviderModel,
 } from "@supacode/contracts";
 import {
-  applyClaudePromptEffortPrefix,
   buildProviderOptionSelectionsFromDescriptors,
   getProviderOptionCurrentLabel,
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
-  isClaudeUltrathinkPrompt,
   normalizeModelSlug,
 } from "@supacode/shared/model";
+import {
+  resolveProviderPromptEffortState,
+  resolveProviderSelectChange,
+} from "@supacode/client-runtime/provider-traits";
 import {
   getSpeedToggle,
   getSpeedToggleNextValue,
@@ -97,8 +99,6 @@ type TraitsPersistence =
       onModelOptionsChange: (nextOptions: ProviderOptions | undefined) => void;
     };
 
-const ULTRATHINK_PROMPT_PREFIX = "Ultrathink:\n";
-
 function DefaultBadge() {
   return (
     <Badge variant="outline" size="sm" className="min-w-0">
@@ -177,19 +177,11 @@ function getSelectedTraits(
   const thinkingDescriptor =
     booleanDescriptors.find((descriptor) => descriptor.id === "thinking") ?? null;
 
-  // Prompt-controlled effort (e.g. ultrathink in prompt text)
-  const ultrathinkPromptControlled =
-    allowPromptInjectedEffort &&
-    (primarySelectDescriptor?.promptInjectedValues?.length ?? 0) > 0 &&
-    isClaudeUltrathinkPrompt(prompt);
-
-  // Check if "ultrathink" appears in the body text (not just our prefix)
-  const ultrathinkInBodyText =
-    ultrathinkPromptControlled && isClaudeUltrathinkPrompt(prompt.replace(/^Ultrathink:\s*/i, ""));
-  const effort =
-    (ultrathinkPromptControlled
-      ? "ultrathink"
-      : getDescriptorStringValue(primarySelectDescriptor)) ?? null;
+  const {
+    controlled: ultrathinkPromptControlled,
+    inBodyText: ultrathinkInBodyText,
+    value: effort,
+  } = resolveProviderPromptEffortState(primarySelectDescriptor, prompt, allowPromptInjectedEffort);
   const thinkingEnabled =
     typeof thinkingDescriptor?.currentValue === "boolean" ? thinkingDescriptor.currentValue : null;
   const contextWindow = getDescriptorStringValue(contextWindowDescriptor);
@@ -363,21 +355,17 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     descriptor: Extract<ProviderOptionDescriptor, { type: "select" }>,
     value: string,
   ) => {
-    if (!value) return;
-    if (descriptor.promptInjectedValues?.includes(value)) {
-      const nextPrompt =
-        prompt.trim().length === 0
-          ? ULTRATHINK_PROMPT_PREFIX
-          : applyClaudePromptEffortPrefix(prompt, "ultrathink");
-      onPromptChange(nextPrompt);
-      return;
-    }
-    if (ultrathinkInBodyText && descriptor.id === primarySelectDescriptor?.id) return;
-    if (ultrathinkPromptControlled && descriptor.id === primarySelectDescriptor?.id) {
-      const stripped = prompt.replace(/^Ultrathink:\s*/i, "");
-      onPromptChange(stripped);
-    }
-    updateDescriptors(replaceDescriptorCurrentValue(descriptors, descriptor.id, value));
+    const change = resolveProviderSelectChange({
+      descriptor,
+      primaryDescriptor: primarySelectDescriptor,
+      value,
+      prompt,
+      allowPromptInjectedEffort,
+    });
+    if (!change) return;
+    if (change.prompt !== null) onPromptChange(change.prompt);
+    if (change.applyOption)
+      updateDescriptors(replaceDescriptorCurrentValue(descriptors, descriptor.id, value));
   };
 
   if (!hasAnyControls) {

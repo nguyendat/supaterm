@@ -348,6 +348,9 @@ importers:
       '@supacode/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@supacode/micro':
+        specifier: workspace:*
+        version: link:../../packages/micro
       '@supacode/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -889,6 +892,9 @@ importers:
       '@supacode/mermaid-ascii':
         specifier: workspace:*
         version: link:../../packages/mermaid-ascii
+      '@supacode/micro':
+        specifier: workspace:*
+        version: link:../../packages/micro
       '@supacode/provider-acp-registry':
         specifier: workspace:*
         version: link:../../packages/provider-acp-registry
@@ -1183,6 +1189,34 @@ importers:
       '@types/node':
         specifier: 24.12.4
         version: 24.12.4
+      vite-plus:
+        specifier: 1.0.0
+        version: 1.0.0(@types/jsdom@30.0.0)(@types/node@24.12.4)(@vitest/ui@5.0.1)(bufferutil@4.1.0)(esbuild@0.28.2)(jiti@2.7.0)(jsdom@30.1.0(@noble/hashes@1.8.0))(msw@2.12.11(@types/node@24.12.4)(typescript@7.0.2))(terser@5.48.0)(typescript@7.0.2)(unrun@0.2.39)(utf-8-validate@6.0.6)(yaml@2.9.0)
+
+  packages/micro:
+    dependencies:
+      '@supacode/client-runtime':
+        specifier: workspace:*
+        version: link:../client-runtime
+      '@supacode/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@supacode/shared':
+        specifier: workspace:*
+        version: link:../shared
+      effect:
+        specifier: 4.0.1
+        version: 4.0.1(patch_hash=a33cba07c41f32374c2aaa86ea4a84d3ab9a872a78c94b65e929b19f8361856f)
+      react:
+        specifier: ^19.3.0
+        version: 19.3.0
+    devDependencies:
+      '@types/react':
+        specifier: ~19.3.0
+        version: 19.3.0
+      electron:
+        specifier: 44.5.1
+        version: 44.5.1(supports-color@8.1.1)
       vite-plus:
         specifier: 1.0.0
         version: 1.0.0(@types/jsdom@30.0.0)(@types/node@24.12.4)(@vitest/ui@5.0.1)(bufferutil@4.1.0)(esbuild@0.28.2)(jiti@2.7.0)(jsdom@30.1.0(@noble/hashes@1.8.0))(msw@2.12.11(@types/node@24.12.4)(typescript@7.0.2))(terser@5.48.0)(typescript@7.0.2)(unrun@0.2.39)(utf-8-validate@6.0.6)(yaml@2.9.0)

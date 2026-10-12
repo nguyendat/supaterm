@@ -1,3 +1,4 @@
+import { useMicroActions } from "@supacode/micro/react";
 import {
   pendingThreadCreationMessage,
   resolvePendingThreadCreation,
@@ -9696,6 +9697,22 @@ export default function ChatView(props: ChatViewProps) {
     },
     [activeThreadId, environmentId, pendingApprovals, respondToThreadApproval, setThreadError],
   );
+
+  useMicroActions((action) => {
+    if (!document.hasFocus()) return;
+    if (action.type === "fork" && forkSource && !forkDisabled) {
+      void onForkFromRun(forkSource);
+    } else if (
+      (action.type === "approve" || action.type === "reject") &&
+      activePendingApproval &&
+      !respondingRequestIds.includes(activePendingApproval.requestId)
+    ) {
+      void onRespondToApproval(
+        activePendingApproval.requestId,
+        action.type === "approve" ? "accept" : "decline",
+      );
+    }
+  });
 
   const onRespondToUserInput = useCallback(
     async (requestId: RuntimeRequestId, answers: Record<string, unknown>) => {

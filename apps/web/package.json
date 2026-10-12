@@ -27,6 +27,7 @@
     "@supacode/client-runtime": "workspace:*",
     "@supacode/contracts": "workspace:*",
     "@supacode/mermaid-ascii": "workspace:*",
+    "@supacode/micro": "workspace:*",
     "@supacode/provider-acp-registry": "workspace:*",
     "@supacode/provider-core": "workspace:*",
     "@supacode/provider-cursor": "workspace:*",

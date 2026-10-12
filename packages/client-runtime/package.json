@@ -119,6 +119,10 @@
       "types": "./src/providerSpeedToggle.ts",
       "default": "./src/providerSpeedToggle.ts"
     },
+    "./provider-traits": {
+      "types": "./src/providerTraits.ts",
+      "default": "./src/providerTraits.ts"
+    },
     "./voice-input": {
       "types": "./src/voice-input/index.ts",
       "default": "./src/voice-input/index.ts"
