@@ -21,7 +21,7 @@ The handshake and cipher live in Supacode's [`packages/shared/src/relay/protocol
 
 ## Use
 
-Supacode uses the public relay at `wss://relay.supacode.sh`. To use your own, set **Settings → Connections → Public relay → Relay server** on the host before creating pairing links.
+Supacode uses the public relay at `wss://relay.supaterm.com`. To use your own, set **Settings → Connections → Public relay → Relay server** on the host before creating pairing links.
 
 ## Run
 
