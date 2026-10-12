@@ -8,8 +8,13 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
 } from "@supacode/contracts";
 import { onTestFinished, vi } from "vite-plus/test";
+import {
+  collectAssistantCitations,
+  serializeAssistantCitation,
+} from "@supacode/shared/assistantCitations";
 import { rememberedModelOptions, rememberModelOptions } from "./use-model-option-memory";
 
 const composerDraftFileMocks = vi.hoisted(() => {
@@ -185,6 +190,8 @@ import {
   setComposerDraftText,
   insertComposerDraftContext,
   insertComposerDraftText,
+  insertComposerDraftCitation,
+  readComposerDraftSelection,
   rememberComposerDraftSelection,
   setComposerDraftAttachmentUpload,
   waitForComposerDraftsLoaded,
@@ -841,6 +848,44 @@ describe("mobile composer drafts", () => {
     expect(clearComposerDraftContentState(restored, draftKey)[draftKey]?.context).toBeUndefined();
     setComposerDraftText(draftKey, "Fix next");
     expect(getComposerDraftSnapshot(draftKey).context).toBeUndefined();
+  });
+
+  it("inserts a citation at the captured caret and retains its comment after restoring the draft", () => {
+    const key = "citation-environment:citation-thread";
+    const citation = {
+      version: 1 as const,
+      environmentId: EnvironmentId.make("citation-environment"),
+      threadId: ThreadId.make("citation-thread"),
+      messageId: MessageId.make("citation-message"),
+      text: "quoted words",
+      comment: "Explain this\nwith an example",
+      start: 0,
+      end: 12,
+      prefix: "",
+      suffix: "",
+    };
+    setComposerDraftText(key, "Before replace after");
+    rememberComposerDraftSelection(key, "Before replace after", { start: 7, end: 14 });
+    const insertion = captureComposerDraftInsertion(key);
+    expect(insertComposerDraftCitation(key, citation, insertion)).toBe(true);
+    const draft = getComposerDraftSnapshot(key);
+    const source = serializeAssistantCitation(citation);
+    expect(draft.text).toBe(`Before ${source}  after`);
+    expect(readComposerDraftSelection(key, draft.text)).toEqual({
+      start: 7 + source.length + 1,
+      end: 7 + source.length + 1,
+    });
+    const restored = decodePersistedComposerState(
+      JSON.parse(JSON.stringify({ schemaVersion: 1, drafts: { [key]: draft } })),
+    ).drafts[key];
+    expect(collectAssistantCitations(restored!.text)[0]?.citation).toEqual(citation);
+    setComposerDraftText(key, "Updated while commenting");
+    expect(insertComposerDraftCitation(key, citation, insertion)).toBe(true);
+    expect(getComposerDraftSnapshot(key).text).toBe(`Updated while commenting${source} `);
+    setComposerDraftText(key, "x".repeat(PROVIDER_SEND_TURN_MAX_INPUT_CHARS));
+    const full = captureComposerDraftInsertion(key);
+    expect(insertComposerDraftCitation(key, citation, full)).toBe(false);
+    expect(getComposerDraftSnapshot(key).text).toBe(full.text);
   });
 
   // Hydration is one-shot per module instance and the attachment sweep now

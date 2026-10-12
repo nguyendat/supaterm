@@ -10,6 +10,8 @@ import {
   ForwardCompatibleArray,
   OrchestrationMessageContext,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+  type AssistantCitation,
   ProjectId as ProjectIdSchema,
   ProviderInteractionMode as ProviderInteractionModeSchema,
   ProviderOptionSelection as ProviderOptionSelectionSchema,
@@ -24,6 +26,7 @@ import {
   type ScopedProjectRef,
 } from "@supacode/contracts";
 import * as Schema from "effect/Schema";
+import { serializeAssistantCitation } from "@supacode/shared/assistantCitations";
 
 import { useEffect } from "react";
 import { Atom } from "effect/reactivity";
@@ -1090,6 +1093,20 @@ export function insertComposerDraftText(
     start: start + value.length,
     end: start + value.length,
   });
+}
+
+export function insertComposerDraftCitation(
+  draftKey: string,
+  citation: AssistantCitation,
+  target: ComposerDraftInsertion,
+): boolean {
+  const draft = getComposerDraftSnapshot(draftKey);
+  const { start, end } = contextInsertionRange(draftKey, draft, target);
+  const value = `${serializeAssistantCitation(citation)} `;
+  if (draft.text.length - (end - start) + value.length > PROVIDER_SEND_TURN_MAX_INPUT_CHARS)
+    return false;
+  insertComposerDraftText(draftKey, value, target);
+  return true;
 }
 
 export function appendComposerDraftText(draftKey: string, value: string): void {

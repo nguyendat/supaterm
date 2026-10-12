@@ -7,7 +7,8 @@ Messages can contain up to 120,000 characters. Longer drafts stay in the compose
 so you can shorten them or split them into several messages.
 
 Pasting 32 KiB or more of text adds that fragment as a text-file attachment so
-the agent can inspect it without filling the model context. A smaller paste also
+the agent can inspect it without filling the model context. Copied citations stay
+inline when they fit within the message limit. A smaller paste also
 becomes an attachment when inserting it would exceed the message limit. On a
 hardware keyboard, use `Cmd+Shift+V` on Apple devices or `Ctrl+Shift+V` elsewhere
 to keep a large paste editable in the composer instead.
@@ -109,7 +110,12 @@ On web and desktop, select text within one assistant response and choose
 **Cite in composer**. You can add a comment about the quote and write instructions
 around it.
 
-Select the quote in a draft or sent message to return to its source. If the source
+On mobile, touch and hold text within an assistant response, adjust the selection,
+and choose **Cite**. Add an optional comment, then choose **Cite in composer**.
+Tap the citation chip in an expanded composer to read the quote, edit its comment,
+or remove it from the draft.
+
+On web and desktop, select the quote in a draft or sent message to return to its source. If the source
 is unavailable or has changed, the saved quote remains readable.
 
 The chip shows your comment when it has one, or a short quote preview otherwise. Use the pencil
@@ -119,8 +125,7 @@ delete it like other inline context. Copying, reloading, and restoring a
 with its quote, and sending tells the agent which words were quoted and which comment you wrote.
 The quoted text and comment count toward the message limit.
 
-Mobile displays saved quotes and comments, but does not create citations or
-navigate to their sources.
+Mobile displays saved quotes and comments but does not navigate to their sources.
 
 ## Recall a sent prompt
 

@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
+import { EnvironmentId, MessageId, ThreadId } from "@supacode/contracts";
+import { serializeAssistantCitation } from "@supacode/shared/assistantCitations";
 
 import {
   nextPastedTextFileName,
@@ -46,6 +48,27 @@ describe("pasted text disposition", () => {
         canAttach: true,
         wouldExceedInputLimit: true,
       }),
+    ).toBe("attachment");
+  });
+
+  it("keeps copied citation chips inline even when their encoded quote exceeds the paste threshold", () => {
+    const source = serializeAssistantCitation({
+      version: 1,
+      environmentId: EnvironmentId.make("environment"),
+      threadId: ThreadId.make("thread"),
+      messageId: MessageId.make("message"),
+      text: "引".repeat(4000),
+      comment: "Explain",
+      start: 0,
+      end: 4000,
+      prefix: "",
+      suffix: "",
+    });
+    expect(source.length).toBeGreaterThan(PASTED_TEXT_ATTACHMENT_THRESHOLD_BYTES);
+    expect(pastedTextDisposition({ text: source, canAttach: true })).toBe("inline");
+    expect(pastedTextDisposition({ text: `Revisit ${source}`, canAttach: true })).toBe("inline");
+    expect(
+      pastedTextDisposition({ text: source, canAttach: true, wouldExceedInputLimit: true }),
     ).toBe("attachment");
   });
 });

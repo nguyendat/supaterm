@@ -110,7 +110,10 @@ class SupacodeComposerEditorView(context: Context, appContext: AppContext) : Exp
             val offset = editor.getOffsetForPosition(event.x, event.y)
             val token =
               tokens.firstOrNull {
-                (it.type == "context" || it.type == "mention" || it.type == "skill") &&
+                (
+                  it.type == "context" || it.type == "mention" || it.type == "skill" ||
+                    it.type == "citation"
+                  ) &&
                   offset >= it.start &&
                   offset < it.end
               }

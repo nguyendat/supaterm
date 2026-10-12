@@ -1,4 +1,4 @@
-import { ComposerContextId } from "@supacode/contracts";
+import { ComposerContextId, PROVIDER_SEND_TURN_MAX_INPUT_CHARS } from "@supacode/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
 import { useNavigation } from "@react-navigation/native";
@@ -7,6 +7,10 @@ import { Alert } from "react-native";
 import type { EnvironmentId } from "@supacode/contracts";
 import { encodeComposerContextFragment } from "@supacode/shared/composerContextClipboard";
 import { collectComposerContextReferences } from "@supacode/shared/composerContextReferences";
+import {
+  collectAssistantCitations,
+  serializeAssistantCitation,
+} from "@supacode/shared/assistantCitations";
 import { ComposerEditor as NativeComposerEditor } from "../native/SupacodeComposerEditor";
 import type { ComposerEditorProps as NativeComposerEditorProps } from "../native/SupacodeComposerEditor";
 import {
@@ -24,6 +28,7 @@ import {
 import { importComposerContextClipboard } from "../lib/composerContextClipboard";
 import { mobilePreferencesAtom } from "../state/preferences";
 import { ComposerContextSheet } from "./ComposerContextSheet";
+import { AssistantCitationSheet } from "./AssistantCitationSheet";
 import { AppText as Text } from "./AppText";
 import {
   composerDocumentAttachment,
@@ -80,6 +85,10 @@ export function ComposerEditor({
       setComposerDraftContext(draftKey, restored.context);
       appendComposerDraftAttachments(draftKey, restored.attachments, { allowOverflow: true });
     }
+  };
+  const changeSelection = (text: string, selection: { start: number; end: number }) => {
+    if (draftKey) rememberComposerDraftSelection(draftKey, text, selection);
+    props.onSelectionChange?.(selection);
   };
   const [selected, setSelected] = useState<{ source: string; start: number; end: number } | null>(
     null,
@@ -170,6 +179,10 @@ export function ComposerEditor({
   const selectedReference = selected
     ? collectComposerContextReferences(selected.source)[0]
     : undefined;
+  const selectedCitation =
+    selected && props.value.slice(selected.start, selected.end) === selected.source
+      ? collectAssistantCitations(selected.source)[0]?.citation
+      : undefined;
   const selectedSkillName = selected?.source.match(/^\p{Sc}(.+)$/u)?.[1];
   const selectedSkill = selectedSkillName
     ? props.skills?.find((skill) => skill.name === selectedSkillName)
@@ -206,17 +219,54 @@ export function ComposerEditor({
           setSelected(selection);
         }}
         onSelectionChange={(selection) => {
-          if (draftKey)
-            rememberComposerDraftSelection(
-              draftKey,
-              getComposerDraftSnapshot(draftKey).text,
-              selection,
-            );
-          props.onSelectionChange?.(selection);
+          changeSelection(
+            draftKey ? getComposerDraftSnapshot(draftKey).text : props.value,
+            selection,
+          );
         }}
       />
       {importing ? (
         <Text className="py-2 text-xs text-foreground-muted">Copying context…</Text>
+      ) : null}
+      {selected && selectedCitation ? (
+        <AssistantCitationSheet
+          key={selected.source}
+          citation={selectedCitation}
+          onClose={() => setSelected(null)}
+          onSave={
+            props.readOnly || props.editable === false
+              ? undefined
+              : (citation) => {
+                  const source = serializeAssistantCitation(citation);
+                  const text =
+                    props.value.slice(0, selected.start) + source + props.value.slice(selected.end);
+                  if (text.length > PROVIDER_SEND_TURN_MAX_INPUT_CHARS) {
+                    Alert.alert(
+                      "Draft is too long",
+                      "Shorten the draft or comment before saving this quote.",
+                    );
+                    return false;
+                  }
+                  changeText(text);
+                  changeSelection(text, {
+                    start: selected.start + source.length,
+                    end: selected.start + source.length,
+                  });
+                  return true;
+                }
+          }
+          onRemove={
+            props.readOnly || props.editable === false
+              ? undefined
+              : () => {
+                  const text =
+                    props.value.slice(0, selected.start) + props.value.slice(selected.end);
+                  changeText(text);
+                  changeSelection(text, { start: selected.start, end: selected.start });
+                  setSelected(null);
+                }
+          }
+        />
       ) : null}
       {selected && (selectedReference || selectedSkill) ? (
         <ComposerContextSheet

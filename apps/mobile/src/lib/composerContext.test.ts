@@ -4,9 +4,13 @@ import {
   ProjectId,
   ProviderInstanceId,
   ComposerContextId,
+  EnvironmentId,
+  MessageId,
+  ThreadId,
   type OrchestrationMessageContext,
 } from "@supacode/contracts";
 import { collectComposerInlineTokens } from "@supacode/shared/composerInlineTokens";
+import { serializeAssistantCitation } from "@supacode/shared/assistantCitations";
 import {
   ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
   collectComposerContextReferences,
@@ -174,6 +178,35 @@ describe("mobile composer context", () => {
       referencedComposerContext(formatComposerContextReference(annotation), context)?.records,
     ).toEqual([annotation, image]);
     expect(referencedComposerContext("plain text", context)).toBeUndefined();
+  });
+
+  it("keeps citations atomic beside mentions, skills, context and repeated quotes", () => {
+    const citation = {
+      version: 1 as const,
+      environmentId: EnvironmentId.make("environment"),
+      threadId: ThreadId.make("thread"),
+      messageId: MessageId.make("message"),
+      text: "Use @src/file.ts and $skill",
+      comment: "Explain this",
+      start: 0,
+      end: 27,
+      prefix: "",
+      suffix: "",
+    };
+    const source = serializeAssistantCitation(citation);
+    const text = `Use $playwright [app.ts](src/app.ts) ${source},${formatComposerContextReference(terminal)} ${source}`;
+    const tokens = composerContextEditorTokens(text, collectComposerInlineTokens(text));
+    expect(tokens.map((token) => token.type)).toEqual([
+      "skill",
+      "mention",
+      "citation",
+      "context",
+      "citation",
+    ]);
+    for (const token of tokens) expect(text.slice(token.start, token.end)).toBe(token.source);
+    expect(
+      tokens.filter((token) => token.type === "citation").map((token) => token.citation),
+    ).toEqual([citation, citation]);
   });
 
   it("reidentifies pasted records and their screenshot binding without changing repeated-reference identity", () => {

@@ -81,6 +81,7 @@ export interface SelectableMarkdownTextProps {
   readonly renderImage?: MarkdownImageRenderer;
   readonly resolveImageSource?: MarkdownImageSourceResolver;
   readonly onImagePress?: (href: string) => void;
+  readonly onCiteSelection?: (text: string) => void;
   readonly marginTop?: number;
   readonly marginBottom?: number;
 }

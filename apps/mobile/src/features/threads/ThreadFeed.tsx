@@ -19,6 +19,8 @@ import { resolveUserMessagePresentation } from "@supacode/client-runtime/user-me
 import { canForkProjectedAssistantItem } from "@supacode/client-runtime/state/thread-workflows";
 import {
   type OrchestrationMessageContext,
+  ASSISTANT_CITATION_MAX_TEXT_LENGTH,
+  type AssistantCitation,
   ThreadId,
   type ChatAttachment,
   type ChatFileAttachment,
@@ -29,6 +31,7 @@ import {
   type RunId,
 } from "@supacode/contracts";
 import { renderAssistantCitationsAsText } from "@supacode/shared/assistantCitations";
+import { captureAssistantCitation } from "../../lib/assistantCitation";
 import { encodeComposerContextFragment } from "@supacode/shared/composerContextClipboard";
 import { parseThreadLinkHref } from "@supacode/shared/threadLinks";
 import { PROMPT_LINK_MAX_PROMPT_LENGTH } from "@supacode/shared/promptLinks";
@@ -309,6 +312,7 @@ export interface ThreadFeedProps {
   readonly onEndFollowEnabledChange?: (enabled: boolean) => void;
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill>;
   readonly onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
+  readonly onCiteAssistantText?: (citation: AssistantCitation) => void;
 }
 
 async function waitForThreadShell(
@@ -827,9 +831,42 @@ const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
   readonly onUseArtifactTemplate?: ((template: CodexArtifactTemplate) => void) | undefined;
   readonly renderImage: MarkdownImageRenderer;
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill> | undefined;
+  readonly threadId?: ThreadId;
+  readonly messageId?: MessageId;
+  readonly onCiteAssistantText?: ((citation: AssistantCitation) => void) | undefined;
 }) {
+  const {
+    environmentId,
+    threadId,
+    messageId,
+    markdown: sourceMarkdown,
+    onCiteAssistantText,
+  } = props;
   const liveMarkdown = useLiveThreadLinkLabels(props.markdown, props.environmentId);
   const segments = useMemo(() => splitCodexArtifactTemplateMarkdown(liveMarkdown), [liveMarkdown]);
+  const onCiteSelection = useCallback(
+    (text: string) => {
+      if (!threadId || !messageId || !onCiteAssistantText) return;
+      if (text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH) {
+        Alert.alert(
+          "Selection is too long",
+          `Select at most ${ASSISTANT_CITATION_MAX_TEXT_LENGTH.toLocaleString()} characters to cite.`,
+        );
+        return;
+      }
+      const citation = captureAssistantCitation(
+        {
+          environmentId,
+          threadId,
+          messageId,
+          markdown: sourceMarkdown,
+        },
+        text,
+      );
+      if (citation) onCiteAssistantText(citation);
+    },
+    [environmentId, threadId, messageId, sourceMarkdown, onCiteAssistantText],
+  );
 
   return segments.map((segment) => {
     if (segment.kind === "artifact-template") {
@@ -853,6 +890,7 @@ const AssistantMarkdownContent = memo(function AssistantMarkdownContent(props: {
         textStyle={props.markdownStyles.nativeTextStyle}
         {...props.linkHandlers}
         renderImage={props.renderImage}
+        onCiteSelection={props.onCiteAssistantText ? onCiteSelection : undefined}
       />
     );
   });
@@ -996,6 +1034,7 @@ function renderFeedEntry(
     ThreadFeedProps,
     | "environmentId"
     | "onUseArtifactTemplate"
+    | "onCiteAssistantText"
     | "skills"
     | "dispatchingMessageId"
     | "onEditPendingMessage"
@@ -1411,6 +1450,9 @@ function renderFeedEntry(
               onUseArtifactTemplate={props.onUseArtifactTemplate}
               renderImage={props.renderMarkdownImage}
               skills={props.skills}
+              threadId={props.threadId}
+              messageId={message.id}
+              onCiteAssistantText={props.onCiteAssistantText}
             />
           </MarkdownImageAvailableWidthContext>
         ) : null}
@@ -2607,6 +2649,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
               dispatchingMessageId: props.dispatchingMessageId,
               onEditPendingMessage: props.onEditPendingMessage,
               onUseArtifactTemplate: props.onUseArtifactTemplate,
+              onCiteAssistantText: props.onCiteAssistantText,
               threadId: props.threadId,
               copiedRowId,
               motionEnabled: !reduceMotion && !isKeyboardMotionSuppressed(),
@@ -2686,6 +2729,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       onToggleWorkRow,
       props.environmentId,
       props.onUseArtifactTemplate,
+      props.onCiteAssistantText,
       props.threadId,
       props.threadTitle,
       props.skills,

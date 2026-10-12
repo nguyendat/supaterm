@@ -1,7 +1,7 @@
 import { PASTED_TEXT_ATTACHMENT_THRESHOLD_BYTES } from "@supacode/client-runtime/text-paste";
 import { PROVIDER_SEND_TURN_MAX_INPUT_CHARS } from "@supacode/contracts";
 import { collectComposerInlineTokens } from "@supacode/shared/composerInlineTokens";
-import { composerContextEditorTokens } from "../lib/composerContext";
+import { composerContextEditorTokens, composerEditorTokenLabel } from "../lib/composerContext";
 import { requireNativeView } from "expo";
 import { TextInputWrapper } from "expo-paste-input";
 import {
@@ -102,11 +102,6 @@ interface NativeComposerEditorProps extends ViewProps {
 
 const NativeView = requireNativeView<NativeComposerEditorProps>(NATIVE_MODULE_NAME);
 
-function basename(path: string): string {
-  const separator = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  return separator >= 0 ? path.slice(separator + 1) : path;
-}
-
 function fileIconUri(path: string): string | null {
   return markdownIconAssetUri(markdownFileIconSource(resolveMarkdownFileIcon(path))) ?? null;
 }
@@ -178,12 +173,7 @@ export function ComposerEditor({
           start: token.start,
           end: token.end,
           ...contextChipPresentation(token.type === "context" ? token.kind : token.type, record),
-          label:
-            token.type === "skill"
-              ? (skillLabels.get(token.value) ?? token.value)
-              : token.type === "context"
-                ? `${token.label}${props.context?.records.some((record) => record.contextId === token.contextId) ? "" : " · unavailable"}`
-                : basename(token.value),
+          label: composerEditorTokenLabel(token, skillLabels, props.context?.records),
           detail: token.type === "context" ? composerChipSizeSuffix(record) : "",
           // Only a mention wears per-filetype artwork. An attachment chip keeps the tinted
           // monochrome glyph web draws for it: coloured artwork ignores the chip's accent and

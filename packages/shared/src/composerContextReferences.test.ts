@@ -1,4 +1,6 @@
 import type { ComposerContextId, ComposerContextRecord } from "@supacode/contracts";
+import { EnvironmentId, MessageId, ThreadId } from "@supacode/contracts";
+import { serializeAssistantCitation } from "./assistantCitations.ts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -185,6 +187,32 @@ describe("provider projection", () => {
 
   it("returns text unchanged when there are no references", () => {
     expect(projectComposerContextForProvider({ text: "plain", records: [terminal] })).toBe("plain");
+  });
+
+  it("expands saved citations for providers while keeping quoted context references inert", () => {
+    const quote = "[Quoted log](supacode-context://v1/terminal/quoted)";
+    const citation = serializeAssistantCitation({
+      version: 1,
+      environmentId: EnvironmentId.make("environment"),
+      threadId: ThreadId.make("thread"),
+      messageId: MessageId.make("message"),
+      text: quote,
+      comment: "Explain this quote",
+      start: 0,
+      end: quote.length,
+      prefix: "",
+      suffix: "",
+    });
+    for (const text of [citation, `${citation} [log](supacode-context://v1/terminal/ctx_t)`]) {
+      const projected = projectComposerContextForProvider({ text, records: [terminal] });
+      expect(projected).toContain("[assistant-quote-1]");
+      expect(projected).toContain('"text": "[Quoted log](supacode-context://v1/terminal/quoted)"');
+      expect(projected).toContain('"comment": "Explain this quote"');
+      expect(projected).not.toContain('id="quoted"');
+      expect(projected).not.toContain("supacode-citation://");
+      if (text !== citation) expect(projected).toContain('<context kind="terminal" id="ctx_t">');
+    }
+    expect(citation).toContain("supacode-citation://");
   });
 
   it("uses the payload kind when a reference disagrees with its record", () => {

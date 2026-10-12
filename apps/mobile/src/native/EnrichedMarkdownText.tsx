@@ -248,6 +248,20 @@ export function MobileEnrichedMarkdownText(props: SelectableMarkdownTextProps) {
     () => ({ ...enrichedStyle(props.textStyle, themeAppearance === "dark"), linkVariants }),
     [props.textStyle, themeAppearance, linkVariants],
   );
+  const { onCiteSelection } = props;
+  const contextMenuItems = useMemo(
+    () =>
+      onCiteSelection
+        ? [
+            {
+              text: "Cite",
+              icon: "text.quote",
+              onPress: ({ text }: { text: string }) => onCiteSelection(text),
+            },
+          ]
+        : undefined,
+    [onCiteSelection],
+  );
   const renderDiagram = props.isStreaming ? null : (props.renderDiagram ?? null);
   const renderMedia = useCallback(
     (asset: MarkdownMediaAsset) => {
@@ -338,6 +352,7 @@ export function MobileEnrichedMarkdownText(props: SelectableMarkdownTextProps) {
           containerStyle={{ flexShrink: 1, minWidth: 0 }}
           flavor="github"
           selectable
+          contextMenuItems={contextMenuItems}
           selectionClipboard={selectionClipboard}
           selectionColor={props.textStyle.selectionColor}
           selectionHandleColor={props.textStyle.selectionHandleColor}

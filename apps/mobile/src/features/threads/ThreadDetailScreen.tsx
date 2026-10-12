@@ -19,6 +19,7 @@ import { HeaderHeightContext } from "@react-navigation/elements";
 import { NativeLayoutObserver } from "../../native/NativeLayoutObserver";
 import { deriveBottomControlInsets, type NativeLayoutMetrics } from "../../lib/reserved-regions";
 import type {
+  AssistantCitation,
   EnvironmentId,
   MessageId,
   ModelSelection,
@@ -29,6 +30,14 @@ import type {
   ThreadId,
   UsageLimitsReport,
 } from "@supacode/contracts";
+import { AssistantCitationSheet } from "../../components/AssistantCitationSheet";
+import {
+  captureComposerDraftInsertion,
+  insertComposerDraftCitation,
+  readComposerDraftSelection,
+  getComposerDraftSnapshot,
+  type ComposerDraftInsertion,
+} from "../../state/use-composer-drafts";
 import {
   appendCodexArtifactTemplateUsePrompt,
   type CodexArtifactTemplate,
@@ -150,6 +159,7 @@ import { ComposerQueuedEditBanner } from "./ComposerQueuedEdit";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { resolveThreadFeedSubmissionAnchor } from "./thread-feed-live-follow";
 import { useGlobalVoiceInput } from "../voice-input/VoiceInputProvider";
+import { voiceInputBlocksSubmission } from "@supacode/client-runtime/voice-input";
 
 export interface ThreadDetailScreenProps {
   readonly worktreeSetup?: WorktreeSetupCardProps | null;
@@ -374,7 +384,11 @@ const USER_INPUT_TOGGLE_TIMING = {
 export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: ThreadDetailScreenProps) {
   const usesNativeWorkspaceColumns = useNativeWorkspaceColumnsSupported();
   const navigation = useNavigation();
-  const { session: voiceInputSession } = useGlobalVoiceInput();
+  const {
+    session: voiceInputSession,
+    isBusy: voiceInputBusy,
+    ownerKey: voiceInputOwnerKey,
+  } = useGlobalVoiceInput();
   const { reportedModelSelection, queuedCount, turnSubagents } =
     useSelectedThreadComposerMetadata();
   const deviceState = useEnvironmentQuery(
@@ -466,6 +480,35 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   const composerEditorRef = useRef<ComposerEditorHandle>(null);
   // A provider-native subagent shows status instead of a composer.
   const isProviderSubagent = isProviderNativeSubagentThread(props.selectedThread.source);
+  const citationDraftKey = props.composerDraftKey ?? selectedThreadKey;
+  const citationDraftFrozen = voiceInputBusy && voiceInputOwnerKey === citationDraftKey;
+  const [pendingCitation, setPendingCitation] = useState<{
+    citation: AssistantCitation;
+    draftKey: string;
+    insertion: ComposerDraftInsertion;
+  } | null>(null);
+  if (pendingCitation && pendingCitation.draftKey !== citationDraftKey) setPendingCitation(null);
+  const handleCiteAssistantText = useCallback(
+    (citation: AssistantCitation) => {
+      if (
+        voiceInputSession.ownerKey === citationDraftKey &&
+        voiceInputBlocksSubmission(voiceInputSession.controller.currentState)
+      )
+        return;
+      if (
+        citation.environmentId !== props.environmentId ||
+        citation.threadId !== props.selectedThread.id
+      )
+        return;
+      Keyboard.dismiss();
+      setPendingCitation({
+        citation,
+        draftKey: citationDraftKey,
+        insertion: captureComposerDraftInsertion(citationDraftKey),
+      });
+    },
+    [citationDraftKey, props.environmentId, props.selectedThread.id, voiceInputSession],
+  );
   // Entering edit mode from the queue sheet should land in a ready composer,
   // not require a second tap on a composer already holding the message.
   const editingRunId = props.queuedRunEdit?.runId ?? null;
@@ -1285,6 +1328,11 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
               onEndFollowEnabledChange={setEndFollowEnabled}
               skills={selectedProviderSkills}
               onUseArtifactTemplate={handleUseArtifactTemplate}
+              onCiteAssistantText={
+                isProviderSubagent || props.isSavingQueuedEdit || citationDraftFrozen
+                  ? undefined
+                  : handleCiteAssistantText
+              }
             />
           </RenderErrorBoundary>
         </View>
@@ -1596,6 +1644,43 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
             </Animated.View>
           </ComposerPopoverHost>
         </KeyboardStickyView>
+      ) : null}
+      {pendingCitation && pendingCitation.draftKey === citationDraftKey ? (
+        <AssistantCitationSheet
+          citation={pendingCitation.citation}
+          saveLabel="Cite in composer"
+          onClose={() => setPendingCitation(null)}
+          onSave={(citation) => {
+            if (
+              props.isSavingQueuedEdit ||
+              (voiceInputSession.ownerKey === pendingCitation.draftKey &&
+                voiceInputBlocksSubmission(voiceInputSession.controller.currentState))
+            ) {
+              Alert.alert(
+                "Draft is busy",
+                "Finish dictation or saving the queued message before adding this quote.",
+              );
+              return false;
+            }
+            if (
+              !insertComposerDraftCitation(
+                pendingCitation.draftKey,
+                citation,
+                pendingCitation.insertion,
+              )
+            ) {
+              Alert.alert("Draft is too long", "Shorten the draft before adding this quote.");
+              return false;
+            }
+            const text = getComposerDraftSnapshot(pendingCitation.draftKey).text;
+            const selection = readComposerDraftSelection(pendingCitation.draftKey, text);
+            requestAnimationFrame(() => {
+              composerEditorRef.current?.focus();
+              if (selection) composerEditorRef.current?.setSelection(selection);
+            });
+            return true;
+          }}
+        />
       ) : null}
     </View>
   );

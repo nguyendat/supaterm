@@ -2,6 +2,10 @@ import { serializeLegacyContextMessage } from "@supacode/shared/composerContextL
 import { filePreviewKind } from "@supacode/shared/filePreview";
 import { videoMimeType } from "@supacode/shared/video";
 import {
+  assistantCitationLabel,
+  collectAssistantCitations,
+} from "@supacode/shared/assistantCitations";
+import {
   COMPOSER_CONTEXT_MAX_RECORDS,
   COMPOSER_CONTEXT_REVIEW_TEXT_MAX_CHARS,
   ComposerContextId,
@@ -156,16 +160,34 @@ export function pullRequestComposerContext(
 /** Native editors collapse the canonical source range to a single atomic attachment. */
 export function composerContextEditorTokens(text: string, tokens: readonly ComposerInlineToken[]) {
   const references = collectComposerContextReferences(text);
+  const citations = collectAssistantCitations(text);
+  const atomicRanges = [...references, ...citations];
   return [
     ...tokens.filter(
-      (token) => !references.some((ref) => token.start < ref.end && token.end > ref.start),
+      (token) => !atomicRanges.some((ref) => token.start < ref.end && token.end > ref.start),
     ),
     ...references.map((ref) => ({
       type: "context" as const,
       value: ref.label,
       ...ref,
     })),
+    ...citations.map((ref) => ({ type: "citation" as const, ...ref })),
   ].sort((a, b) => a.start - b.start);
+}
+
+export function composerEditorTokenLabel(
+  token: ReturnType<typeof composerContextEditorTokens>[number],
+  skillLabels: ReadonlyMap<string, string>,
+  records?: readonly ComposerContextRecord[],
+) {
+  if (token.type === "citation") return assistantCitationLabel(token.citation);
+  if (token.type === "skill") return skillLabels.get(token.value) ?? token.value;
+  if (token.type === "context") {
+    const available = records?.some((record) => record.contextId === token.contextId);
+    return `${token.label}${available ? "" : " · unavailable"}`;
+  }
+  const separator = Math.max(token.value.lastIndexOf("/"), token.value.lastIndexOf("\\"));
+  return token.value.slice(separator + 1);
 }
 
 /** Prunes removed references, retaining the screenshot bound to a preview annotation. */

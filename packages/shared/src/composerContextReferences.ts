@@ -6,6 +6,7 @@ import {
   type ElementContextDetails,
   type KnownComposerContextRecord,
 } from "@supacode/contracts";
+import { expandAssistantCitationsForProvider } from "./assistantCitations.ts";
 
 /**
  * Canonical inline reference: `[label](supacode-context://v1/<kind>/<contextId>)`, or the image
@@ -281,7 +282,7 @@ export function projectComposerContextForProvider(input: {
   records: ReadonlyArray<ComposerContextRecord>;
 }): string {
   const occurrences = collectComposerContextReferences(input.text);
-  if (occurrences.length === 0) return input.text;
+  if (occurrences.length === 0) return expandAssistantCitationsForProvider(input.text);
   const recordsById = new Map<ComposerContextId, ComposerContextRecord | undefined>();
   for (const record of input.records) {
     // Even callers that bypass the wire schema must not silently select an ambiguous payload.
@@ -307,8 +308,9 @@ export function projectComposerContextForProvider(input: {
     );
     entries.push(entry);
   }
-  if (entries.length === 0) return body;
-  return `${body}\n\n<${CONTEXT_ENVELOPE_TAG} version="1">\n${entries.join("\n")}\n</${CONTEXT_ENVELOPE_TAG}>`;
+  const prompt = expandAssistantCitationsForProvider(body);
+  if (entries.length === 0) return prompt;
+  return `${prompt}\n\n<${CONTEXT_ENVELOPE_TAG} version="1">\n${entries.join("\n")}\n</${CONTEXT_ENVELOPE_TAG}>`;
 }
 
 /** Preserve context bindings when uploads become thread-owned attachments. */

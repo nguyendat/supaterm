@@ -1,3 +1,5 @@
+import { collectAssistantCitations } from "@supacode/shared/assistantCitations";
+
 export const PASTED_TEXT_ATTACHMENT_THRESHOLD_BYTES = 32 * 1024;
 
 const textEncoder = new TextEncoder();
@@ -30,11 +32,12 @@ export function pastedTextDisposition(input: {
   if (input.bypassAutoAttachment || !input.canAttach || input.text.length === 0) {
     return "inline";
   }
-  return input.wouldExceedInputLimit ||
+  if (input.wouldExceedInputLimit) return "attachment";
+  const large =
     input.text.length >= PASTED_TEXT_ATTACHMENT_THRESHOLD_BYTES ||
-    textEncoder.encode(input.text).byteLength >= PASTED_TEXT_ATTACHMENT_THRESHOLD_BYTES
-    ? "attachment"
-    : "inline";
+    textEncoder.encode(input.text).byteLength >= PASTED_TEXT_ATTACHMENT_THRESHOLD_BYTES;
+  if (!large) return "inline";
+  return collectAssistantCitations(input.text).length > 0 ? "inline" : "attachment";
 }
 
 /** Stable, human-readable names when a draft contains several folded pastes. */
