@@ -504,6 +504,7 @@ export class MissingServerProductionDependenciesError extends Schema.TaggedError
 const DesktopBuildInputArtifact = Schema.Literals([
   "desktop-dist",
   "desktop-client",
+  "micro-native",
   "desktop-resources",
   "server-dist",
   "bundled-server-client",
@@ -511,6 +512,7 @@ const DesktopBuildInputArtifact = Schema.Literals([
 type DesktopBuildInputArtifact = typeof DesktopBuildInputArtifact.Type;
 const desktopBuildInputArtifactNames = {
   "desktop-client": "desktop renderer",
+  "micro-native": "Micro native addon",
   "desktop-dist": "desktopDist",
   "desktop-resources": "desktopResources",
   "server-dist": "serverDist",
@@ -3141,6 +3143,19 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     );
   }
 
+  if (options.platform === "mac") {
+    const spawnCommand = yield* resolveSpawnCommand("node", [
+      path.join(repoRoot, "packages/micro/scripts/build-native.mjs"),
+    ]);
+    yield* runCommand(
+      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+        cwd: repoRoot,
+        shell: spawnCommand.shell,
+      }),
+      { label: "build Micro native addon", verbose: options.verbose },
+    );
+  }
+
   const requiredBuildInputs = [
     { artifact: "desktop-dist", artifactPath: distDirs.desktopDist },
     {
@@ -3156,6 +3171,19 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         ...input,
         buildCommand: "vp run build:desktop",
       });
+    }
+  }
+
+  if (options.platform === "mac") {
+    for (const file of ["topology.node", "driver.cjs"]) {
+      const artifactPath = path.join(distDirs.desktopDist, "micro-hid", file);
+      if (!(yield* fs.exists(artifactPath))) {
+        return yield* new MissingDesktopBuildInputError({
+          artifact: "micro-native",
+          artifactPath,
+          buildCommand: "vp run build:desktop",
+        });
+      }
     }
   }
 

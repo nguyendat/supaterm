@@ -13,6 +13,7 @@ import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsL
 const CONNECTION_LABELS = {
   connected: "Connected",
   disconnected: "Disconnected",
+  waiting: "Waiting for device",
   connecting: "Connecting…",
   disconnecting: "Disconnecting…",
   unsupported: "Unavailable",
@@ -73,14 +74,19 @@ export function MicroSettings() {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={snapshot.phase === "unsupported" || snapshot.phase === "disconnecting"}
+                disabled={
+                  snapshot.phase === "unsupported" ||
+                  (snapshot.phase === "disconnecting" && !snapshot.enabled)
+                }
                 onClick={() => {
-                  void (connected || snapshot.phase === "connecting"
-                    ? micro.disconnect()
-                    : micro.connect());
+                  void (snapshot.enabled ? micro.disconnect() : micro.connect());
                 }}
               >
-                {connected ? "Disconnect" : snapshot.phase === "connecting" ? "Cancel" : "Connect"}
+                {snapshot.phase === "connecting"
+                  ? "Cancel"
+                  : snapshot.enabled
+                    ? "Disconnect"
+                    : "Connect"}
               </Button>
             </div>
           }

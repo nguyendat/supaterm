@@ -426,7 +426,7 @@ export const make = Effect.gen(function* () {
       },
     });
 
-    installMicro(window, applicationUrl, environment.platform);
+    installMicro(window, applicationUrl, environment.platform, environment.dirname);
 
     if (environment.platform === "darwin") {
       window.setAutoHideCursor(false);

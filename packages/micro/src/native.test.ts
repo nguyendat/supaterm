@@ -4,6 +4,7 @@ import type { DesktopMicroBridge, DesktopMicroEvent } from "@supacode/contracts/
 import { describe, expect, it, vi } from "vite-plus/test";
 import { MicroController } from "./controller.ts";
 import { DesktopMicroHid } from "./desktopHid.ts";
+import { MicroUnavailableError } from "./hid.ts";
 import { NativeMicro } from "./native.ts";
 import { encodeReports, MICRO_VENDOR_ID, MICRO_PRODUCT_ID, ReportDecoder } from "./protocol.ts";
 
@@ -39,7 +40,12 @@ function fixture(devices = [device("bluetooth")]) {
     async () => ({ devicesAsync: enumerate, HIDAsync: { open } }),
   );
   const bridge: DesktopMicroBridge = {
-    open: () => micro.open(),
+    open: () =>
+      micro.open().catch((error) => {
+        if (error instanceof MicroUnavailableError) return null;
+        throw error;
+      }),
+    stop: () => micro.dispose(),
     close: (id) => micro.close(id),
     write: (id, data) => micro.write(id, data),
     onEvent: (listener) => {
@@ -191,7 +197,7 @@ describe("native Micro transport", () => {
     const controller = new MicroController(new DesktopMicroHid(f.bridge));
     await controller.connect();
     expect(controller.getSnapshot()).toMatchObject({
-      phase: "error",
+      phase: "waiting",
       error: expect.stringContaining("No Micro found"),
     });
     expect(f.listeners.size).toBe(0);
@@ -201,9 +207,15 @@ describe("native Micro transport", () => {
     const f = fixture();
     f.bridge.open = async () => {
       const info = await f.micro.open();
+      const disconnected = Promise.withResolvers<void>();
+      const unsubscribe = f.bridge.onEvent((event) => {
+        if (event.type === "disconnected") disconnected.resolve();
+      });
       for (let index = 0; index < 40; index++)
         f.handle.report({ m: "v.oai.hid", p: { k: "ACT07", act: 1 } });
       f.handle.emit("error", new Error("disconnected"));
+      await disconnected.promise;
+      unsubscribe();
       return info;
     };
     const controller = new MicroController(new DesktopMicroHid(f.bridge));

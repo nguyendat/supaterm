@@ -23,7 +23,7 @@ function fixture(platform = "linux") {
     },
   });
   const window = Object.assign(new NodeEvents.EventEmitter(), { webContents: contents });
-  installMicro(window as unknown as BrowserWindow, "supacode://app/", platform);
+  installMicro(window as unknown as BrowserWindow, "supacode://app/", platform, "/native");
   const invoke = (channel: string, frame = mainFrame, raw?: unknown) =>
     handlers.get(channel)!({ senderFrame: frame } as unknown as IpcMainInvokeEvent, raw);
   return { invoke, mainFrame };

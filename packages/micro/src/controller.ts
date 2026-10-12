@@ -17,6 +17,7 @@ import type {
   MicroHidReportEvent,
   MicroHidConnectionEvent,
 } from "./hid.ts";
+import { MicroUnavailableError } from "./hid.ts";
 import {
   encodeReports,
   lightingMessage,
@@ -48,11 +49,13 @@ export type MicroSnapshot = {
   readonly phase:
     | "unsupported"
     | "disconnected"
+    | "waiting"
     | "connecting"
     | "connected"
     | "disconnecting"
     | "error";
   readonly productName: string | null;
+  readonly enabled: boolean;
   readonly transport: "USB" | "Bluetooth" | null;
   readonly firmware: string | null;
   readonly error: string | null;
@@ -79,6 +82,10 @@ export class MicroController {
     reject: (error: Error) => void;
   } | null = null;
   private requestId = 0;
+  private unsubscribeTopology: (() => void) | undefined;
+  private topologyPending = false;
+  private retryTimer: ReturnType<typeof setTimeout> | undefined;
+  private retries = 0;
 
   constructor(hid: MicroHid | null, storage: Pick<Storage, "getItem" | "setItem"> | null = null) {
     this.hid = hid;
@@ -99,6 +106,7 @@ export class MicroController {
     this.snapshot = {
       phase: hid ? "disconnected" : "unsupported",
       productName: null,
+      enabled: false,
       transport: null,
       firmware: null,
       error: null,
@@ -162,8 +170,9 @@ export class MicroController {
     )
       return;
     const generation = ++this.generation;
-    this.publish({ phase: "connecting", error: null });
+    this.publish({ phase: "connecting", enabled: true, error: null });
     try {
+      this.unsubscribeTopology ??= this.hid.subscribeTopology?.(this.onTopology);
       const devices = await this.hid.requestDevice({
         filters: [
           { vendorId: MICRO_VENDOR_ID, productId: MICRO_PRODUCT_ID, usagePage: MICRO_USAGE_PAGE },
@@ -201,22 +210,61 @@ export class MicroController {
         firmware: status.value.version ?? null,
         error: null,
       });
+      this.retries = 0;
       this.flushLighting();
     } catch (error) {
       if (generation !== this.generation) return;
       await this.releaseDevice();
       if (generation !== this.generation) return;
       this.publish({
-        phase: "error",
+        phase: error instanceof MicroUnavailableError ? "waiting" : "error",
         error: error instanceof Error ? error.message : "Could not connect to the Micro.",
       });
+      this.scheduleReconnect();
+    } finally {
+      if (generation === this.generation && this.topologyPending) {
+        this.topologyPending = false;
+        if (this.snapshot.enabled && this.getSnapshot().phase !== "connected") this.onTopology();
+      }
     }
   };
 
+  private readonly onTopology = () => {
+    if (!this.snapshot.enabled) return;
+    clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
+    this.retries = 0;
+    if (this.snapshot.phase === "connecting" || this.snapshot.phase === "disconnecting") {
+      this.topologyPending = true;
+    } else if (this.snapshot.phase !== "connected") void this.connect();
+  };
+
+  private scheduleReconnect(): void {
+    if (
+      !this.snapshot.enabled ||
+      !this.hid?.subscribeTopology ||
+      this.snapshot.phase !== "error" ||
+      this.retryTimer
+    )
+      return;
+    const delay = [250, 1000, 3000][this.retries++];
+    if (delay === undefined) return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = undefined;
+      void this.connect();
+    }, delay);
+  }
+
   readonly disconnect = async (): Promise<void> => {
-    if (this.snapshot.phase === "disconnecting") return;
+    if (this.snapshot.phase === "disconnecting" && !this.snapshot.enabled) return;
     const generation = ++this.generation;
-    this.publish({ phase: "disconnecting", error: null });
+    this.unsubscribeTopology?.();
+    this.unsubscribeTopology = undefined;
+    this.topologyPending = false;
+    this.retries = 0;
+    clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
+    this.publish({ phase: "disconnecting", enabled: false, error: null });
     const device = this.device;
     if (device?.opened) {
       try {
@@ -224,6 +272,7 @@ export class MicroController {
       } catch {}
     }
     await this.releaseDevice();
+    await this.hid?.stop?.();
     if (generation === this.generation)
       this.publish({
         phase: this.hid ? "disconnected" : "unsupported",
@@ -251,7 +300,24 @@ export class MicroController {
 
   private readonly onDisconnect = (event: MicroHidConnectionEvent) => {
     if (event.device !== this.device) return;
-    void this.disconnect();
+    if (!this.snapshot.enabled || !this.hid?.subscribeTopology) {
+      void this.disconnect();
+      return;
+    }
+    const generation = ++this.generation;
+    this.publish({
+      phase: "disconnecting",
+      productName: null,
+      transport: null,
+      firmware: null,
+      error: null,
+    });
+    void this.releaseDevice().then(() => {
+      if (generation !== this.generation || !this.snapshot.enabled) return;
+      this.topologyPending = false;
+      this.publish({ phase: "waiting" });
+      void this.connect();
+    });
   };
 
   private readonly onReport = (event: MicroHidReportEvent) => {
@@ -284,7 +350,7 @@ export class MicroController {
       timer = setTimeout(
         () =>
           reject(new Error("The Micro did not respond. Release it in other apps, then reconnect.")),
-        3000,
+        10000,
       );
     });
     try {
@@ -341,6 +407,7 @@ export class MicroController {
           phase: "error",
           error: error instanceof Error ? error.message : "Could not update the Micro's lights.",
         });
+        this.scheduleReconnect();
       } finally {
         this.flushing = false;
         if (this.device && this.device !== device) this.flushLighting();

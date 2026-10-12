@@ -6,15 +6,20 @@ import {
   MICRO_USAGE_PAGE,
   MICRO_VENDOR_ID,
 } from "./protocol.ts";
+import type { MicroInterface, MicroTopology } from "./topology.ts";
+import { MicroUnavailableError } from "./hid.ts";
 
 type NativeHandle = Pick<HIDAsync, "close" | "write"> & {
   on(type: "data" | "error", listener: (data: Uint8Array) => void): unknown;
   off(type: "data" | "error", listener: (data: Uint8Array) => void): unknown;
 };
-type NativeHid = {
+export type NativeHid = {
   devicesAsync(vendorId: number, productId: number): Promise<Device[]>;
   HIDAsync: { open(path: string, options: { nonExclusive: boolean }): Promise<NativeHandle> };
 };
+
+const transportOf = (device: Device | MicroInterface) =>
+  "transport" in device ? device.transport : (device.release & 3) === 0 ? "USB" : "Bluetooth";
 
 export class MicroAccessError extends Error {
   constructor(cause: unknown) {
@@ -25,11 +30,17 @@ export class MicroAccessError extends Error {
 export class NativeMicro {
   private readonly emit: (event: DesktopMicroEvent) => void;
   private readonly loadHid: () => Promise<NativeHid>;
+  private readonly topology: MicroTopology | undefined;
+  private unwatch: (() => void) | null = null;
+  private watchVersion = 0;
+  private topologyDirty = false;
+  private topologyScan: Promise<void> | null = null;
   private generation = 0;
   private pending: Promise<DesktopMicroDevice> | null = null;
   private closing: Promise<void> = Promise.resolve();
   private connection: {
     id: string;
+    path: string;
     handle: NativeHandle;
     onData: (data: Uint8Array) => void;
     onError: () => void;
@@ -38,9 +49,11 @@ export class NativeMicro {
   constructor(
     emit: (event: DesktopMicroEvent) => void,
     loadHid: () => Promise<NativeHid> = () => import("node-hid"),
+    topology?: MicroTopology,
   ) {
     this.emit = emit;
     this.loadHid = loadHid;
+    this.topology = topology;
   }
 
   open(): Promise<DesktopMicroDevice> {
@@ -55,20 +68,19 @@ export class NativeMicro {
 
   private async openDevice(generation: number): Promise<DesktopMicroDevice> {
     await this.closing;
+    if (generation !== this.generation) throw new Error("Micro connection cancelled.");
+    if (this.topology && !this.unwatch) {
+      const version = ++this.watchVersion;
+      this.unwatch = this.topology.watch(() => {
+        if (version === this.watchVersion) void this.reconcileTopology();
+      });
+    }
     const hid = await this.loadHid();
-    const devices = await hid.devicesAsync(MICRO_VENDOR_ID, MICRO_PRODUCT_ID);
-    const candidates = devices.filter(
-      (device) =>
-        device.vendorId === MICRO_VENDOR_ID &&
-        device.productId === MICRO_PRODUCT_ID &&
-        device.usagePage === MICRO_USAGE_PAGE &&
-        device.path,
-    );
-    const device = candidates.find((candidate) => (candidate.release & 3) === 0) ?? candidates[0];
-    if (!device?.path)
-      throw new Error(
-        "No Micro found. Connect USB or pair the Micro in your system’s Bluetooth settings.",
-      );
+    const devices = this.topology
+      ? await this.topology.find()
+      : await hid.devicesAsync(MICRO_VENDOR_ID, MICRO_PRODUCT_ID);
+    const device = this.selectDevice(devices);
+    if (!device?.path) throw new MicroUnavailableError();
     if (generation !== this.generation) throw new Error("Micro connection cancelled.");
     const handle = await hid.HIDAsync.open(device.path, { nonExclusive: true }).catch((cause) => {
       throw new MicroAccessError(cause);
@@ -84,17 +96,62 @@ export class NativeMicro {
     };
     const onError = () => {
       if (this.connection?.id !== id) return;
-      this.emit({ type: "disconnected", id });
-      void this.close(id).catch(() => {});
+      void this.close(id)
+        .finally(() => this.emit({ type: "disconnected", id }))
+        .catch(() => {});
     };
-    this.connection = { id, handle, onData, onError };
+    this.connection = { id, path: device.path, handle, onData, onError };
     handle.on("error", onError);
     handle.on("data", onData);
     return {
       id,
       productName: device.product ?? "Codex Micro",
-      transport: (device.release & 3) === 0 ? "USB" : "Bluetooth",
+      transport: transportOf(device),
     };
+  }
+
+  private selectDevice(devices: readonly (Device | MicroInterface)[]) {
+    const candidates = devices.filter(
+      (device) =>
+        device.vendorId === MICRO_VENDOR_ID &&
+        device.productId === MICRO_PRODUCT_ID &&
+        device.usagePage === MICRO_USAGE_PAGE &&
+        device.path,
+    );
+    const current = candidates.find((candidate) => candidate.path === this.connection?.path);
+    if (current && transportOf(current) === "USB") return current;
+    return (
+      candidates.find((candidate) => transportOf(candidate) === "USB") ?? current ?? candidates[0]
+    );
+  }
+
+  private reconcileTopology(): Promise<void> {
+    this.topologyDirty = true;
+    if (this.topologyScan) return this.topologyScan;
+    const version = this.watchVersion;
+    const scan = (async () => {
+      while (this.topologyDirty && this.unwatch && version === this.watchVersion) {
+        this.topologyDirty = false;
+        await this.pending?.catch(() => {});
+        const selected = this.selectDevice(await this.topology!.find());
+        if (version !== this.watchVersion) return;
+        const connection = this.connection;
+        if (connection && connection.path !== selected?.path) {
+          await this.close(connection.id).catch(() => {});
+          if (version !== this.watchVersion) return;
+          this.emit({ type: "disconnected", id: connection.id });
+        }
+        if (!this.connection) this.emit({ type: "topology" });
+      }
+    })()
+      .catch(() => {
+        if (version === this.watchVersion && !this.connection) this.emit({ type: "topology" });
+      })
+      .finally(() => {
+        if (this.topologyScan === scan) this.topologyScan = null;
+      });
+    this.topologyScan = scan;
+    return scan;
   }
 
   async write(id: string, data: Uint8Array): Promise<void> {
@@ -118,9 +175,14 @@ export class NativeMicro {
   }
 
   async dispose(): Promise<void> {
+    ++this.watchVersion;
+    this.topologyDirty = false;
+    this.unwatch?.();
+    this.unwatch = null;
     ++this.generation;
     if (this.connection) await this.close(this.connection.id).catch(() => {});
     await this.pending?.catch(() => {});
     await this.closing;
+    await this.topologyScan;
   }
 }

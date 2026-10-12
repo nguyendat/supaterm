@@ -10,6 +10,8 @@ import {
 } from "./electron-launcher.mjs";
 import { waitForResources } from "./wait-for-resources.mjs";
 
+await import("../../../packages/micro/scripts/build-native.mjs");
+
 const devServerUrl = process.env.VITE_DEV_SERVER_URL?.trim();
 if (!devServerUrl) {
   throw new Error("VITE_DEV_SERVER_URL is required for desktop development.");

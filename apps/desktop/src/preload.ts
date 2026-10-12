@@ -63,9 +63,11 @@ function unwrapEnsureSshEnvironmentResult(result: unknown) {
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   micro: {
+    supportsTopology: clientPlatform === "darwin",
     open: () => ipcRenderer.invoke(DESKTOP_MICRO_CHANNELS.open),
     close: (id) => ipcRenderer.invoke(DESKTOP_MICRO_CHANNELS.close, id),
     write: (id, data) => ipcRenderer.invoke(DESKTOP_MICRO_CHANNELS.write, { id, data }),
+    stop: () => ipcRenderer.invoke(DESKTOP_MICRO_CHANNELS.stop),
     onEvent: (listener) => {
       const handler = (
         _event: Electron.IpcRendererEvent,

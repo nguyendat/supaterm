@@ -1,7 +1,7 @@
 name: Desktop macOS Preview
 
 # Untrusted half of the macOS preview. This runs PR code (including fork PRs)
-# with a read-only token and no secrets, and only produces the JS bundle. The
+# with a read-only token and no secrets, and only produces the app bundle. The
 # trusted half, desktop-macos-preview-publish.yml, runs on workflow_run from
 # main, verifies the PR author is vouched, then packages, signs, notarizes, and
 # publishes the bundle without ever executing it.
@@ -44,10 +44,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build:
-    name: Build preview JS bundle
+    name: Build preview app bundle
     needs: trust
     if: contains(fromJSON('["bot", "collaborator", "vouched"]'), needs.trust.outputs.status)
-    runs-on: depot-ubuntu-24.04-32
+    runs-on: depot-macos-26
     timeout-minutes: 30
     steps:
       # This repository is public, so Git needs no credentials. checkout's
@@ -82,12 +82,7 @@ jobs:
           base_version="$(node -p "require('./apps/desktop/package.json').version")"
           node scripts/update-release-package-versions.ts "${base_version}-pr.${PR_NUMBER}.${GITHUB_RUN_NUMBER}"
 
-      - uses: ./.github/actions/setup-apt-mirrors
-
-      - name: Install browser secret helper build libraries
-        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
-
-      - name: Build JS bundle
+      - name: Build app bundle
         run: vp run build:desktop
 
       # Same layout as release.yml's js-bundle so release-desktop.yml can

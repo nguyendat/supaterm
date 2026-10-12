@@ -17,7 +17,7 @@ export default defineConfig({
     tasks: {
       build: {
         command:
-          "node scripts/build-browser-secret.mjs && node scripts/build-preview-annotation-css.mjs && vp pack && vp run --filter @supacode/web build:desktop",
+          "node scripts/build-browser-secret.mjs && node scripts/build-preview-annotation-css.mjs && vp pack && node ../../packages/micro/scripts/build-native.mjs && vp run --filter @supacode/web build:desktop",
         dependsOn: ["supacode#build"],
         cache: false,
       },
@@ -42,6 +42,16 @@ export default defineConfig({
   pack: [
     {
       format: "cjs",
+      outDir: "dist-electron/micro-hid",
+      dts: false,
+      sourcemap: true,
+      outExtensions: () => ({ js: ".cjs" }),
+      entry: { driver: "../../packages/micro/src/driver.ts" },
+      clean: false,
+      deps: { alwaysBundle: (id) => !id.startsWith("node:"), onlyBundle: false },
+    },
+    {
+      format: "cjs",
       outDir: "dist-electron",
       dts: false,
       sourcemap: true,
@@ -54,7 +64,9 @@ export default defineConfig({
         neverBundle: isMainProcessExternal,
         onlyBundle: false,
       },
-      ...(shouldLaunchElectronAfterPack ? { onSuccess: "node scripts/dev-electron.mjs" } : {}),
+      onSuccess: shouldLaunchElectronAfterPack
+        ? "node scripts/dev-electron.mjs"
+        : "node ../../packages/micro/scripts/build-native.mjs",
     },
     {
       format: "cjs",

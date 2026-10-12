@@ -141,7 +141,7 @@ describe("Micro connection lifecycle", () => {
     const { hid } = fakeHid(device);
     const micro = new MicroController(hid);
     const connection = micro.connect();
-    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(10000);
     await connection;
     expect(micro.getSnapshot()).toMatchObject({ phase: "error" });
     expect(micro.getSnapshot().error).toContain("did not respond");

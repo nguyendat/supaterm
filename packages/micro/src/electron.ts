@@ -3,6 +3,8 @@ import * as Schema from "effect/Schema";
 import { DESKTOP_MICRO_CHANNELS, DesktopMicroWriteSchema } from "@supacode/contracts/desktopMicro";
 import { MicroAccessError, NativeMicro } from "./native.ts";
 import { hasInputMonitoringPermission } from "./permissions.ts";
+import { macMicroHid, macMicroTopology } from "./topology.ts";
+import { MicroUnavailableError } from "./hid.ts";
 
 const decodeId = Schema.decodeUnknownSync(Schema.String);
 const decodeWrite = Schema.decodeUnknownSync(DesktopMicroWriteSchema);
@@ -11,12 +13,19 @@ export function installMicro(
   window: BrowserWindow,
   applicationUrl: string,
   platform: string,
+  nativeDirectory: string,
 ): void {
   const expected = new URL(applicationUrl);
   const contents = window.webContents;
-  const micro = new NativeMicro((event) => {
-    if (!contents.isDestroyed()) contents.send(DESKTOP_MICRO_CHANNELS.event, event);
-  });
+  const micro = new NativeMicro(
+    (event) => {
+      if (!contents.isDestroyed()) contents.send(DESKTOP_MICRO_CHANNELS.event, event);
+    },
+    platform === "darwin" ? async () => macMicroHid(`${nativeDirectory}/micro-hid`) : undefined,
+    platform === "darwin"
+      ? macMicroTopology(`${nativeDirectory}/micro-hid/topology.node`)
+      : undefined,
+  );
   const authorize = (event: IpcMainInvokeEvent) => {
     const frame = event.senderFrame;
     const requested = frame ? new URL(frame.url) : null;
@@ -33,6 +42,7 @@ export function installMicro(
     try {
       return await micro.open();
     } catch (error) {
+      if (error instanceof MicroUnavailableError) return null;
       if (
         error instanceof MicroAccessError &&
         platform === "darwin" &&
@@ -53,6 +63,10 @@ export function installMicro(
     authorize(event);
     const { id, data } = decodeWrite(raw);
     return micro.write(id, data);
+  });
+  contents.ipc.handle(DESKTOP_MICRO_CHANNELS.stop, (event) => {
+    authorize(event);
+    return micro.dispose();
   });
   contents.on("did-start-navigation", (details) => {
     if (details.isMainFrame && !details.isSameDocument) void micro.dispose();

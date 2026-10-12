@@ -1,3 +1,4 @@
+import { MicroUnavailableError } from "./hid.ts";
 import type {
   DesktopMicroBridge,
   DesktopMicroDevice,
@@ -43,6 +44,7 @@ class DesktopMicroHidDevice implements MicroHidDevice {
     });
     try {
       this.info = await this.bridge.open();
+      if (!this.info) throw new MicroUnavailableError();
       if (this.disconnectedId === this.info.id)
         this.onEvent({ type: "disconnected", id: this.disconnectedId });
       if (!this.info) throw new Error("The Micro disconnected while connecting.");
@@ -55,6 +57,7 @@ class DesktopMicroHidDevice implements MicroHidDevice {
   }
 
   private onEvent(event: DesktopMicroEvent): void {
+    if (event.type === "topology") return;
     if (event.id !== this.info?.id) return;
     if (event.type === "disconnected") {
       this.info = null;
@@ -92,10 +95,19 @@ class DesktopMicroHidDevice implements MicroHidDevice {
 }
 
 export class DesktopMicroHid implements MicroHid {
+  readonly subscribeTopology?: (listener: () => void) => () => void;
   private readonly bridge: DesktopMicroBridge;
   private readonly listeners = new Set<(event: MicroHidConnectionEvent) => void>();
   constructor(bridge: DesktopMicroBridge) {
     this.bridge = bridge;
+    if (bridge.supportsTopology)
+      this.subscribeTopology = (listener) =>
+        this.bridge.onEvent((event) => {
+          if (event.type === "topology") listener();
+        });
+  }
+  stop(): Promise<void> {
+    return this.bridge.stop();
   }
   async requestDevice(): Promise<MicroHidDevice[]> {
     const device = new DesktopMicroHidDevice(this.bridge, () => {
