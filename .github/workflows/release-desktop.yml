@@ -11,6 +11,8 @@ on:
     secrets:
       OP_SERVICE_ACCOUNT_TOKEN:
         required: false
+      MACOS_PROVISIONING_PROFILE:
+        required: false
       AZURE_TENANT_ID:
         required: false
       AZURE_CLIENT_ID:
@@ -323,6 +325,19 @@ jobs:
           profile: apple
           service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 
+      - name: Prepare optional macOS passkey provisioning profile
+        if: inputs.platform == 'mac'
+        shell: bash
+        env:
+          MACOS_PROVISIONING_PROFILE: ${{ secrets.MACOS_PROVISIONING_PROFILE }}
+        run: |
+          if [[ -n "$MACOS_PROVISIONING_PROFILE" ]]; then
+            profile_path="$RUNNER_TEMP/supacode.provisionprofile"
+            printf '%s' "$MACOS_PROVISIONING_PROFILE" | base64 --decode > "$profile_path"
+            chmod 600 "$profile_path"
+            echo "SUPACODE_MACOS_PROVISIONING_PROFILE=$profile_path" >> "$GITHUB_ENV"
+          fi
+
       - name: Build desktop artifact
         shell: bash
         env:
@@ -422,7 +437,11 @@ jobs:
           security unlock-keychain -p "$keychain_password" "$keychain"
           security import "$cert_path" -k "$keychain" -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
-          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          existing_keychains=()
+          while IFS= read -r existing_keychain; do
+            existing_keychains+=("$existing_keychain")
+          done < <(security list-keychains -d user | sed -E 's/^[[:space:]]*"//; s/"[[:space:]]*$//')
+          security list-keychains -d user -s "$keychain" "${existing_keychains[@]}"
           identity="$(security find-identity -v -p codesigning "$keychain" | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -n 1)"
           if [[ -z "$identity" ]]; then
             echo "No Developer ID Application identity found in CSC_LINK." >&2

@@ -130,6 +130,18 @@ Credential lookup failures stop the job. The finalize job uses the App credentia
 GitHub Release publication uses the repository-scoped workflow token so it has a rate-limit quota
 independent from the shared Release App installation.
 
+### macOS browser passkeys
+
+The desktop artifact enables Touch ID and the macOS system passkey sheet only when the embedded provisioning profile grants their entitlements. Request Apple's managed browser passkey capability for the desktop App ID, then store the resulting provisioning profile as the base64 encoded `MACOS_PROVISIONING_PROFILE` secret in the release environment. The release workflow decodes it and passes its path to the packaging step.
+
+The packager records the granted capabilities in the staged package metadata and signs the app with the matching entitlements. Verify a signed artifact with:
+
+```sh
+codesign -d --entitlements :- "/Applications/Supacode.app"
+```
+
+The output should include `keychain-access-groups` for Touch ID when that group is present in the profile, and `com.apple.developer.web-browser.public-key-credential` when Apple granted the system passkey capability. The in-app browser should then complete registration, authentication, cancellation, and account selection through the macOS credential sheet.
+
 ## Cloudflare hosting
 
 Cloudflare Workers serves the marketing site and hosted web client. The agent server continues to run on users' machines. Hosting configuration lives in `apps/marketing/wrangler.json` and `apps/web/cloudflare/`.

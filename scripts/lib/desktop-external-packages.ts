@@ -15,6 +15,7 @@ export const DESKTOP_RUNTIME_EXTERNAL_PREFIXES = [
   // Native addons and the wrappers that dlopen them by real path.
   "@napi-rs/keyring",
   "@crowecawcaw/xa11y",
+  "electron-webauthn",
   "ffi-rs",
   "@yuuang/",
   // Desktop injection reads coreBundle.js; the server browser loads the full runtime.

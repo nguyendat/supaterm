@@ -15,11 +15,13 @@
     "@supacode/tailscale": "workspace:*",
     "effect": "catalog:",
     "playwright-core": "1.60.0",
+    "plist": "catalog:",
     "pngjs": "7.0.0",
     "sharp": "0.35.5"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
+    "@types/plist": "catalog:",
     "@types/pngjs": "6.0.5",
     "typescript": "catalog:",
     "typescript-legacy": "npm:typescript@~6.0.3",

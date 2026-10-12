@@ -38,6 +38,7 @@ import {
   selectDesktopRuntimeExternalDependencies,
 } from "./lib/desktop-external-packages.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
+import { prepareMacTouchIdSigning, type MacTouchIdSigning } from "./lib/mac-touch-id-signing.ts";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -81,9 +82,25 @@ const StageWorkspaceConfig = Schema.Struct({
   allowBuilds: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
   patchedDependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   overrides: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  packageExtensions: Schema.optional(
+    Schema.Record(
+      Schema.String,
+      Schema.Struct({
+        peerDependenciesMeta: Schema.Record(
+          Schema.String,
+          Schema.Struct({ optional: Schema.Boolean }),
+        ),
+      }),
+    ),
+  ),
   nodeLinker: Schema.optional(Schema.Literals(["hoisted"])),
 });
 type StageWorkspaceConfig = typeof StageWorkspaceConfig.Type;
+
+const STAGE_PACKAGE_EXTENSIONS = {
+  "electron-webauthn": { peerDependenciesMeta: { typescript: { optional: true } } },
+  "@electron-webauthn/macos": { peerDependenciesMeta: { typescript: { optional: true } } },
+} as const;
 
 const RepoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("..", import.meta.url))),
@@ -877,6 +894,10 @@ interface StagePackageJson {
   readonly version: string;
   readonly buildVersion: string;
   readonly supacodeCommitHash: string;
+  readonly supacodeWebAuthn?: {
+    readonly touchIdKeychainAccessGroup?: string;
+    readonly browserPasskeys?: boolean;
+  };
   readonly private: true;
   readonly packageManager: string;
   readonly description: string;
@@ -1214,6 +1235,7 @@ export function createStageWorkspaceConfig(input: {
       ? { patchedDependencies }
       : {}),
     ...(overrides && Object.keys(overrides).length > 0 ? { overrides } : {}),
+    packageExtensions: STAGE_PACKAGE_EXTENSIONS,
   };
 }
 
@@ -2318,6 +2340,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   // source file was never written fails the electron-builder step.
   wslRuntimeBundled = false,
   arch?: typeof BuildArch.Type,
+  macTouchIdSigning?: Pick<MacTouchIdSigning, "entitlementsPath" | "provisioningProfilePath">,
 ) {
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
@@ -2380,8 +2403,15 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
           name: "Supacode",
           schemes: ["supacode", "supacode-dev"],
         },
+        { name: "Web links", schemes: ["http", "https"], role: "Viewer" },
       ],
       ...(signed ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") } : {}),
+      ...(macTouchIdSigning
+        ? {
+            entitlements: macTouchIdSigning.entitlementsPath,
+            provisioningProfile: macTouchIdSigning.provisioningProfilePath,
+          }
+        : {}),
     };
   }
 
@@ -3302,6 +3332,14 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const stageProdResourcesDir = path.join(stageAppDir, "apps/desktop/prod-resources");
   yield* fs.copy(stageResourcesDir, stageProdResourcesDir);
 
+  const macTouchIdSigning = yield* prepareMacTouchIdSigning({
+    platform: options.platform,
+    signed: options.signed,
+    repoRoot,
+    stageAppDir,
+    appId: DESKTOP_APP_ID,
+  });
+
   // Windows splits dependencies per process: app.asar carries only the
   // desktop main-process externals, while the server bundle's externals live
   // in the server.asar sidecar (see stageWindowsServerSidecar). macOS and
@@ -3329,6 +3367,16 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     version: appVersion,
     buildVersion: appVersion,
     supacodeCommitHash: commitHash,
+    ...(macTouchIdSigning
+      ? {
+          supacodeWebAuthn: {
+            ...(macTouchIdSigning.touchIdKeychainAccessGroup
+              ? { touchIdKeychainAccessGroup: macTouchIdSigning.touchIdKeychainAccessGroup }
+              : {}),
+            ...(macTouchIdSigning.browserPasskeys ? { browserPasskeys: true } : {}),
+          },
+        }
+      : {}),
     private: true,
     packageManager: rootPackageJson.packageManager,
     description:
@@ -3347,6 +3395,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       options.mockUpdateServerPort,
       bundlesWslRuntime({ platform: options.platform, runtimeArchivePath: options.wslRuntime }),
       options.arch,
+      macTouchIdSigning,
     ),
     dependencies: stageDependencies,
     devDependencies: {

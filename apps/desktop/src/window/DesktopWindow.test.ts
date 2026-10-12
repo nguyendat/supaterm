@@ -55,6 +55,7 @@ import {
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 import * as PreviewManager from "../preview/Manager.ts";
+import * as PreviewPasskeys from "../preview/Passkeys.ts";
 
 const environmentInput = {
   dirname: "/repo/apps/desktop/dist-electron",
@@ -330,6 +331,12 @@ function layerTest(input: {
               input.previewZoomReapplies?.push(input.window.webContents.getZoomLevel());
             }),
         }),
+        Layer.mock(PreviewPasskeys.PreviewPasskeys)({
+          bridgeEnabled: false,
+          configure: Effect.void,
+          installSessionHandlers: () => {},
+          attachGuest: () => () => {},
+        }),
       ),
     ),
   );
@@ -427,6 +434,12 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
             setMainWindow: () => Effect.void,
             isBrowserPartition: (partition) => partition.startsWith("persist:supacode-preview-"),
             getBrowserPartition: () => Effect.succeed("persist:supacode-preview-test"),
+          }),
+          Layer.mock(PreviewPasskeys.PreviewPasskeys)({
+            bridgeEnabled: false,
+            configure: Effect.void,
+            installSessionHandlers: () => {},
+            attachGuest: () => () => {},
           }),
         ),
       ),
