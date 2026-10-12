@@ -24,8 +24,7 @@ import { KeybindingsConfigWarning } from "../components/KeybindingsConfigWarning
 import { FirstRunGate } from "../components/onboarding/FirstRunGate";
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
 import { SnapShotCoordinator } from "../components/desktop/SnapShotCoordinator";
-import { MicroCoordinator } from "../components/desktop/MicroCoordinator";
-import { hasMicroDeviceAccess } from "@supacode/micro/hid";
+import { MicroCoordinator } from "~/desktop/micro";
 import { DesktopAppActivationCoordinator } from "../components/desktop/DesktopAppActivationCoordinator";
 import { RunningThreadKeepAlive } from "../components/desktop/RunningThreadKeepAlive";
 import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
@@ -234,7 +233,7 @@ function RootRouteView() {
           {isElectron ? <RunningThreadKeepAlive /> : null}
           <SshPasswordPromptDialog />
           <SnapShotCoordinator />
-          {isElectron || hasMicroDeviceAccess() ? <MicroCoordinator /> : null}
+          {isElectron ? <MicroCoordinator /> : null}
           <ThreadNotificationCoordinator />
           <ReopenClosedViewShortcut />
           <ConfirmDialogHost />

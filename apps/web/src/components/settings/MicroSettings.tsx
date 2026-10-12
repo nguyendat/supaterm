@@ -77,7 +77,7 @@ export function MicroSettings() {
         {snapshot.phase === "unsupported" ? (
           <SettingsRow
             title="Device access unavailable"
-            description="Use the desktop app or a browser with WebHID support."
+            description="Device access is unavailable in this desktop app."
           />
         ) : null}
       </SettingsSection>

@@ -24,7 +24,9 @@ export function useMicro() {
   return useSyncExternalStore(micro.subscribe, micro.getSnapshot, micro.getSnapshot);
 }
 
-export function useMicroActions(handler: (action: MicroAction) => void): void {
+export function useMicroActions(handler: (action: MicroAction) => void, enabled = true): void {
   const onAction = useEffectEvent(handler);
-  useEffect(() => getMicroController().subscribeActions(onAction), []);
+  useEffect(() => {
+    if (enabled) return getMicroController().subscribeActions(onAction);
+  }, [enabled]);
 }

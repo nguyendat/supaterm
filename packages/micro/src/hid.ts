@@ -1,7 +1,3 @@
-export function hasMicroDeviceAccess(): boolean {
-  return typeof navigator !== "undefined" && "hid" in navigator;
-}
-
 export interface MicroHidDevice {
   readonly vendorId: number;
   readonly productId: number;

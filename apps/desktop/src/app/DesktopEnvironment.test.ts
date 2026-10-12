@@ -171,7 +171,7 @@ describe("DesktopEnvironment", () => {
       );
       assert.equal(
         environment.clientAssetsDir,
-        "/install/resources/server.asar/apps/server/dist/client",
+        "/install/resources/app.asar/apps/desktop/dist-electron/client",
       );
     }),
   );

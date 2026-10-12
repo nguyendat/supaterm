@@ -1,4 +1,5 @@
 import * as NodeZlib from "node:zlib";
+import * as NodeURL from "node:url";
 
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
@@ -17,6 +18,7 @@ import {
 import { loadRepoEnv } from "../../scripts/lib/public-config";
 import { thirdPartyLicensesPlugin } from "../../scripts/lib/third-party-licenses";
 import { tailwindPlugins } from "./vite/tailwind";
+import { excludeMicroFromWeb } from "./vite/micro";
 
 Object.assign(process.env, loadRepoEnv());
 
@@ -136,10 +138,24 @@ const configuredAllowedHosts = (process.env.SUPACODE_DEV_ALLOWED_HOSTS ?? "")
   .filter((entry) => entry.length > 0);
 const allowedHosts = [".ts.net", ...configuredAllowedHosts];
 
-export default defineConfig(() => {
+export default defineConfig(({ command, mode }) => {
+  const desktopClient =
+    mode === "desktop" || (command === "serve" && process.env.SUPACODE_CLIENT_TARGET === "desktop");
+  const disabledMicroModule = NodeURL.fileURLToPath(
+    new URL("./src/desktop/micro.disabled.ts", import.meta.url),
+  );
   return {
+    run: {
+      tasks: {
+        "build:desktop": {
+          command: "vp build --mode desktop",
+          cache: false,
+        },
+      },
+    },
     assetsInclude: ["**/*.wasm"],
     plugins: [
+      ...(!desktopClient ? [excludeMicroFromWeb()] : []),
       devCompressionPlugin(),
       thirdPartyLicensesPlugin({
         bundleName: "web",
@@ -188,6 +204,12 @@ export default defineConfig(() => {
       "import.meta.env.APP_VERSION": JSON.stringify(configuredAppVersion),
     },
     resolve: {
+      alias: {
+        "~/desktop/micro": desktopClient
+          ? NodeURL.fileURLToPath(new URL("./src/desktop/micro.tsx", import.meta.url))
+          : disabledMicroModule,
+        ...(!desktopClient ? { "~/components/settings/MicroSettings": disabledMicroModule } : {}),
+      },
       tsconfigPaths: true,
       dedupe: ["react", "react-dom"],
     },
@@ -248,7 +270,7 @@ export default defineConfig(() => {
       devSourcemap: buildSourcemap !== false,
     },
     build: {
-      outDir: "dist",
+      outDir: desktopClient ? "../desktop/dist-electron/client" : "dist",
       emptyOutDir: true,
       manifest: true,
       sourcemap: buildSourcemap,

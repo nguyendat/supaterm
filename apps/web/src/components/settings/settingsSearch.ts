@@ -1,5 +1,4 @@
 import { isElectron } from "~/env";
-import { hasMicroDeviceAccess } from "@supacode/micro/hid";
 import { isMacPlatform, isWindowsPlatform, normalizeSearchText } from "~/lib/utils";
 import { STATIC_KEYBINDING_COMMANDS, type KeybindingCommand } from "@supacode/contracts";
 import type { EnvironmentId } from "@supacode/contracts";
@@ -541,7 +540,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Micro controller",
     to: "/settings/micro",
     searchTerms: ["work louder keyboard agent keys fast approve reject fork send"],
-    desktopOnly: !hasMicroDeviceAccess(),
+    desktopOnly: true,
   },
   ...KEYBINDING_SEARCH_ITEMS,
   {

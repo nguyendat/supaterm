@@ -24,7 +24,6 @@ import {
   XIcon,
 } from "lucide-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { hasMicroDeviceAccess } from "@supacode/micro/hid";
 import { isElectron } from "../../env";
 
 import { Button } from "../ui/button";
@@ -103,7 +102,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const navItems = SETTINGS_NAV_ITEMS.filter(
     (item) =>
       (item.to !== "/settings/projects" || isSettingsOverviewVisible(scopeSearch)) &&
-      (item.to !== "/settings/micro" || isElectron || hasMicroDeviceAccess()),
+      (item.to !== "/settings/micro" || isElectron),
   );
   const { isMobile, setOpenMobile, open, setOpen } = useSidebar();
   const searchInputRef = useRef<HTMLInputElement>(null);

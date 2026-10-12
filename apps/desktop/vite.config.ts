@@ -17,7 +17,7 @@ export default defineConfig({
     tasks: {
       build: {
         command:
-          "node scripts/build-browser-secret.mjs && node scripts/build-preview-annotation-css.mjs && vp pack",
+          "node scripts/build-browser-secret.mjs && node scripts/build-preview-annotation-css.mjs && vp pack && vp run --filter @supacode/web build:desktop",
         dependsOn: ["supacode#build"],
         cache: false,
       },

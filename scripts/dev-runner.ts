@@ -318,6 +318,7 @@ export function createDevRunnerEnv({
 
     const output: NodeJS.ProcessEnv = {
       ...baseEnv,
+      SUPACODE_CLIENT_TARGET: isDesktopMode ? "desktop" : "web",
       PORT: String(webPort),
       VITE_DEV_SERVER_URL:
         devUrl?.toString() ??

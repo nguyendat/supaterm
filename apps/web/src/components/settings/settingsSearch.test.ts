@@ -149,6 +149,15 @@ describe("searchSettings", () => {
     });
   });
 
+  it("hides Micro settings in browsers with device access", () => {
+    vi.stubGlobal("navigator", { platform: "MacIntel", hid: {} });
+    try {
+      expect(searchSettings("micro").map((item) => item.id)).not.toContain("micro-controller");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("hides settings whose controls are unavailable", () => {
     const available = filterAvailableSettingsSearchItems({
       hasEnvironment: false,

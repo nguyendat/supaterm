@@ -1,7 +1,7 @@
 import { formatProviderSkillDisplayName } from "@supacode/shared/inlineSkills";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { runtimeModeConfig, runtimeModeOptions as runtimeModes } from "./runtimeModeConfig";
-import { useMicroComposer } from "@supacode/micro/composer";
+import { useMicroComposer } from "~/desktop/micro";
 import { getProviderOptionDescriptors } from "@supacode/shared/model";
 import { getProviderModelCapabilities } from "../../providerModels";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";

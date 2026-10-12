@@ -503,12 +503,14 @@ export class MissingServerProductionDependenciesError extends Schema.TaggedError
 
 const DesktopBuildInputArtifact = Schema.Literals([
   "desktop-dist",
+  "desktop-client",
   "desktop-resources",
   "server-dist",
   "bundled-server-client",
 ]);
 type DesktopBuildInputArtifact = typeof DesktopBuildInputArtifact.Type;
 const desktopBuildInputArtifactNames = {
+  "desktop-client": "desktop renderer",
   "desktop-dist": "desktopDist",
   "desktop-resources": "desktopResources",
   "server-dist": "serverDist",
@@ -3141,6 +3143,10 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
   const requiredBuildInputs = [
     { artifact: "desktop-dist", artifactPath: distDirs.desktopDist },
+    {
+      artifact: "desktop-client",
+      artifactPath: path.join(distDirs.desktopDist, "client/index.html"),
+    },
     { artifact: "desktop-resources", artifactPath: distDirs.desktopResources },
     { artifact: "server-dist", artifactPath: distDirs.serverDist },
   ] as const;
@@ -3229,8 +3235,10 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
   const webAssetBrand = resolveDesktopWebAssetBrand(appVersion);
   yield* applyWebBrandAssets(webAssetBrand, "apps/server/dist/client");
+  yield* applyWebBrandAssets(webAssetBrand, "apps/desktop/dist-electron/client");
   yield* Effect.log(`[desktop-artifact] Applied ${webAssetBrand} web client branding.`);
   yield* validateBundledClientAssets(path.dirname(bundledClientEntry));
+  yield* validateBundledClientAssets(path.join(distDirs.desktopDist, "client"));
 
   yield* fs.makeDirectory(path.join(stageAppDir, "apps/desktop"), { recursive: true });
   if (options.platform !== "win") {

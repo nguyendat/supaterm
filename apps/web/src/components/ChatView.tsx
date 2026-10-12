@@ -1,4 +1,4 @@
-import { useMicroActions } from "@supacode/micro/react";
+import { useMicroActions } from "~/desktop/micro";
 import {
   pendingThreadCreationMessage,
   resolvePendingThreadCreation,

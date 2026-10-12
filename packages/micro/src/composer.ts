@@ -73,6 +73,7 @@ export function resolveMicroComposerChange(
 }
 
 export function useMicroComposer(input: {
+  readonly enabled?: boolean;
   readonly provider: string;
   readonly readDescriptors: () => readonly ProviderOptionDescriptor[];
   readonly prompt: string;
@@ -110,5 +111,5 @@ export function useMicroComposer(input: {
     if (!change) return;
     if (change.prompt !== null) input.writePrompt(change.prompt);
     if (change.options !== null) input.writeOptions(change.options);
-  });
+  }, input.enabled);
 }
