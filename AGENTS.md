@@ -129,10 +129,10 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 
 - `apps/server` - WebSocket, orchestration, providers, checkpointing. Effect-heavy: read [Effect services](docs/internals/effect-services.md) before adding server code, and use the [Effect skill](.agents/skills/effect-ts/SKILL.md) for the Effect library itself. Before writing Effect code, read `node_modules/effect/AGENTS.md` completely and follow its links as needed. Search `node_modules/effect/src` for APIs and concepts the guide does not cover.
 - `apps/web` - React/Vite UI. `apps/desktop` wraps it, `apps/mobile` is React Native, `apps/marketing` is the site.
+- `apps/relay` - Go relay behind `wss://relay.supacode.sh`. AGPL-3.0-only: do not copy its code into MIT packages. Test with `make test` there. Its [wire protocol](apps/relay/docs/protocol.md) is spoken by `apps/server/src/relay`, `packages/shared/src/relay`, and `apps/mobile/modules/supacode-relay-tunnel`, so a protocol change touches all four.
 - `packages/contracts` - Effect/Schema contracts plus small derived helpers. No heavy runtime logic.
 - `packages/shared` - shared runtime utils, subpath exports, no barrel.
 - `packages/client-runtime` - client code shared by web and mobile.
-- `apps/relay` - the Go end-to-end encrypted relay behind `wss://relay.supacode.sh`. AGPL-3.0-only, unlike the rest of the repo. Run `make test` there; its handshake counterpart is `packages/shared/src/relay/protocol.ts`.
 
 ## Taste
 

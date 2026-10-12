@@ -377,6 +377,10 @@ jobs:
       - name: Exercise release-only workflow steps
         run: node scripts/release-smoke.ts
 
+  relay:
+    name: Relay
+    uses: ./.github/workflows/relay-ci.yml
+
   # Branch protection requires this job by its name, `Check`. It fails when any
   # other job fails, is cancelled, or is skipped without a reason, so splitting
   # or resharding jobs needs no ruleset change. Add every new job to `needs`.
@@ -394,6 +398,7 @@ jobs:
         test_web,
         test_server,
         rust,
+        relay,
         mobile_native_changes,
         mobile_native_static_analysis,
         release_smoke,

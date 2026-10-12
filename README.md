@@ -41,6 +41,10 @@ The [documentation index](./docs/README.md) for all pages.
 - [Source control integrations](./docs/user/source-control.md)
 - [Background service](./docs/user/background-service.md)
 
+## License
+
+MIT, except [`apps/relay`](./apps/relay), which is AGPL-3.0-only.
+
 ## Attribution
 
 Supacode is a fork of https://github.com/pingdotgg/t3code
