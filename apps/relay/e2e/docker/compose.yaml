@@ -1,0 +1,64 @@
+name: ${E2E_PROJECT:-supacode-relay-e2e}
+
+services:
+  relay:
+    image: supacode-relay:e2e
+    build:
+      context: ../..
+      target: relay
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 10s
+    restart: "no"
+    ports:
+      - "127.0.0.1:${E2E_RELAY_PORT:-18480}:8080"
+    networks:
+      public:
+        ipv4_address: 10.231.2.10
+    environment:
+      RELAY_ADDR: 0.0.0.0:8080
+      RELAY_PRIVATE_ADDR: 0.0.0.0:9090
+      RELAY_PRIVATE_ALLOWED_PEERS: 127.0.0.1/32,::1/128
+      RELAY_ADMISSION_RATE: ${E2E_RELAY_RATE:-100000}
+      RELAY_HEARTBEAT_MS: ${E2E_RELAY_HEARTBEAT_MS:-2000}
+      RELAY_PAIR_TIMEOUT_MS: "10000"
+      RELAY_MAX_CLIENTS_PER_HOST: "256"
+      RELAY_MAX_CLIENTS_PER_HOST_PER_IP: "256"
+      RELAY_MAX_PENDING_PER_HOST: "128"
+      RELAY_MAX_CLIENTS: "8192"
+      RELAY_MAX_CONNS: "16384"
+      RELAY_MAX_CONNS_PER_IP: "8192"
+    healthcheck:
+      test: ["CMD", "/relay", "healthcheck"]
+      interval: 1s
+      timeout: 2s
+      retries: 10
+      start_period: 2s
+
+  probe:
+    image: supacode-relay-tools:e2e
+    build:
+      context: ../..
+      target: tools
+    profiles: [tools]
+    read_only: true
+    cap_drop: [ALL]
+    networks:
+      public:
+        ipv4_address: 10.231.2.50
+
+  bench:
+    image: supacode-relay-tools:e2e
+    profiles: [bench]
+    read_only: true
+    cap_drop: [ALL]
+    entrypoint: ["/relay-bench"]
+    networks:
+      public: {}
+
+networks:
+  public:
+    ipam:
+      config:
+        - subnet: 10.231.2.0/24
