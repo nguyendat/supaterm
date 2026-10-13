@@ -2,6 +2,7 @@
 import { type DeviceHubAccess, withDeviceHubQuery } from "../device/hubAccess.ts";
 import {
   PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE,
+  PREVIEW_STREAM_VERSION,
   type PreviewStreamHostSetup,
   type PreviewViewportSetting,
 } from "@supacode/contracts";
@@ -212,11 +213,12 @@ export interface PreviewStreamTarget {
   readonly maxHeight: number;
   /** Passive viewers reduce their own access, including automatic control grants. */
   readonly interactive?: boolean;
+  readonly keepAliveWhenHidden?: boolean;
 }
 
 export interface PreviewStreamEvents {
   /** One complete JPEG frame. */
-  readonly onFrame: (jpeg: ArrayBuffer) => void;
+  readonly onFrame: (jpeg: ArrayBuffer) => void | Promise<void>;
   readonly onViewport: (viewport: PreviewStreamViewport) => void;
   readonly onProbe?: (probe: PreviewStreamProbe) => void;
   /** The agent's cursor moved to, or clicked at, a page point. */
@@ -258,31 +260,72 @@ export function createPreviewStreamClient(
     maxHeight: String(Math.max(1, Math.round(target.maxHeight))),
   });
   if (target.interactive === false) query.set("interactive", "false");
-  const url = withDeviceHubQuery(`${target.access.wsBase}/ws?${query.toString()}`, target.access);
+  const streamUrl = (legacy: boolean) =>
+    withDeviceHubQuery(
+      `${target.access.wsBase}/${legacy ? "ws" : "ws/v2"}?${query.toString()}`,
+      target.access,
+    );
   let stopped = false;
   let socket: WebSocket | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let handshakeTimer: ReturnType<typeof setTimeout> | null = null;
   let failures = 0;
   let control: PreviewStreamControl | null = null;
   let fileChooser: string | null = null;
+  let legacy = false;
+  let ready = false;
+  const visibilityDocument = typeof document === "undefined" ? null : document;
+  const isVisible = () => target.keepAliveWhenHidden === true || !visibilityDocument?.hidden;
+  const visibilityChanged = () => {
+    if (!legacy && ready && socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "visibility", visible: isVisible() }));
+    }
+  };
+  visibilityDocument?.addEventListener("visibilitychange", visibilityChanged);
+  const cleanVisibility = () =>
+    visibilityDocument?.removeEventListener("visibilitychange", visibilityChanged);
 
   const connect = () => {
     if (stopped) return;
-    const ws = new WebSocket(url);
+    const ws = new WebSocket(streamUrl(legacy));
     ws.binaryType = "arraybuffer";
     socket = ws;
     let opened = false;
+    let connected = false;
+    let unsupported = false;
+    ready = false;
     ws.addEventListener("open", () => {
       if (socket !== ws) return;
       opened = true;
-      events.onConnectedChange(true);
+      if (legacy) {
+        ready = connected = true;
+        events.onConnectedChange(true);
+      } else {
+        handshakeTimer = setTimeout(() => {
+          unsupported = true;
+          ws.close(1002, "stream hello required");
+        }, 5000);
+      }
     });
     ws.addEventListener("message", (event) => {
       if (socket !== ws) return;
       if (event.data instanceof ArrayBuffer) {
+        if (!ready) return;
         failures = 0;
-        ws.send(ACK_MESSAGE);
-        events.onFrame(event.data);
+        const acknowledge = () => {
+          if (socket === ws && ws.readyState === WebSocket.OPEN) ws.send(ACK_MESSAGE);
+        };
+        if (!isVisible()) {
+          acknowledge();
+          return;
+        }
+        try {
+          const painted = events.onFrame(event.data);
+          if (painted) void painted.then(acknowledge, acknowledge);
+          else acknowledge();
+        } catch {
+          acknowledge();
+        }
         return;
       }
       if (typeof event.data !== "string") return;
@@ -293,6 +336,26 @@ export function createPreviewStreamClient(
         return;
       }
       if (typeof message !== "object" || message === null) return;
+      if ("type" in message && message.type === "hello" && !legacy && !ready) {
+        if (
+          !("version" in message) ||
+          message.version !== PREVIEW_STREAM_VERSION ||
+          !("codec" in message) ||
+          message.codec !== "jpeg"
+        ) {
+          unsupported = true;
+          ws.close(1002, "unsupported browser stream");
+          return;
+        }
+        if (handshakeTimer !== null) clearTimeout(handshakeTimer);
+        ready = connected = true;
+        ws.send(
+          JSON.stringify({ type: "ready", version: PREVIEW_STREAM_VERSION, visible: isVisible() }),
+        );
+        events.onConnectedChange(true);
+        return;
+      }
+      if (!ready) return;
       const {
         type,
         x,
@@ -385,23 +448,33 @@ export function createPreviewStreamClient(
     });
     ws.addEventListener("close", (event) => {
       if (socket !== ws) return;
+      if (handshakeTimer !== null) clearTimeout(handshakeTimer);
       socket = null;
       control = null;
-      if (opened) events.onConnectedChange(false);
+      ready = false;
+      if (connected) events.onConnectedChange(false);
       if (stopped) return;
+      if (!legacy && (unsupported || (!opened && event.code === 1006))) {
+        legacy = true;
+        connect();
+        return;
+      }
       if (event.code === 4404) {
         stopped = true;
+        cleanVisibility();
         events.onGone?.();
         return;
       }
       if (event.code === PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE) {
         stopped = true;
+        cleanVisibility();
         events.onHostSetup?.(decodeHostSetup(event.reason));
         return;
       }
       // Rejected upgrades surface as 1006 before open for both cookies and tickets.
       if (event.code === 1008 || event.code === 4401 || (!opened && event.code === 1006)) {
         stopped = true;
+        cleanVisibility();
         events.onUnauthorized();
         return;
       }
@@ -414,7 +487,7 @@ export function createPreviewStreamClient(
 
   return {
     send: (input) => {
-      if (socket?.readyState !== WebSocket.OPEN) return false;
+      if (!ready || socket?.readyState !== WebSocket.OPEN) return false;
       if (!control?.canOperate) return false;
       if (input.type !== "takeControl" && control.controller !== "you") return false;
       socket.send(JSON.stringify(input));
@@ -422,7 +495,9 @@ export function createPreviewStreamClient(
     },
     stop: () => {
       stopped = true;
+      cleanVisibility();
       if (retryTimer !== null) clearTimeout(retryTimer);
+      if (handshakeTimer !== null) clearTimeout(handshakeTimer);
       const ws = socket;
       socket = null;
       control = null;
@@ -432,7 +507,7 @@ export function createPreviewStreamClient(
 }
 
 export interface PreviewFramePainter {
-  readonly paint: (jpeg: ArrayBuffer) => void;
+  readonly paint: (jpeg: ArrayBuffer) => Promise<void>;
   readonly stop: () => void;
 }
 
@@ -444,26 +519,30 @@ export function createPreviewFramePainter(
   const context = canvas.getContext("2d");
   let stopped = false;
   let decoding = false;
-  let waiting: ArrayBuffer | null = null;
-  const draw = (jpeg: ArrayBuffer) => {
+  let waiting: { readonly jpeg: ArrayBuffer; readonly resolve: () => void } | null = null;
+  let active: (() => void) | null = null;
+  const draw = (frame: NonNullable<typeof waiting>) => {
     decoding = true;
-    void createImageBitmap(new Blob([jpeg], { type: "image/jpeg" }))
+    active = frame.resolve;
+    void createImageBitmap(new Blob([frame.jpeg], { type: "image/jpeg" }))
       .then((bitmap) => {
-        if (stopped || !context) {
+        try {
+          if (stopped || !context) return;
+          if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+            canvas.width = bitmap.width;
+            canvas.height = bitmap.height;
+          }
+          context.drawImage(bitmap, 0, 0);
+          onPainted?.();
+        } finally {
           bitmap.close();
-          return;
         }
-        if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
-          canvas.width = bitmap.width;
-          canvas.height = bitmap.height;
-        }
-        context.drawImage(bitmap, 0, 0);
-        bitmap.close();
-        onPainted?.();
       })
       // A frame that fails to decode is skipped; the next one repaints.
       .catch(() => undefined)
       .finally(() => {
+        frame.resolve();
+        active = null;
         decoding = false;
         const next = waiting;
         waiting = null;
@@ -471,13 +550,19 @@ export function createPreviewFramePainter(
       });
   };
   return {
-    paint: (jpeg) => {
-      if (stopped) return;
-      if (decoding) waiting = jpeg;
-      else draw(jpeg);
-    },
+    paint: (jpeg) =>
+      new Promise<void>((resolve) => {
+        if (stopped) return resolve();
+        const frame = { jpeg, resolve };
+        if (decoding) {
+          waiting?.resolve();
+          waiting = frame;
+        } else draw(frame);
+      }),
     stop: () => {
       stopped = true;
+      active?.();
+      waiting?.resolve();
       waiting = null;
     },
   };

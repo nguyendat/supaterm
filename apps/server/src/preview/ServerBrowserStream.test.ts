@@ -370,3 +370,180 @@ it.effect.each([
     });
   }).pipe(Effect.scoped),
 );
+
+const streamServer = Effect.fnUntraced(function* (browser: ServerBrowser.ServerBrowser["Service"]) {
+  const services = yield* Layer.build(
+    HttpRouter.serve(
+      routeLayer.pipe(
+        Layer.provide(Layer.succeed(ServerBrowser.ServerBrowser, browser)),
+        Layer.provide(platformLayer),
+      ),
+      { disableListenLog: true },
+    ).pipe(
+      Layer.provideMerge(NodeHttpServer.layerTest),
+      Layer.provide(makeAuth([AuthOrchestrationReadScope]).layer),
+    ),
+  );
+  return HttpServer.formatAddress(Context.get(services, HttpServer.HttpServer).address).replace(
+    /^http/,
+    "ws",
+  );
+});
+
+const streamSocket = Effect.fnUntraced(function* (origin: string, tab: string, versioned = false) {
+  const messages = yield* Queue.make<ArrayBuffer | Record<string, unknown>>();
+  const closed = Promise.withResolvers<number>();
+  const socket = yield* Effect.acquireRelease(
+    Effect.sync(() => {
+      const socket = new WebSocket(
+        `${origin}/api/preview-stream/${versioned ? "ws/v2" : "ws"}?threadId=thread&tabId=${tab}`,
+      );
+      socket.binaryType = "arraybuffer";
+      socket.addEventListener("message", (event) => {
+        Queue.offerUnsafe(
+          messages,
+          typeof event.data === "string" ? JSON.parse(event.data) : event.data,
+        );
+      });
+      socket.addEventListener("close", (event) => closed.resolve(event.code));
+      return socket;
+    }),
+    (socket) => Effect.sync(() => socket.close()),
+  );
+  return { socket, messages, closed: closed.promise };
+});
+
+const browserWithViewer = (attachViewer: ServerBrowser.ServerBrowser["Service"]["attachViewer"]) =>
+  ServerBrowser.ServerBrowser.of({
+    clearProfile: () => Effect.void,
+    reportProfiles: () => Effect.void,
+    openDownload: () => Effect.succeedNone,
+    answerFileChooser: () => Effect.succeed(false),
+    attachViewer,
+  });
+
+it.effect("negotiates readiness and lets read-only viewers pause without gaining input scope", () =>
+  Effect.gen(function* () {
+    const output = yield* Queue.make<ServerBrowser.ServerBrowserViewerOutput>();
+    const inputs: unknown[] = [];
+    const attachments: Array<
+      Parameters<ServerBrowser.ServerBrowser["Service"]["attachViewer"]>[0]
+    > = [];
+    const hidden = Promise.withResolvers<void>();
+    const browser = browserWithViewer((input) => {
+      attachments.push(input);
+      return Effect.succeed({
+        output,
+        input: (message) =>
+          Effect.sync(() => {
+            inputs.push(message);
+            if (inputs.length === 2) hidden.resolve();
+          }),
+      });
+    });
+    yield* Queue.offer(output, { _tag: "viewport", width: 1280, height: 800 });
+    const stream = yield* streamSocket(yield* streamServer(browser), "tab", true);
+    expect(yield* Queue.take(stream.messages)).toEqual({
+      type: "hello",
+      version: 2,
+      codec: "jpeg",
+    });
+    stream.socket.send(JSON.stringify({ type: "ready", version: 2, visible: true }));
+    expect(yield* Queue.take(stream.messages)).toEqual({
+      type: "viewport",
+      width: 1280,
+      height: 800,
+    });
+    stream.socket.send(JSON.stringify({ type: "navigate", url: "http://example.test" }));
+    stream.socket.send(JSON.stringify({ type: "visibility", visible: false }));
+    yield* Effect.promise(() => hidden.promise);
+    expect(inputs).toEqual([
+      { type: "visibility", visible: true },
+      { type: "visibility", visible: false },
+    ]);
+    expect(attachments[0]).toMatchObject({ canOperate: false, visible: false });
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "keeps only the latest waiting frame and a slow viewer does not stall another viewer",
+  () =>
+    Effect.gen(function* () {
+      const slowOutput = yield* Queue.make<ServerBrowser.ServerBrowserViewerOutput>();
+      const fastOutput = yield* Queue.make<ServerBrowser.ServerBrowserViewerOutput>();
+      const acked: number[] = [];
+      const discarded = Promise.withResolvers<void>();
+      const frame = (id: number): ServerBrowser.ServerBrowserViewerOutput => ({
+        _tag: "frame",
+        data: new Uint8Array([id]),
+        ack: Effect.sync(() => {
+          acked.push(id);
+          if (id === 2) discarded.resolve();
+        }),
+      });
+      const browser = browserWithViewer(({ tabId }) =>
+        Effect.succeed({
+          output: tabId === "slow" ? slowOutput : fastOutput,
+          input: () => Effect.void,
+        }),
+      );
+      const origin = yield* streamServer(browser);
+      const slow = yield* streamSocket(origin, "slow");
+      const fast = yield* streamSocket(origin, "fast");
+      yield* Queue.offer(slowOutput, frame(1));
+      yield* Queue.offer(fastOutput, frame(10));
+      expect(new Uint8Array((yield* Queue.take(slow.messages)) as ArrayBuffer)).toEqual(
+        new Uint8Array([1]),
+      );
+      expect(new Uint8Array((yield* Queue.take(fast.messages)) as ArrayBuffer)).toEqual(
+        new Uint8Array([10]),
+      );
+      fast.socket.send(JSON.stringify({ type: "ack" }));
+      yield* Queue.offer(fastOutput, frame(11));
+      expect(new Uint8Array((yield* Queue.take(fast.messages)) as ArrayBuffer)).toEqual(
+        new Uint8Array([11]),
+      );
+      yield* Queue.offer(slowOutput, frame(2));
+      yield* Queue.offer(slowOutput, frame(3));
+      yield* Queue.offer(slowOutput, { _tag: "viewport", width: 3, height: 1 });
+      expect(yield* Queue.take(slow.messages)).toEqual({ type: "viewport", width: 3, height: 1 });
+      yield* Effect.promise(() => discarded.promise);
+      expect(acked).toContain(2);
+      expect(acked).not.toContain(1);
+      slow.socket.send(JSON.stringify({ type: "ack" }));
+      expect(new Uint8Array((yield* Queue.take(slow.messages)) as ArrayBuffer)).toEqual(
+        new Uint8Array([3]),
+      );
+      expect(acked).toContain(1);
+    }).pipe(Effect.scoped),
+);
+
+it.effect("delivers a large frame with one credit and closes a frame beyond the byte budget", () =>
+  Effect.gen(function* () {
+    const output = yield* Queue.make<ServerBrowser.ServerBrowserViewerOutput>();
+    const stream = yield* streamSocket(
+      yield* streamServer(
+        browserWithViewer(() =>
+          Effect.succeed({
+            output,
+            input: () => Effect.void,
+          }),
+        ),
+      ),
+      "tab",
+    );
+    const large = new Uint8Array(2 * 1024 * 1024);
+    large[large.length - 1] = 255;
+    yield* Queue.offer(output, { _tag: "frame", data: large, ack: Effect.void });
+    const received = (yield* Queue.take(stream.messages)) as ArrayBuffer;
+    expect(received.byteLength).toBe(large.byteLength);
+    expect(new Uint8Array(received).at(-1)).toBe(255);
+    stream.socket.send(JSON.stringify({ type: "ack" }));
+    yield* Queue.offer(output, {
+      _tag: "frame",
+      data: new Uint8Array(8 * 1024 * 1024),
+      ack: Effect.void,
+    });
+    expect(yield* Effect.promise(() => stream.closed)).toBe(1006);
+  }).pipe(Effect.scoped),
+);

@@ -193,6 +193,22 @@ export const PreviewStreamHostSetup = Schema.Struct({
 export type PreviewStreamHostSetup = typeof PreviewStreamHostSetup.Type;
 export const PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE = 4503;
 
+export const PREVIEW_STREAM_VERSION = 2;
+export const PreviewStreamHello = Schema.Struct({
+  type: Schema.Literal("hello"),
+  version: Schema.Literal(PREVIEW_STREAM_VERSION),
+  codec: Schema.Literal("jpeg"),
+});
+export const PreviewStreamReady = Schema.Struct({
+  type: Schema.Literal("ready"),
+  version: Schema.Literal(PREVIEW_STREAM_VERSION),
+  visible: Schema.Boolean,
+});
+export const PreviewStreamVisibility = Schema.Struct({
+  type: Schema.Literal("visibility"),
+  visible: Schema.Boolean,
+});
+
 export const PreviewSessionSnapshot = Schema.Struct({
   threadId: TrimmedNonEmptyString,
   tabId: PreviewTabId,

@@ -109,11 +109,12 @@ export async function openServerPictureInPicture(input: {
         maxWidth: 1280,
         maxHeight: 1280,
         interactive: false,
+        keepAliveWhenHidden: true,
       },
       {
         onFrame: (jpeg) => {
           refusals = 0;
-          painter.paint(jpeg);
+          return painter.paint(jpeg);
         },
         onViewport: () => undefined,
         onConnectedChange: () => undefined,

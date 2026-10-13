@@ -61,8 +61,10 @@ vi.mock("./ServerBrowserContexts.ts", () => ({
 }));
 
 function makeSession() {
+  const events = new NodeEvents.EventEmitter();
   return {
-    on: vi.fn(),
+    on: (name: string, listener: (...args: unknown[]) => void) => events.on(name, listener),
+    emit: (name: string, ...args: unknown[]) => events.emit(name, ...args),
     detach: vi.fn(async () => {}),
     send: vi.fn(async (method: string, _input?: unknown): Promise<Record<string, unknown>> => {
       if (method === "Page.getNavigationHistory") return { currentIndex: 0, entries: [{}] };
@@ -1601,6 +1603,75 @@ it.live("a desktop page that comes back reconnects without waiting for a viewer"
 
       while (desktopConnections.length < 2) yield* Effect.yieldNow;
       expect(desktopConnections).toHaveLength(2);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("a read-only viewer can pause capture and resume without changing browser ownership", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { browser, tabId } = yield* ready;
+      const viewer = yield* browser.attachViewer({ ...viewerInput(tabId, false), visible: false });
+      const session = contexts[0]!.sessions.at(-1)!;
+      expect(session.send).not.toHaveBeenCalledWith("Page.startScreencast", expect.anything());
+      const initial = yield* Queue.clear(viewer.output);
+      expect(initial.some((item) => item._tag === "frame")).toBe(false);
+      yield* viewer.input({ type: "visibility", visible: true });
+      expect(session.send).toHaveBeenCalledWith(
+        "Page.startScreencast",
+        expect.objectContaining({
+          maxFramesInFlight: 1,
+          sendLastFrame: true,
+        }),
+      );
+      const resumed = yield* Queue.clear(viewer.output);
+      expect(resumed.filter((item) => item._tag === "frame")).toHaveLength(1);
+      const controller = initial.find((item) => item._tag === "control");
+      yield* viewer.input({ type: "visibility", visible: false });
+      yield* viewer.input({ type: "text", text: "read-only" });
+      expect(session.send).not.toHaveBeenCalledWith("Input.insertText", expect.anything());
+      expect(
+        (yield* Queue.clear(viewer.output)).find((item) => item._tag === "control"),
+      ).toBeUndefined();
+      expect(controller).toMatchObject({ canOperate: false, controller: "agent" });
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("capture frames replace older queued images while retaining the viewport", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { browser, tabId } = yield* ready;
+      const viewer = yield* browser.attachViewer(viewerInput(tabId, false));
+      const session = contexts[0]!.sessions.at(-1)!;
+      session.emit("Page.screencastFrame", {
+        data: Buffer.from("old").toString("base64"),
+        sessionId: 1,
+      });
+      session.emit("Page.screencastFrame", {
+        data: Buffer.from("latest").toString("base64"),
+        sessionId: 2,
+      });
+      const queued = yield* Queue.clear(viewer.output);
+      expect(queued.find((item) => item._tag === "viewport")).toMatchObject({
+        width: 1280,
+        height: 800,
+      });
+      const frames = queued.filter((item) => item._tag === "frame");
+      expect(frames.map((item) => Buffer.from(item.data).toString())).toEqual(["latest"]);
+      const latest = frames[0]!;
+      yield* latest.ack;
+      yield* latest.ack;
+      expect(
+        session.send.mock.calls.filter(
+          ([method, input]) =>
+            method === "Page.screencastFrameAck" &&
+            typeof input === "object" &&
+            input !== null &&
+            "sessionId" in input &&
+            input.sessionId === 2,
+        ),
+      ).toHaveLength(1);
     }),
   ).pipe(Effect.provide(layer)),
 );

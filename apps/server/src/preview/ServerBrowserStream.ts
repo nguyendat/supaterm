@@ -3,9 +3,14 @@ import {
   AuthPreviewOperateScope,
   AuthOrchestrationReadScope,
   PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE,
+  PREVIEW_STREAM_VERSION,
+  PreviewStreamHello,
   PreviewStreamHostSetup,
+  PreviewStreamReady,
+  PreviewStreamVisibility,
 } from "@supacode/contracts";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
@@ -31,8 +36,10 @@ const TAB_GONE_CODE = 4404;
 
 const DEFAULT_QUALITY = 70;
 const MAX_SOCKET_BUFFER_BYTES = 8 * 1024 * 1024;
-const MAX_UNACKNOWLEDGED_FRAMES = 64;
 const textDecoder = new TextDecoder();
+const isReady = Schema.is(PreviewStreamReady);
+const isVisibility = Schema.is(PreviewStreamVisibility);
+const encodeHello = Schema.encodeSync(Schema.fromJsonString(PreviewStreamHello));
 
 const intParam = (params: URLSearchParams, name: string, fallback: number, max: number) => {
   const value = Number(params.get(name));
@@ -63,8 +70,9 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
         ? yield* receiveUpload(browser, url.value.searchParams)
         : HttpServerResponse.text("Method Not Allowed", { status: 405 });
     }
+    const versioned = url.value.pathname === `${PREVIEW_STREAM_ROUTE_PREFIX}/ws/v2`;
     if (
-      url.value.pathname !== `${PREVIEW_STREAM_ROUTE_PREFIX}/ws` ||
+      (!versioned && url.value.pathname !== `${PREVIEW_STREAM_ROUTE_PREFIX}/ws`) ||
       request.headers.upgrade?.toLowerCase() !== "websocket"
     ) {
       return HttpServerResponse.text("Not Found", { status: 404 });
@@ -88,6 +96,7 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
             maxWidth: intParam(params, "maxWidth", 1280, 7680),
             maxHeight: intParam(params, "maxHeight", 800, 4320),
             quality: intParam(params, "quality", DEFAULT_QUALITY, 100),
+            ...(versioned ? { visible: false } : {}),
           })
           .pipe(
             Effect.map((viewer) => ({ _tag: "attached" as const, viewer })),
@@ -124,9 +133,15 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
           return HttpServerResponse.empty();
         }
         const viewer = attached.viewer;
-        // `write` returns once the frame is queued, so Chromium's ack for each
-        // frame waits for the viewer's `ack` message instead.
-        const unacknowledged: Array<Effect.Effect<void>> = [];
+        const ready = yield* Deferred.make<void>();
+        const credits = yield* Queue.make<void>({ capacity: 1, strategy: "dropping" });
+        const frames = yield* Queue.make<
+          Extract<ServerBrowser.ServerBrowserViewerOutput, { _tag: "frame" }>
+        >({ capacity: 1, strategy: "dropping" });
+        let unacknowledged: Effect.Effect<void> | undefined;
+        let visible = !versioned;
+        if (!versioned) yield* Deferred.succeed(ready, undefined);
+        yield* Queue.offer(credits, undefined);
         const disconnectSlowViewer = Effect.sync(() => transport.destroy()).pipe(
           Effect.andThen(Effect.interrupt),
         );
@@ -139,16 +154,22 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
             }
             return writer.write(data);
           });
-        const sendOutput = Queue.take(viewer.output).pipe(
+        if (versioned) {
+          yield* write(
+            encodeHello({ type: "hello", version: PREVIEW_STREAM_VERSION, codec: "jpeg" }),
+          );
+        }
+        const sendOutput = Deferred.await(ready).pipe(
+          Effect.andThen(Queue.take(viewer.output)),
           Effect.flatMap((output) => {
             switch (output._tag) {
               case "frame":
-                if (unacknowledged.length >= MAX_UNACKNOWLEDGED_FRAMES) {
-                  return disconnectSlowViewer;
-                }
-                return write(output.data).pipe(
-                  Effect.andThen(Effect.sync(() => unacknowledged.push(output.ack))),
-                );
+                return Effect.gen(function* () {
+                  const dropped = yield* Queue.clear(frames);
+                  for (const item of dropped) yield* item.ack.pipe(Effect.forkScoped);
+                  if (!visible) yield* output.ack.pipe(Effect.forkScoped);
+                  else yield* Queue.offer(frames, output);
+                });
               case "viewport":
               case "control":
               case "clipboard":
@@ -170,21 +191,58 @@ const makeHandler = (browser: ServerBrowser.ServerBrowser["Service"]) =>
             }
           }),
         );
+        const sendFrames = Effect.gen(function* () {
+          yield* Deferred.await(ready);
+          yield* Queue.take(credits);
+          const frame = yield* Queue.take(frames);
+          unacknowledged = frame.ack;
+          yield* write(frame.data);
+        });
         const receive = (chunk: Uint8Array | string) => {
           const message = parseMessage(chunk);
+          if (versioned && (isReady(message) || isVisibility(message))) {
+            if (!isReady(message) && !Deferred.isDoneUnsafe(ready)) return Effect.void;
+            visible = message.visible;
+            return Effect.gen(function* () {
+              yield* viewer.input({ type: "visibility", visible });
+              if (!visible) {
+                const dropped = yield* Queue.clear(frames);
+                for (const frame of dropped) yield* frame.ack.pipe(Effect.forkScoped);
+              }
+              if (isReady(message)) yield* Deferred.succeed(ready, undefined);
+            });
+          }
           // Ownership serializes actions in the service. Keep reading so dialog
           // replies and takeover can unblock an action already waiting on the page.
           if (!isAck(message))
             return canOperate
               ? viewer.input(message).pipe(Effect.forkScoped, Effect.asVoid)
               : Effect.void;
-          const ack = unacknowledged.shift();
-          // Forked: Chromium acks are paced and must not hold up input.
-          return ack ? Effect.forkScoped(ack).pipe(Effect.asVoid) : Effect.void;
+          const ack = unacknowledged;
+          if (!ack) return Effect.void;
+          unacknowledged = undefined;
+          return ack.pipe(
+            Effect.forkScoped,
+            Effect.andThen(Queue.offer(credits, undefined)),
+            Effect.asVoid,
+          );
         };
         const receiveInput = reader.pull.pipe(
           Effect.flatMap((chunks) => Effect.forEach(chunks, receive, { discard: true })),
         );
+        yield* Effect.forever(sendFrames).pipe(Effect.forkScoped);
+        if (versioned) {
+          yield* Deferred.await(ready).pipe(
+            Effect.timeoutOrElse({
+              duration: "5 seconds",
+              orElse: () =>
+                writer
+                  .write(new Socket.CloseEvent(1002, "stream readiness required"))
+                  .pipe(Effect.andThen(Effect.interrupt)),
+            }),
+            Effect.forkScoped,
+          );
+        }
         return yield* Effect.raceFirst(Effect.forever(sendOutput), Effect.forever(receiveInput));
       }),
     ).pipe(

@@ -179,6 +179,7 @@ export function start(configuration: PreviewStreamConfiguration) {
         maxWidth: cap.width,
         maxHeight: cap.height,
         interactive,
+        keepAliveWhenHidden: !interactive,
       },
       {
         onFrame: (jpeg) => painter.paint(jpeg),

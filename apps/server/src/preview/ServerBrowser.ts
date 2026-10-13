@@ -84,8 +84,7 @@ import { BrowserControlInterrupted, SessionControl } from "./SessionControl.ts";
 
 const SERVER_HOST_CLIENT_ID = SERVER_BROWSER_AUTOMATION_CLIENT_ID;
 const RENDER_SCALE = 2;
-// Chromium allows three unacked frames, so 100 ms pacing caps viewers near 30 fps.
-const SCREENCAST_ACK_PACE_MS = 100;
+const SCREENCAST_ACK_PACE_MS = 1000 / 30;
 const SCREENCAST_SETTLE_MS = 200;
 // Only scrolling triggers reduced-quality motion frames; animations stay sharp.
 const SCREENCAST_MOTION_FRAMES = 4;
@@ -217,6 +216,7 @@ export class ServerBrowser extends Context.Service<
       readonly maxHeight: number;
       readonly quality: number;
       readonly canOperate: boolean;
+      readonly visible?: boolean;
     }) => Effect.Effect<
       ServerBrowserViewer,
       ServerBrowserTabNotFoundError | ServerBrowserLaunchError,
@@ -2189,7 +2189,8 @@ const make = Effect.gen(function* () {
           ),
       );
       const quality = Math.min(100, Math.max(1, Math.round(input.quality)));
-      // Chromium may drop the final frame during a burst; send a still when it settles.
+      let visible = input.visible !== false;
+      let disposed = false;
       let framesInFlight = 0;
       let mayHaveDropped = false;
       let motion = false;
@@ -2200,16 +2201,17 @@ const make = Effect.gen(function* () {
         screencastScale = scale;
         screencastParams = screencastParams.then(async () => {
           // A scaled capture is rendering; its resume starts the stream.
-          if (tab.capturing > 0) return;
+          if (tab.capturing > 0 || !visible || disposed) return;
           await session.send("Page.stopScreencast").catch(constVoid);
-          await session
-            .send("Page.startScreencast", {
-              format: "jpeg",
-              quality: screencastScale < 1 ? Math.min(quality, SCREENCAST_MOTION_QUALITY) : quality,
-              maxWidth: Math.max(1, Math.round(input.maxWidth * screencastScale)),
-              maxHeight: Math.max(1, Math.round(input.maxHeight * screencastScale)),
-            })
-            .catch(constVoid);
+          const parameters = {
+            format: "jpeg" as const,
+            quality: screencastScale < 1 ? Math.min(quality, SCREENCAST_MOTION_QUALITY) : quality,
+            maxWidth: Math.max(1, Math.round(input.maxWidth * screencastScale)),
+            maxHeight: Math.max(1, Math.round(input.maxHeight * screencastScale)),
+            maxFramesInFlight: 1,
+            sendLastFrame: true,
+          };
+          await session.send("Page.startScreencast", parameters).catch(constVoid);
         });
         return screencastParams;
       };
@@ -2219,7 +2221,21 @@ const make = Effect.gen(function* () {
         pressedKeys: new Map(),
         pressedButtons: new Map(),
         push: (next) => {
-          // Dropped frames must still release Chromium.
+          if (next._tag === "frame") {
+            if (!visible || disposed) {
+              runFork(next.ack);
+              return;
+            }
+            const queued = Effect.runSyncExit(Queue.clear(output));
+            if (queued._tag === "Failure") {
+              runFork(next.ack);
+              return;
+            }
+            for (const item of queued.value) {
+              if (item._tag === "frame") runFork(item.ack);
+              else Queue.offerUnsafe(output, item);
+            }
+          }
           if (Queue.offerUnsafe(output, next)) return;
           if (next._tag === "frame") runFork(next.ack);
           // State a stalled viewer cannot miss replaces its backlog. It runs
@@ -2252,6 +2268,7 @@ const make = Effect.gen(function* () {
         }),
         () =>
           Effect.promise(async () => {
+            disposed = true;
             await tab.control.disconnect(viewer.id, () => releaseViewerInput(viewer, session));
             tab.viewers.delete(viewer);
             broadcastControl(tab);
@@ -2263,13 +2280,19 @@ const make = Effect.gen(function* () {
       }
       broadcastControl(tab);
       pushFileChooser(tab);
-      // Full scale: a scaled capture would flash in every other viewer.
       const pushStill = async () => {
-        const data = await withCaptureLock(tab, () =>
+        if (!visible || disposed) return;
+        const viewport = tab.page.viewportSize() ?? UNATTACHED_FILL_VIEWPORT;
+        const scale = Math.min(
+          1,
+          input.maxWidth / (viewport.width * RENDER_SCALE),
+          input.maxHeight / (viewport.height * RENDER_SCALE),
+        );
+        const data = await withScreencastsPaused(tab, () =>
           ServerBrowserPage.captureViewport(tab.page, session, {
             format: "jpeg",
             quality,
-            scale: 1,
+            scale,
           }),
         ).catch(() => null);
         if (data)
@@ -2305,40 +2328,62 @@ const make = Effect.gen(function* () {
         if (settleTimer !== null) clearTimeout(settleTimer);
         settleTimer = setTimeout(() => {
           settleTimer = null;
-          if (!motion && !mayHaveDropped) return;
+          if ((!motion && !mayHaveDropped) || !visible || disposed) return;
           mayHaveDropped = false;
-          if (motion) {
-            motion = false;
-            recentFrames.length = 0;
-            void startScreencast(1);
-          }
+          motion = false;
+          recentFrames.length = 0;
+          void startScreencast(1);
           void pushStill();
         }, SCREENCAST_SETTLE_MS);
+        let acknowledged = false;
         viewer.push({
           _tag: "frame",
           data: Buffer.from(frame.data, "base64"),
-          ack: Effect.promise(() =>
-            sleepUntil(arrivedAt + SCREENCAST_ACK_PACE_MS).then(() => {
-              framesInFlight -= 1;
-              return session
-                .send("Page.screencastFrameAck", { sessionId: frame.sessionId })
-                .catch(constVoid);
-            }),
-          ),
+          ack: Effect.promise(async () => {
+            if (acknowledged) return;
+            acknowledged = true;
+            await sleepUntil(arrivedAt + SCREENCAST_ACK_PACE_MS);
+            framesInFlight -= 1;
+            await session
+              .send("Page.screencastFrameAck", { sessionId: frame.sessionId })
+              .catch(constVoid);
+          }),
         });
       });
       broadcastViewport(tab);
       yield* Effect.promise(() => startScreencast(1));
       // An idle page does not repaint for a new screencast, so the viewer
       // starts from a still unless a live frame beat it.
-      if (!screencastStarted) yield* Effect.promise(pushStill);
+      if (visible && !screencastStarted) yield* Effect.promise(pushStill);
       return {
         output,
         input: (raw: unknown) =>
           Effect.promise(async () => {
-            if (!viewer.canOperate) return;
             const message = asRecord(raw);
             if (!message) return;
+            if (message.type === "visibility" && typeof message.visible === "boolean") {
+              if (visible === message.visible || disposed) return;
+              visible = message.visible;
+              if (settleTimer !== null) clearTimeout(settleTimer);
+              settleTimer = null;
+              motion = false;
+              recentFrames.length = 0;
+              if (visible) {
+                await startScreencast(1);
+                await pushStill();
+              } else {
+                await viewer.pause();
+                const queued = Effect.runSyncExit(Queue.clear(output));
+                if (queued._tag === "Success") {
+                  for (const item of queued.value) {
+                    if (item._tag === "frame") runFork(item.ack);
+                    else Queue.offerUnsafe(output, item);
+                  }
+                }
+              }
+              return;
+            }
+            if (!viewer.canOperate) return;
             try {
               if (message.type === "takeControl") {
                 const taking = tab.control.take(viewer.id);

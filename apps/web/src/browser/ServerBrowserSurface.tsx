@@ -420,7 +420,7 @@ export function ServerBrowserSurface(props: {
       {
         onFrame: (jpeg) => {
           unauthorizedRef.current = 0;
-          painter.paint(jpeg);
+          return painter.paint(jpeg);
         },
         onProbe: (result) => {
           if (controlRef.current?.controller !== "you") return;
