@@ -124,6 +124,7 @@ const SEMU_MAGIC = 0x53454d55;
 const SEMU_HEADER_BYTES = 16;
 const SEMU_FLAG_KEY = 1;
 const MAX_DECODE_QUEUE = 4;
+const MAX_IN_FLIGHT_FRAMES = 16 + MAX_DECODE_QUEUE;
 
 // serve-sim binary WS message tags (browser -> helper).
 const IOS_MSG_TOUCH = 0x03;
@@ -625,7 +626,7 @@ export function createDeviceStreamClient(
     if (awaitingKeyframe && !isKey) return;
     if (
       videoDecoder.decodeQueueSize >= MAX_DECODE_QUEUE ||
-      submittedFrames.size >= MAX_DECODE_QUEUE ||
+      submittedFrames.size >= MAX_IN_FLIGHT_FRAMES ||
       submittedBytes + data.byteLength > DEVICE_MEDIA_MAX_PACKET_BYTES
     ) {
       if (mediaTransport || platform !== "ios") {
@@ -839,7 +840,7 @@ export function createDeviceStreamClient(
                 .catch(() => {});
               break;
             case "description": {
-              awaitingKeyframe = true;
+              closeDecoder();
               const configured = await configureDecoder(
                 { codec: avcCodecString(chunk.payload), description: chunk.payload },
                 isCurrent,

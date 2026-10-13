@@ -588,6 +588,73 @@ describe("negotiated iOS media decoding", () => {
     vi.unstubAllGlobals();
   });
 
+  it.each([
+    ["ios", false],
+    ["ios", true],
+    ["android", false],
+  ] as const)(
+    "allows sixteen frames of native output delay for %s with mediaV1=%s",
+    async (platform, mediaV1) => {
+      const { client, sockets, videoBodies, sps, decoders, decodedFrame, events, drawImage } =
+        recoveryFixture(platform, false, mediaV1);
+      client.start();
+      if (platform === "android") sockets[0]!.onmessage?.({ data: sps });
+      else if (mediaV1) {
+        sockets[0]!.onmessage?.({ data: mediaHello });
+        sockets[0]!.onmessage?.({ data: mediaPacket(1, 1) });
+      } else {
+        await vi.advanceTimersByTimeAsync(0);
+        videoBodies[0]!.enqueue(new Uint8Array(envelope(1, [1, 0x64, 0, 0x1f])));
+      }
+      await vi.advanceTimersByTimeAsync(0);
+      const decoder = decoders[0]!;
+      if (platform === "android") {
+        decodedFrame();
+        decoder.decode.mockClear();
+        drawImage.mockClear();
+      }
+      const delayed: EncodedVideoChunk[] = [];
+      const closed: ReturnType<typeof vi.fn>[] = [];
+      decoder.decode.mockImplementation((chunk: EncodedVideoChunk) => {
+        delayed.push(chunk);
+        if (delayed.length <= 16) return;
+        const frame = delayed.shift()!;
+        const close = vi.fn();
+        closed.push(close);
+        decoder.callbacks.output({
+          timestamp: frame.timestamp,
+          displayWidth: 400,
+          displayHeight: 800,
+          close,
+        } as unknown as VideoFrame);
+      });
+      for (let index = 0; index < 48; index++) {
+        if (platform === "android")
+          sockets[0]!.onmessage?.({
+            data: Uint8Array.of(0, 0, 1, index === 0 ? 0x65 : 0x41, index).buffer,
+          });
+        else if (mediaV1)
+          sockets[0]!.onmessage?.({ data: mediaPacket(index + 2, index === 0 ? 2 : 3) });
+        else videoBodies[0]!.enqueue(new Uint8Array(envelope(index === 0 ? 2 : 3, [index])));
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      expect(decoder.decodeQueueSize).toBe(0);
+      expect(decoder.decode).toHaveBeenCalledTimes(48);
+      expect(drawImage).toHaveBeenCalledTimes(32);
+      expect(delayed).toHaveLength(16);
+      expect(closed.every((close) => close.mock.calls.length === 1)).toBe(true);
+      expect(decoders).toHaveLength(1);
+      expect(decoder.state).toBe("configured");
+      expect(events.onStatus).toHaveBeenLastCalledWith("streaming", undefined);
+      expect(
+        events.onStatus.mock.calls.some(([, detail]) => detail === "Video decoder restarted."),
+      ).toBe(false);
+      expect(events.onMjpegFallback).not.toHaveBeenCalled();
+      client.stop();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
   it("reopens a media socket that stalls after its JPEG seed without disconnecting input", async () => {
     const { client, sockets, events, decoders, decodedFrame } = recoveryFixture("ios", false, true);
     const close = vi.fn();
@@ -667,21 +734,21 @@ describe("negotiated iOS media decoding", () => {
     socket.onmessage?.({ data: mediaHello });
     socket.onmessage?.({ data: mediaPacket(1, 1) });
     await vi.advanceTimersByTimeAsync(0);
-    for (let sequence = 2; sequence <= 6; sequence++) {
+    for (let sequence = 2; sequence <= 22; sequence++) {
       socket.onmessage?.({ data: mediaPacket(sequence, sequence === 2 ? 2 : 3) });
       await vi.advanceTimersByTimeAsync(0);
     }
-    expect(decoders[0]!.decode).toHaveBeenCalledTimes(4);
+    expect(decoders[0]!.decode).toHaveBeenCalledTimes(20);
     expect(decoders[0]!.state).toBe("closed");
     expect(
       socket.send.mock.calls.slice(-2).map(([message]) => JSON.parse(message as string)),
-    ).toEqual([{ type: "recover" }, { type: "ack", accountedThrough: 6 }]);
+    ).toEqual([{ type: "recover" }, { type: "ack", accountedThrough: 22 }]);
     expect(decodedFrame(0)).toHaveBeenCalledOnce();
     expect(drawImage).not.toHaveBeenCalled();
-    socket.onmessage?.({ data: mediaPacket(7, 3) });
-    socket.onmessage?.({ data: mediaPacket(8, 1, 2) });
-    socket.onmessage?.({ data: mediaPacket(9, 3, 2) });
-    socket.onmessage?.({ data: mediaPacket(10, 2, 2) });
+    socket.onmessage?.({ data: mediaPacket(23, 3) });
+    socket.onmessage?.({ data: mediaPacket(24, 1, 2) });
+    socket.onmessage?.({ data: mediaPacket(25, 3, 2) });
+    socket.onmessage?.({ data: mediaPacket(26, 2, 2) });
     await vi.advanceTimersByTimeAsync(0);
     expect(decoders[1]!.decode).toHaveBeenCalledOnce();
     decodedFrame();
@@ -974,6 +1041,57 @@ describe("shared device stream readiness and recovery", () => {
     expect(events.onMjpegFallback).not.toHaveBeenCalled();
     expect(events.onStatus).toHaveBeenLastCalledWith("streaming", undefined);
     expect(events.onInputConnected).toHaveBeenLastCalledWith(true);
+    client.stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("releases old AVCC decoder accounting and discards late output across codec descriptions", async () => {
+    const { client, videoBodies, decoders, drawImage, events } = recoveryFixture("ios", false);
+    client.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const body = videoBodies[0]!;
+    body.enqueue(new Uint8Array(envelope(1, [1, 0x64, 0, 0x1f])));
+    await vi.advanceTimersByTimeAsync(0);
+    for (let index = 0; index < 8; index++)
+      body.enqueue(new Uint8Array(envelope(index === 0 ? 2 : 3, [index])));
+    await vi.advanceTimersByTimeAsync(0);
+    const previous = decoders[0]!;
+    expect(previous.decode).toHaveBeenCalledTimes(8);
+    body.enqueue(new Uint8Array(envelope(1, [1, 0x64, 0, 0x33])));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(previous.state).toBe("closed");
+    const current = decoders[1]!;
+    const delayed: EncodedVideoChunk[] = [];
+    current.decode.mockImplementation((chunk: EncodedVideoChunk) => {
+      delayed.push(chunk);
+      if (delayed.length <= 16) return;
+      const source = delayed.shift()!;
+      current.callbacks.output({
+        timestamp: source.timestamp,
+        displayWidth: 400,
+        displayHeight: 800,
+        close: vi.fn(),
+      } as unknown as VideoFrame);
+    });
+    for (let index = 0; index < 24; index++)
+      body.enqueue(new Uint8Array(envelope(index === 0 ? 2 : 3, [index])));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(current.decode).toHaveBeenCalledTimes(24);
+    expect(drawImage).toHaveBeenCalledTimes(8);
+    expect(current.state).toBe("configured");
+    const oldTimestamp = (previous.decode.mock.calls[0]![0] as EncodedVideoChunk).timestamp;
+    const close = vi.fn();
+    previous.callbacks.output({
+      timestamp: oldTimestamp,
+      displayWidth: 400,
+      displayHeight: 800,
+      close,
+    } as unknown as VideoFrame);
+    expect(close).toHaveBeenCalledOnce();
+    expect(drawImage).toHaveBeenCalledTimes(8);
+    expect(events.onStatus).toHaveBeenLastCalledWith("streaming", undefined);
+    expect(videoBodies).toHaveLength(1);
+    expect(events.onMjpegFallback).not.toHaveBeenCalled();
     client.stop();
     expect(vi.getTimerCount()).toBe(0);
   });
