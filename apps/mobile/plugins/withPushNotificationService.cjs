@@ -49,9 +49,12 @@ function reconcileSources(project, target, sources) {
       project.addFile(name, group[0]);
     }
   }
-  let phase = project.pbxSourcesBuildPhaseObj(target);
-  if (!phase)
-    phase = project.addBuildPhase([], "PBXSourcesBuildPhase", "Sources", target).buildPhase;
+  const sourcePhase = objects.PBXNativeTarget[target].buildPhases.find(
+    (reference) => objects.PBXSourcesBuildPhase?.[reference.value],
+  );
+  const phase = sourcePhase
+    ? objects.PBXSourcesBuildPhase[sourcePhase.value]
+    : project.addBuildPhase([], "PBXSourcesBuildPhase", "Sources", target).buildPhase;
   const references = new Map(
     group[1].children.map((child) => [
       objects.PBXFileReference[child.value]?.path?.replaceAll('"', ""),
