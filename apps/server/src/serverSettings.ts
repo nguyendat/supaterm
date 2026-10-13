@@ -210,6 +210,10 @@ export class ServerSettingsService extends Context.Service<
       patch: ServerSettingsPatch,
     ) => Effect.Effect<ServerSettings, ServerSettingsError>;
 
+    readonly modifySettings: <E, R>(
+      modify: (current: ServerSettings) => Effect.Effect<ServerSettingsPatch, E, R>,
+    ) => Effect.Effect<ServerSettings, E | ServerSettingsError, R>;
+
     /** Apply a patch and one provider-instance mutation against the same latest settings snapshot. */
     readonly updateProviderInstance: (
       mutation: ProviderInstanceMutation,
@@ -254,9 +258,9 @@ const makeTest = (overrides: DeepPartial<ServerSettings> = {}) =>
     const writeSemaphore = yield* Semaphore.make(1);
     const getSettings = Ref.get(currentSettingsRef).pipe(Effect.map(resolveTextGenerationProvider));
 
-    const updateTestSettings = (
-      update: (current: ServerSettings) => Effect.Effect<ServerSettings, ServerSettingsError>,
-    ): Effect.Effect<ServerSettings, ServerSettingsError> =>
+    const updateTestSettings = <E, R>(
+      update: (current: ServerSettings) => Effect.Effect<ServerSettings, E, R>,
+    ): Effect.Effect<ServerSettings, E | ServerSettingsError, R> =>
       writeSemaphore.withPermits(1)(
         Ref.get(currentSettingsRef).pipe(
           Effect.flatMap(update),
@@ -273,6 +277,10 @@ const makeTest = (overrides: DeepPartial<ServerSettings> = {}) =>
       updateSettings: (patch) =>
         updateTestSettings((currentSettings) =>
           Effect.succeed(applyServerSettingsPatch(currentSettings, patch)),
+        ),
+      modifySettings: (modify) =>
+        updateTestSettings((current) =>
+          modify(current).pipe(Effect.map((patch) => applyServerSettingsPatch(current, patch))),
         ),
       updateProviderInstance: (mutation, patch = {}) =>
         updateTestSettings((currentSettings) =>
@@ -1093,9 +1101,9 @@ const make = Effect.gen(function* () {
     );
   };
 
-  const updateAndPersistSettings = (
-    update: (current: ServerSettings) => Effect.Effect<ServerSettings, ServerSettingsError>,
-  ): Effect.Effect<ServerSettings, ServerSettingsError> =>
+  const updateAndPersistSettings = <E, R>(
+    update: (current: ServerSettings) => Effect.Effect<ServerSettings, E, R>,
+  ): Effect.Effect<ServerSettings, E | ServerSettingsError, R> =>
     writeSemaphore.withPermits(1)(
       Effect.gen(function* () {
         const current = yield* getSettingsFromCache;
@@ -1249,6 +1257,10 @@ const make = Effect.gen(function* () {
     updateSettings: (patch) =>
       updateAndPersistSettings((current) =>
         Effect.succeed(applyServerSettingsPatch(current, patch)),
+      ),
+    modifySettings: (modify) =>
+      updateAndPersistSettings((current) =>
+        modify(current).pipe(Effect.map((patch) => applyServerSettingsPatch(current, patch))),
       ),
     updateProviderInstance: (mutation, patch = {}) =>
       updateAndPersistSettings((current) =>

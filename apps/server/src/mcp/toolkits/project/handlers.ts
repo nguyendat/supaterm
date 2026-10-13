@@ -1,4 +1,5 @@
 import { MessageId, ThreadId, OrchestratorMcpFailure, ProjectId } from "@supacode/contracts";
+import * as ProjectScriptImport from "../../../project/ProjectScriptImportService.ts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -256,6 +257,23 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
       return yield* projects
         .update({ ...input, commandId: yield* newCommandId() })
         .pipe(Effect.mapError(projectFailure));
+    }),
+  ),
+  supacode_project_import_scripts: McpToolAccess.writesEnvironment((input) =>
+    Effect.gen(function* () {
+      const context = yield* readCaller();
+      const projectId = yield* resolveProjectId(context, input.projectId);
+      const importer = yield* ProjectScriptImport.ProjectScriptImportService;
+      const scripts = yield* importer.importFromFile(projectId).pipe(
+        Effect.mapError(
+          (error) =>
+            new OrchestratorMcpFailure({
+              code: "invalid_request",
+              message: error.message,
+            }),
+        ),
+      );
+      return { scripts };
     }),
   ),
   supacode_project_delete: McpToolAccess.writesEnvironment((input) =>

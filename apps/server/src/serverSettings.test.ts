@@ -628,6 +628,38 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
+  it.effect("persists concurrent settings modifications from the latest snapshot", () =>
+    Effect.gen(function* () {
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const first = yield* service
+        .modifySettings(() =>
+          Deferred.succeed(entered, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.as({ addProjectBaseDirectory: "~/setup" }),
+          ),
+        )
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      yield* Deferred.await(entered);
+      const second = yield* service
+        .modifySettings((current) =>
+          Effect.succeed({ addProjectBaseDirectory: `${current.addProjectBaseDirectory}/next` }),
+        )
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(first);
+      yield* Fiber.join(second);
+      assert.equal((yield* service.getSettings).addProjectBaseDirectory, "~/setup/next");
+      const persisted = yield* decodeServerSettingsJson(
+        yield* fs.readFileString(config.settingsPath),
+      );
+      assert.equal(persisted.addProjectBaseDirectory, "~/setup/next");
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
   it.effect("pauses provider-instance mutations while a settings snapshot is in use", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;

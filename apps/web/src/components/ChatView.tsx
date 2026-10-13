@@ -1,3 +1,4 @@
+import { useProjectSetup } from "~/hooks/useProjectSetup";
 import {
   pendingThreadCreationMessage,
   resolvePendingThreadCreation,
@@ -4235,6 +4236,16 @@ export default function ChatView(props: ChatViewProps) {
     refresh: gitStatusQuery.refresh,
     resourceKey: `git-status:${activeThreadKey ?? ""}:${gitStatusCwd ?? ""}`,
   });
+  const projectSetup = useProjectSetup({
+    environmentId,
+    project: activeProject,
+    runtimeMode,
+    getModelSelection: useCallback(
+      () => composerRef.current?.getSendContext().selectedModelSelection,
+      [composerRef],
+    ),
+    mutationId: workspaceMutationId,
+  });
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const scriptKeybindings =
     useAtomValue(serverEnvironment.configValueAtom(environmentId))?.keybindings ??
@@ -7948,6 +7959,7 @@ export default function ChatView(props: ChatViewProps) {
         ...projectCloneItems,
         ...systemComposerBannerItems,
         ...backgroundWorkItems,
+        ...(projectSetup.banner ? [projectSetup.banner] : []),
       ];
     }
     return [
@@ -7957,6 +7969,7 @@ export default function ChatView(props: ChatViewProps) {
       ...projectCloneItems,
       ...systemComposerBannerItems,
       ...backgroundWorkItems,
+      ...(projectSetup.banner ? [projectSetup.banner] : []),
       {
         id: `branch-mismatch:${activeBranchMismatchKey}`,
         variant: "info",
@@ -8016,6 +8029,7 @@ export default function ChatView(props: ChatViewProps) {
     goalBannerItem,
     localCheckoutBranchMismatch,
     projectCloneBannerItem,
+    projectSetup.banner,
     showBranchMismatchBanner,
     systemComposerBannerItems,
     usageLimitsBanner,
@@ -10469,6 +10483,7 @@ export default function ChatView(props: ChatViewProps) {
     onComposerFocusRequest: scheduleComposerFocus,
     ...(isServerThread && isGitRepo ? { onOpenChanges: openChangesFromThreadPanel } : {}),
     onRunProjectScript: runProjectScript,
+    onSetupProjectScript: projectSetup.requestSetup,
     onAddProjectScript: saveProjectScript,
     onUpdateProjectScript: updateProjectScript,
     onDeleteProjectScript: deleteProjectScript,
@@ -11341,6 +11356,7 @@ export default function ChatView(props: ChatViewProps) {
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
+      {projectSetup.dialog}
       <LinkPullRequestDialogHost />
       {expandedImage && (
         <ExpandedImageDialog

@@ -1,12 +1,14 @@
+import { useProjectSetup } from "../../hooks/useProjectSetup";
+import { resolveDefaultProviderModelSelection } from "../../providerInstances";
 import { useScopedSettingsWriteAllowed } from "./useScopedSettings";
-import { AuthSettingsWriteScope } from "@supacode/contracts";
+import { AuthSettingsWriteScope, resolveProjectProviderInstanceEnabled } from "@supacode/contracts";
 import { EnvironmentId, type SupacodeProjectFileScript } from "@supacode/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@supacode/client-runtime/state/runtime";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@supacode/shared/keybindings";
-import { ChevronDownIcon, PlusIcon } from "lucide-react";
+import { ChevronDownIcon, PlusIcon, SparklesIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useSupacodeProjectFileState } from "../../hooks/useSupacodeProjectFileScripts";
 import { useEnvironments } from "../../state/environments";
@@ -91,6 +93,25 @@ export function ProjectActionsSettings() {
   // A project's supacode.json can declare actions to import. Read it from the
   // representative checkout; the imported action still fans out.
   const representativeMember = target?.projectId ? memberById.get(target.projectId) : undefined;
+  const setup = useProjectSetup({
+    environmentId: representativeMember?.environmentId ?? EnvironmentId.make("none"),
+    project: targets.length === 1 ? (representativeMember ?? null) : null,
+    runtimeMode: target?.settings.defaultRuntimeMode ?? "approval-required",
+    getModelSelection: () =>
+      resolveDefaultProviderModelSelection(
+        (representativeConfig?.providers ?? []).map((provider) => ({
+          ...provider,
+          enabled: representativeConfig
+            ? resolveProjectProviderInstanceEnabled(
+                representativeConfig.settings,
+                representativeMember?.id ?? null,
+                provider.instanceId,
+              )
+            : provider.enabled,
+        })),
+        target?.settings.defaultModelSelection,
+      ),
+  });
   const supacodeFile = useSupacodeProjectFileState(
     representativeMember?.environmentId ?? EnvironmentId.make("none"),
     representativeMember?.workspaceRoot ?? null,
@@ -144,6 +165,12 @@ export function ProjectActionsSettings() {
         onResetOverride={() => void persist(() => null)}
         control={
           <div className="flex flex-wrap items-center gap-1.5">
+            {setup.requestSetup ? (
+              <Button size="xs" variant="outline" onClick={setup.requestSetup}>
+                <SparklesIcon />
+                Set up project script
+              </Button>
+            ) : null}
             {importableScripts.length > 0 ? (
               <Menu>
                 <MenuTrigger
@@ -217,6 +244,7 @@ export function ProjectActionsSettings() {
           className="text-warning"
         />
       ) : null}
+      {setup.dialog}
       {target && (
         <ProjectScriptEditorDialog
           environmentId={target.environmentId}

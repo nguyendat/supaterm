@@ -72,7 +72,7 @@ project crumb.
 The Project category, shown while a project is selected, holds the project's name, icon, actions,
 checkouts and removal. Actions belong to a project: editing them creates the project's own list
 on each selected environment, and reset returns to the environment's shared list. A project's
-`supacode.json` actions can be imported there.
+`supacode.json` actions can be imported there. If the project has no `supacode.json`, choose **Set up project script** in the web or desktop app to have an agent inspect the repository and create one. Review the confirmation before starting; setup opens a separate thread in the main checkout and keeps your current draft. You can also start from the suggestion above the composer. Dismissing that suggestion leaves setup available in the project actions.
 
 Settings a repository can also declare in `supacode.json`, such as the workspace for new threads,
 resolve in one order: a project override, then the environment setting, then `supacode.json`, then the

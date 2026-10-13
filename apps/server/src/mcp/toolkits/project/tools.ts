@@ -13,6 +13,7 @@ import {
   ProjectCreatePayload,
   ProjectUpdatePayload,
   ProjectId,
+  ProjectScript,
   OrchestratorMcpFailure,
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
@@ -30,6 +31,8 @@ import * as ThreadManagementService from "../../../orchestration-v2/ThreadManage
 import * as SourceControlRepositoryService from "../../../sourceControl/SourceControlRepositoryService.ts";
 import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+
+import * as ProjectScriptImportService from "../../../project/ProjectScriptImportService.ts";
 
 const shared = {
   success: Project,
@@ -81,6 +84,14 @@ const ProjectUpdateTool = Tool.make("supacode_project_update", {
   description:
     "Update a registered project's settings. Omitted fields are preserved. Uses the same project service as the app.",
   parameters: Schema.Struct({ projectId: ProjectId, ...ProjectUpdatePayload.fields }),
+}).annotate(Tool.Destructive, true);
+const ProjectImportScriptsTool = Tool.make("supacode_project_import_scripts", {
+  ...shared,
+  description:
+    "Import scripts from the project's root supacode.json into its saved actions. Omit projectId for the calling thread's project. Preserves saved actions, skips equivalent actions, and rejects conflicting saved options or lifecycle actions. Does not execute scripts.",
+  parameters: Schema.Struct({ projectId: Schema.optionalKey(ProjectId) }),
+  success: Schema.Struct({ scripts: Schema.Array(ProjectScript) }),
+  dependencies: [...shared.dependencies, ProjectScriptImportService.ProjectScriptImportService],
 }).annotate(Tool.Destructive, true);
 const ProjectDeleteTool = Tool.make("supacode_project_delete", {
   ...shared,
@@ -157,6 +168,7 @@ export const ProjectToolkit = Toolkit.make(
   ProjectReadTool,
   ProjectCreateTool,
   ProjectUpdateTool,
+  ProjectImportScriptsTool,
   ProjectDeleteTool,
   ProjectCloneTool,
 );

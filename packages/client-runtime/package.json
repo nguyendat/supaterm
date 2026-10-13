@@ -450,6 +450,10 @@
     "./pull-request-markdown": {
       "types": "./src/pullRequestMarkdown.ts",
       "default": "./src/pullRequestMarkdown.ts"
+    },
+    "./project-setup": {
+      "types": "./src/projectSetup.ts",
+      "default": "./src/projectSetup.ts"
     }
   },
   "scripts": {

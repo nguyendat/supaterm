@@ -12,7 +12,14 @@ import {
   squashAtomCommandFailure,
 } from "@supacode/client-runtime/state/runtime";
 import { projectScriptMenuLabel } from "@supacode/shared/projectScripts";
-import { ChevronDownIcon, DownloadIcon, PlusIcon, SettingsIcon, WrenchIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  DownloadIcon,
+  PlusIcon,
+  SparklesIcon,
+  SettingsIcon,
+  WrenchIcon,
+} from "lucide-react";
 import React, { useCallback, useMemo, useState } from "react";
 
 import { commandForProjectScript, primaryProjectScript } from "~/projectScripts";
@@ -67,6 +74,7 @@ interface ProjectScriptsControlProps {
   fileScripts?: ReadonlyArray<SupacodeProjectFileScript>;
   preferredScriptId?: string | null;
   onRunScript?: ((script: ProjectScript) => void) | undefined;
+  onSetupProject?: (() => void) | undefined;
   onAddScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
   onUpdateScript: (
     scriptId: string,
@@ -84,11 +92,18 @@ export default function ProjectScriptsControl({
   fileScripts = NO_FILE_SCRIPTS,
   preferredScriptId = null,
   onRunScript,
+  onSetupProject,
   onAddScript,
   onUpdateScript,
   onDeleteScript,
 }: ProjectScriptsControlProps) {
   const isPanel = displayMode === "panel";
+  const addLabel = onSetupProject
+    ? "Set up project script"
+    : isPanel
+      ? "Add project script"
+      : "Add action";
+  const AddIcon = onSetupProject ? SparklesIcon : PlusIcon;
   const ActionGroup = isPanel ? "div" : Group;
   const panelAnchorRef = React.useRef<HTMLDivElement | null>(null);
   const keybindings =
@@ -128,6 +143,12 @@ export default function ProjectScriptsControl({
   );
 
   const openAddDialog = () => {
+    if (onSetupProject) {
+      onRequestMenuClose?.();
+      setActionsMenuOpen({ presentation, scripts: false, imports: false });
+      onSetupProject();
+      return;
+    }
     setEditorRequest({ scriptId: null, initial: EMPTY_PROJECT_SCRIPT_INPUT });
   };
 
@@ -237,8 +258,8 @@ export default function ProjectScriptsControl({
       })}
       {importMenuItems}
       <MenuItem density={presentation === "menu" ? "touch" : "default"} onClick={openAddDialog}>
-        <PlusIcon className="size-4" />
-        <MenuItemLabel>{isPanel ? "Add project script" : "Add action"}</MenuItemLabel>
+        <AddIcon className="size-4" />
+        <MenuItemLabel>{addLabel}</MenuItemLabel>
       </MenuItem>
     </>
   );
@@ -276,8 +297,10 @@ export default function ProjectScriptsControl({
               density={presentation === "menu" ? "touch" : "default"}
               onClick={openAddDialog}
             >
-              <PlusIcon className="size-4" />
-              <MenuItemLabel>Add project action…</MenuItemLabel>
+              <AddIcon className="size-4" />
+              <MenuItemLabel>
+                {onSetupProject ? "Set up project script" : "Add project action…"}
+              </MenuItemLabel>
             </MenuItem>
           )}
         </>
@@ -436,7 +459,7 @@ export default function ProjectScriptsControl({
                 part="row"
                 panel={isPanel}
                 className={isPanel ? undefined : "w-7 sm:w-6 @3xl/header-actions:w-auto!"}
-                aria-label={isPanel ? "Add project script" : "Add action"}
+                aria-label={addLabel}
                 // The tooltip wrapper replaces data-slot="button", so themed
                 // toolbar styling needs its own hook.
                 data-toolbar-control=""
@@ -444,17 +467,17 @@ export default function ProjectScriptsControl({
               />
             }
           >
-            <PlusIcon className="size-3.5" />
+            <AddIcon className="size-3.5" />
             <span
               className={cn(
                 "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5",
                 isPanel && "not-sr-only ml-0.5",
               )}
             >
-              {isPanel ? "Add project script" : "Add action"}
+              {addLabel}
             </span>
           </TooltipTrigger>
-          <TooltipPopup side="top">{isPanel ? "Add project script" : "Add action"}</TooltipPopup>
+          <TooltipPopup side="top">{addLabel}</TooltipPopup>
         </Tooltip>
       )}
 

@@ -63,6 +63,7 @@ export interface ThreadDetailsPanelProps extends Pick<
   onComposerFocusRequest: () => void;
   onOpenChanges?: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
+  onSetupProjectScript?: (() => void) | undefined;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
   onUpdateProjectScript: (
     scriptId: string,
@@ -157,6 +158,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
 
               {props.activeProjectScripts ? (
                 <ProjectScriptsControl
+                  onSetupProject={props.onSetupProjectScript}
                   environmentId={props.environmentId}
                   displayMode="panel"
                   scripts={props.activeProjectScripts}

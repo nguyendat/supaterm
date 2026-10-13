@@ -191,12 +191,14 @@ export function useProjectEntriesQuery(
   environmentId: EnvironmentId,
   cwd: string,
   directoryPath?: string,
+  enabled = true,
 ): ProjectQueryState<ProjectListEntriesResult> {
   const fileAccess = useFilesystemReadAccess(environmentId);
   const { canReadFiles } = fileAccess;
-  const atom = canReadFiles
-    ? getProjectEntriesQueryAtom(environmentId, cwd, directoryPath)
-    : EMPTY_PROJECT_ENTRIES_QUERY_ATOM;
+  const atom =
+    canReadFiles && enabled
+      ? getProjectEntriesQueryAtom(environmentId, cwd, directoryPath)
+      : EMPTY_PROJECT_ENTRIES_QUERY_ATOM;
   const result = useAtomValue(atom);
   const refreshAtom = useAtomRefresh(atom);
   const refresh = useCallback(() => refreshAtom(), [refreshAtom]);

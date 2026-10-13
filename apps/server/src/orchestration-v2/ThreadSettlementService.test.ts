@@ -643,6 +643,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
       });
 
   const serverSettings = ServerSettings.ServerSettingsService.of({
+    modifySettings: () => Effect.die("Unexpected settings mutation"),
     start: Effect.void,
     ready: Effect.void,
     getSettings: Ref.get(settings),

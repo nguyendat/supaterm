@@ -59,15 +59,21 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
 export type ClientGuardedRpcTag = keyof typeof CLIENT_GUARDED_RPC_SCOPES;
 
 const decodePrepareThread = Schema.decodeUnknownSync(GitPreparePullRequestThreadInput);
-const isQuestionTimerCommand = Schema.is(
-  Schema.Struct({ type: Schema.Literal("thread.user-input.auto-dismiss.pause") }),
+const isGuardedThreadCommand = Schema.is(
+  Schema.Struct({
+    type: Schema.Literals([
+      "thread.user-input.auto-dismiss.pause",
+      "thread.create",
+      "message.dispatch",
+    ]),
+  }),
 );
 
 export function clientRpcRequiredScopes(
   method: string,
   input: unknown,
 ): readonly AuthEnvironmentScope[] {
-  if (method === ORCHESTRATION_V2_WS_METHODS.dispatchCommand && isQuestionTimerCommand(input))
+  if (method === ORCHESTRATION_V2_WS_METHODS.dispatchCommand && isGuardedThreadCommand(input))
     return [AuthOrchestrationOperateScope];
   if (method === WS_METHODS.gitPreparePullRequestThread && input !== undefined) {
     const payload = decodePrepareThread(input);

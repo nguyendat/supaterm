@@ -131,6 +131,31 @@ describe("command permissions", () => {
       }),
     ),
   );
+  it.effect.each(["thread.create", "message.dispatch"])(
+    "requires the destination grant for %s",
+    (type) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* setup;
+          const permissions = createCommandPermissions(
+            runtime,
+            ORCHESTRATION_V2_WS_METHODS.dispatchCommand,
+          );
+          registry.set(sessions(env), AsyncResult.success(grant(false)));
+          expect(registry.get(permissions.permissionAtom(env, { type }))).toBe(false);
+          expect(
+            (yield* permissions.authorize(registry, env, { type }).pipe(Effect.flip))._tag,
+          ).toBe("EnvironmentAuthorizationError");
+          registry.set(sessions(env), AsyncResult.success(grant(true)));
+          expect(registry.get(permissions.permissionAtom(env, { type }))).toBe(true);
+          yield* permissions.authorize(registry, env, { type });
+          registry.set(sessions(other), AsyncResult.success(grant(false)));
+          expect(
+            (yield* permissions.authorize(registry, other, { type }).pipe(Effect.flip))._tag,
+          ).toBe("EnvironmentAuthorizationError");
+        }),
+      ),
+  );
   it.effect("requires the destination settings grant to run storage cleanup", () =>
     Effect.scoped(
       Effect.gen(function* () {

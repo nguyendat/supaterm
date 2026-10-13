@@ -2258,6 +2258,7 @@ it.layer(
         cause: settingsCause,
       });
       const serverSettings = ServerSettings.ServerSettingsService.of({
+        modifySettings: () => Effect.die("Unexpected settings mutation"),
         start: Effect.void,
         ready: Effect.void,
         getSettings: Effect.fail(settingsError),
