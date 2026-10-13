@@ -111,8 +111,21 @@ its generation to fence delayed requests from the previous session. Device
 revocation also reaches the gateway directly, while local intent is reconciled
 with the host on reconnect.
 
-The first release carries a fixed generic alert and opaque identifiers. APNs and
-the gateway see delivery metadata, but no conversation content. A notification
-is a hint: the app resolves it against the host and waits for authoritative state
-before navigating. Preview encryption needs a separate key lifecycle and a native
-notification extension; tunnel keys must never be reused for it.
+Alerts carry opaque identifiers and a fixed generic fallback. Optional previews
+use a separate per-environment, per-device X25519 key held in shared Keychain
+access for the app and Notification Service Extension. The host encrypts with
+RFC 9180 HPKE using HKDF-SHA256 and ChaCha20-Poly1305, then signs the envelope
+with its durable push identity. The extension trusts that signing key only after
+receiving it through the authenticated host connection. Recipient, registration
+generation, key epoch, notification ID and expiry are authenticated together.
+Relay tunnel keys never participate in notification encryption.
+
+The host persists each device's opaque payload before attempting delivery, so
+retries retain the same ciphertext and gateway receipt identity. The extension
+checks the active device binding and a bounded replay ledger before showing a
+preview. Keys are unavailable after reboot until first unlock; missing keys,
+invalid envelopes, expiry and extension failures retain the generic alert.
+
+APNs and the gateway see delivery metadata, but no preview plaintext. A
+notification is a hint: the app resolves it against the host and waits for
+authoritative state before navigating.

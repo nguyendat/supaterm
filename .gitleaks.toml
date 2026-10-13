@@ -1,0 +1,11 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Public HPKE interoperability vector constants"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^apps/mobile/modules/supacode-push-preview/Tests/PushPreviewCoreTests/vectors\.json$''']
+regexes = [
+  '''^(iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w|8057991eef8f1f1af18f4a9491d16a1ce333f695d4db8e38da75975c4478e0fb)$''',
+]

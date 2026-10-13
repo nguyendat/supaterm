@@ -4,6 +4,8 @@ import {
   PushNotificationError,
   PushPreferences,
   type PushNotificationKind,
+  PushDeliveryPayload,
+  PushPreviewContent,
 } from "@supacode/contracts/push";
 import {
   eventChangesNotificationAttention,
@@ -19,8 +21,12 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import { pushPreviewContent } from "./pushPreviewContent.ts";
 
 const decodePreferences = Schema.decodeUnknownSync(Schema.fromJsonString(PushPreferences));
+const decodePayload = Schema.decodeUnknownSync(Schema.fromJsonString(PushDeliveryPayload));
+const encodePayload = Schema.encodeEffect(Schema.fromJsonString(PushDeliveryPayload));
+const encodeContent = Schema.encodeEffect(Schema.fromJsonString(PushPreviewContent));
 
 export interface PendingPushDelivery {
   readonly notification_id: string;
@@ -34,6 +40,10 @@ export interface PendingPushDelivery {
   readonly created_at: number;
   readonly expires_at: number;
   readonly gateway_url: string;
+  readonly preview_json: string | null;
+  readonly preview_key_json: string | null;
+  readonly preferences_json: string;
+  readonly payload_json: string | null;
 }
 
 export class PushOutbox extends Context.Service<
@@ -53,6 +63,10 @@ export class PushOutbox extends Context.Service<
       delivery: PendingPushDelivery,
       status: "accepted" | "failed" | "cancelled" | "retry",
     ) => Effect.Effect<void, PushNotificationError>;
+    readonly prepare: (
+      delivery: PendingPushDelivery,
+      payload: PushDeliveryPayload,
+    ) => Effect.Effect<string | null, PushNotificationError>;
   }
 >()("supacode/notifications/PushOutbox") {}
 
@@ -104,9 +118,13 @@ const make = Effect.gen(function* () {
       });
       if (eligible.length === 0) continue;
       const id = yield* crypto.randomUUIDv4;
+      const previewJson =
+        thread !== null && eligible.some((row) => decodePreferences(row.preferences_json).previews)
+          ? yield* encodeContent(pushPreviewContent(thread, attention.kind))
+          : null;
       const inserted = yield* sql<{ notification_id: string }>`
-        INSERT INTO push_notifications(notification_id, thread_id, attention_key, kind, event_sequence, created_at, expires_at)
-        VALUES (${id}, ${threadId}, ${attention.key}, ${attention.kind}, ${sequence}, ${now}, ${now + 86_400_000})
+        INSERT INTO push_notifications(notification_id, thread_id, attention_key, kind, event_sequence, created_at, expires_at, preview_json)
+        VALUES (${id}, ${threadId}, ${attention.key}, ${attention.kind}, ${sequence}, ${now}, ${now + 86_400_000}, ${previewJson})
         ON CONFLICT(thread_id, attention_key) DO NOTHING RETURNING notification_id
       `;
       if (inserted.length === 0) continue;
@@ -144,7 +162,8 @@ const make = Effect.gen(function* () {
         if (row === undefined) return null;
         const deliveries = yield* sql<PendingPushDelivery>`
       SELECT d.notification_id, d.recipient_id, d.generation, d.attempts,
-             n.thread_id, n.attention_key, n.kind, n.event_sequence, n.created_at, n.expires_at, r.gateway_url
+             n.thread_id, n.attention_key, n.kind, n.event_sequence, n.created_at, n.expires_at, r.gateway_url,
+             n.preview_json, r.preview_key_json, r.preferences_json, d.payload_json
       FROM push_deliveries d JOIN push_notifications n ON n.notification_id = d.notification_id
       JOIN push_registrations r ON r.recipient_id = d.recipient_id
       WHERE d.notification_id = ${row.notification_id} AND d.recipient_id = ${row.recipient_id} AND d.generation = ${row.generation}
@@ -172,6 +191,12 @@ const make = Effect.gen(function* () {
     if (row === undefined) return false;
     const preferences = decodePreferences(row.preferences_json);
     if (!preferences.enabled || !preferences[delivery.kind]) return false;
+    if (
+      delivery.payload_json !== null &&
+      !preferences.previews &&
+      decodePayload(delivery.payload_json).preview !== undefined
+    )
+      return false;
     if (
       row.foreground_until > now &&
       row.foreground_thread_id === delivery.thread_id &&
@@ -203,12 +228,26 @@ const make = Effect.gen(function* () {
     }>`SELECT MIN(CASE WHEN status = 'running' THEN lease_until ELSE available_at END) AS next FROM push_deliveries WHERE status IN ('pending', 'running')`;
     return Math.max(1, Math.min(30_000, (rows[0]?.next ?? now + 30_000) - now));
   }).pipe(Effect.mapError(storageError));
+  const prepare = Effect.fn("PushOutbox.prepare")(function* (
+    delivery: PendingPushDelivery,
+    payload: PushDeliveryPayload,
+  ) {
+    const encoded = yield* encodePayload(payload);
+    const rows = yield* sql<{ payload_json: string }>`
+      UPDATE push_deliveries SET payload_json = COALESCE(payload_json, ${encoded})
+      WHERE notification_id = ${delivery.notification_id} AND recipient_id = ${delivery.recipient_id}
+        AND generation = ${delivery.generation} AND status = 'running' AND attempts = ${delivery.attempts}
+      RETURNING payload_json
+    `;
+    return rows[0]?.payload_json ?? null;
+  }, Effect.mapError(storageError));
   return PushOutbox.of({
     record,
     claim,
     eligible,
     settle,
     nextDelay,
+    prepare,
     wake: Queue.offer(available, undefined).pipe(Effect.asVoid),
     awaitAvailable: Queue.take(available),
   });

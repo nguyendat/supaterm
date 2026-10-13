@@ -12,7 +12,11 @@ import {
   TurnItemId,
   type OrchestrationV2DomainEvent,
 } from "@supacode/contracts";
-import { DEFAULT_PUSH_PREFERENCES } from "@supacode/contracts/push";
+import {
+  DEFAULT_PUSH_PREFERENCES,
+  PushNotificationError,
+  type PushDeliveryPayload,
+} from "@supacode/contracts/push";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -29,6 +33,7 @@ import * as PushGateway from "./PushGateway.ts";
 import * as PushNotifications from "./PushNotifications.ts";
 import * as PushOutbox from "./PushOutbox.ts";
 import * as PushDeliveryWorker from "./PushDeliveryWorker.ts";
+import * as PushPreview from "./PushPreview.ts";
 
 const session = AuthSessionId.make("push-session");
 const otherSession = AuthSessionId.make("other-session");
@@ -49,13 +54,25 @@ const fakeGateway = PushGateway.PushGateway.of({
   revoke: () => Effect.void,
   send: () => Effect.succeed({ accepted: true, retryable: false, invalidToken: false }),
 });
-function testLayer(gateway = fakeGateway) {
+const fakePreview = PushPreview.PushPreview.of({
+  hostSigningKey: Effect.succeed("a".repeat(43)),
+  encrypt: () =>
+    Effect.succeed({
+      version: 1,
+      keyId: deviceId,
+      enc: "a".repeat(43),
+      ciphertext: "b".repeat(22),
+      signature: "c".repeat(86),
+    }),
+});
+function testLayer(gateway = fakeGateway, preview = fakePreview) {
   const persistence = Layer.mergeAll(ProjectionStore.layer, EventStore.layer).pipe(
     Layer.provideMerge(Sqlite.layerMemory),
   );
   const services = Layer.mergeAll(PushOutbox.layer, PushNotifications.layer, EventSink.layer).pipe(
     Layer.provideMerge(persistence),
     Layer.provideMerge(Layer.succeed(PushGateway.PushGateway, gateway)),
+    Layer.provideMerge(Layer.succeed(PushPreview.PushPreview, preview)),
     Layer.provideMerge(ServerSettings.ServerSettingsService.layerTest()),
     Layer.provide(NodeCrypto.layer),
   );
@@ -157,6 +174,151 @@ const activate = Effect.gen(function* () {
     challenge: "b".repeat(43),
   });
   return registration;
+});
+const activatePreview = Effect.gen(function* () {
+  const push = yield* PushNotifications.PushNotifications;
+  const registration = yield* push.register(session, {
+    ...registerInput,
+    preferences: { ...preferences, previews: true },
+    previewKey: { keyId: deviceId, publicKey: "a".repeat(43) },
+  });
+  yield* push.confirm(session, {
+    deviceId,
+    recipientId: registration.recipientId,
+    generation: registration.generation,
+    challenge: "b".repeat(43),
+  });
+  return registration;
+});
+
+it.effect("persists one opaque preview payload across ambiguous delivery retries", () => {
+  const sent: PushDeliveryPayload[] = [];
+  let encrypted = 0;
+  return Effect.scoped(
+    Effect.gen(function* () {
+      yield* seedSessions;
+      yield* activatePreview;
+      const { sink, completed } = yield* createThread;
+      yield* sink.write({ events: [completed] });
+      const worker = yield* PushDeliveryWorker.PushDeliveryWorker;
+      yield* worker.drain;
+      yield* TestClock.adjust("3 seconds");
+      yield* worker.drain;
+      assert.strictEqual(encrypted, 1);
+      assert.strictEqual(sent.length, 2);
+      assert.deepStrictEqual(sent[0], sent[1]);
+      assert.isDefined(sent[0]?.preview);
+      const sql = yield* SqlClient.SqlClient;
+      const rows = yield* sql<{
+        payload_json: string;
+        status: string;
+      }>`SELECT payload_json, status FROM push_deliveries`;
+      assert.strictEqual(rows[0]?.status, "accepted");
+      assert.strictEqual(rows[0]?.payload_json.includes("Notification fixture"), false);
+    }).pipe(
+      Effect.provide(
+        testLayer(
+          {
+            ...fakeGateway,
+            send: (payloadUrl, payload) =>
+              Effect.sync(() => {
+                sent.push(payload);
+                return {
+                  accepted: sent.length > 1,
+                  retryable: sent.length === 1,
+                  invalidToken: false,
+                };
+              }),
+          },
+          {
+            ...fakePreview,
+            encrypt: (key, metadata, content) =>
+              Effect.sync(() => {
+                encrypted++;
+                assert.strictEqual(content.title, "Notification fixture");
+                return {
+                  version: 1,
+                  keyId: key.keyId,
+                  enc: "a".repeat(43),
+                  ciphertext: Buffer.alloc(16, encrypted).toString("base64url"),
+                  signature: "c".repeat(86),
+                };
+              }),
+          },
+        ),
+      ),
+    ),
+  );
+});
+
+it.effect("falls back to the generic alert when preview encryption cannot complete", () => {
+  const sent: PushDeliveryPayload[] = [];
+  return Effect.scoped(
+    Effect.gen(function* () {
+      yield* seedSessions;
+      yield* activatePreview;
+      const { sink, completed } = yield* createThread;
+      yield* sink.write({ events: [completed] });
+      yield* (yield* PushDeliveryWorker.PushDeliveryWorker).drain;
+      assert.strictEqual(sent.length, 1);
+      assert.strictEqual(sent[0]?.preview, undefined);
+    }).pipe(
+      Effect.provide(
+        testLayer(
+          {
+            ...fakeGateway,
+            send: (url, payload) =>
+              Effect.sync(() => {
+                sent.push(payload);
+                return { accepted: true, retryable: false, invalidToken: false };
+              }),
+          },
+          {
+            ...fakePreview,
+            encrypt: () =>
+              Effect.fail(new PushNotificationError({ operation: "deliver", reason: "storage" })),
+          },
+        ),
+      ),
+    ),
+  );
+});
+
+it.effect("cancels a prepared encrypted retry after previews are disabled", () => {
+  let sends = 0;
+  return Effect.scoped(
+    Effect.gen(function* () {
+      yield* seedSessions;
+      yield* activatePreview;
+      const { sink, completed } = yield* createThread;
+      yield* sink.write({ events: [completed] });
+      const worker = yield* PushDeliveryWorker.PushDeliveryWorker;
+      yield* worker.drain;
+      yield* (yield* PushNotifications.PushNotifications).preferences(session, {
+        deviceId,
+        preferences,
+      });
+      yield* TestClock.adjust("3 seconds");
+      yield* worker.drain;
+      assert.strictEqual(sends, 1);
+      const sql = yield* SqlClient.SqlClient;
+      assert.strictEqual(
+        (yield* sql<{ status: string }>`SELECT status FROM push_deliveries`)[0]?.status,
+        "cancelled",
+      );
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          ...fakeGateway,
+          send: () =>
+            Effect.sync(() => {
+              sends++;
+              return { accepted: false, retryable: true, invalidToken: false };
+            }),
+        }),
+      ),
+    ),
+  );
 });
 
 it.effect("fans a committed event out to two eligible devices without duplicate attention", () =>

@@ -21,6 +21,7 @@ export const MobilePushRecord = Schema.Struct({
   environmentId: EnvironmentId,
   revocationToken: PushSecret,
   previousRevocationToken: Schema.optionalKey(PushSecret),
+  hostSigningKey: Schema.optionalKey(PushSecret),
   preferences: PushPreferences,
   registration: Schema.NullOr(PushRegistration),
   revocationPending: Schema.optionalKey(Schema.Boolean),

@@ -420,6 +420,7 @@ const config: ExpoConfig = {
     ...(!isIosPersonalTeamBuild ? [widgetsPlugin] : []),
     ...(!isIosPersonalTeamBuild
       ? [
+          "./plugins/withPushNotificationService.cjs",
           [
             "expo-notifications",
             { mode: APP_VARIANT === "development" ? "development" : "production" },

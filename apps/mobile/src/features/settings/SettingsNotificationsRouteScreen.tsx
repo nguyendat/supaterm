@@ -20,6 +20,7 @@ import { SettingsRow } from "./components/SettingsRow";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
+import PushPreview from "../../../modules/supacode-push-preview";
 
 const KIND_LABELS: Record<PushNotificationKind, string> = {
   approval: "Approval needed",
@@ -156,6 +157,17 @@ function EnvironmentNotifications({
             />
           ))
         : null}
+      {PushPreview !== null ? (
+        <SettingsSwitchRow
+          label="Show previews"
+          value={preferences.previews}
+          subtitle="Show thread names and messages, decrypted only on this device."
+          disabled={busy || !permitted || !enabled}
+          onValueChange={(value) => {
+            void perform(() => updatePushPreferences(environmentId, { previews: value }));
+          }}
+        />
+      ) : null}
       {state.status === "registering" || state.status === "failed" ? (
         <SettingsRow
           icon="arrow.clockwise"

@@ -350,9 +350,13 @@ switch on each environment you want alerts from. Choose which events should
 notify you: approvals, input, completion, failures, or usage limits. Each device
 has its own preferences.
 
-Alerts say “Supacode has an update.” Tap one to reconnect to its environment and
-open the thread after it syncs. The alert contains no conversation preview. The
-environment must be running to submit an alert; notifications are best effort.
+Alerts say “Supacode has an update.” Turn on **Show previews** for an environment
+to include its thread name and a short message, encrypted until they reach this
+device. iOS notification settings control whether previews appear on the lock
+screen. If the device cannot decrypt a preview, it shows the generic alert.
+
+Tap an alert to reconnect to its environment and open the thread after it syncs.
+The environment must be running to submit an alert; notifications are best effort.
 
 Switch an environment's notifications off to revoke this device's registration.
 Removing the environment also revokes its notifications; if both the environment

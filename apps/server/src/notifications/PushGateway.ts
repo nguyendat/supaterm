@@ -2,6 +2,7 @@ import type {
   PushConfirmInput,
   PushRegisterInput,
   PushRevokeInput,
+  PushDeliveryPayload,
 } from "@supacode/contracts/push";
 import { pushRequestHeaders } from "@supacode/shared/pushRequest";
 import * as Context from "effect/Context";
@@ -25,15 +26,11 @@ const DeliveryReceipt = Schema.Struct({
   retryable: Schema.Boolean,
   invalidToken: Schema.Boolean,
 });
-export interface PushDeliveryPayload {
-  readonly version: 1;
-  readonly recipientId: string;
-  readonly generation: number;
-  readonly notificationId: string;
-  readonly createdAt: number;
-  readonly expiresAt: number;
-}
-type EnrollmentPayload = Omit<typeof PushRegisterInput.Type, "deviceId" | "preferences"> &
+export type { PushDeliveryPayload } from "@supacode/contracts/push";
+type EnrollmentPayload = Pick<
+  typeof PushRegisterInput.Type,
+  "token" | "topic" | "environment" | "revocationToken"
+> &
   Pick<typeof PushRevokeInput.Type, "recipientId" | "generation">;
 type ConfirmationPayload = Omit<typeof PushConfirmInput.Type, "deviceId">;
 type RevocationPayload = Omit<typeof PushRevokeInput.Type, "deviceId">;

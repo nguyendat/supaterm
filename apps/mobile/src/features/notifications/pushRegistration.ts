@@ -18,6 +18,7 @@ import * as Schema from "effect/Schema";
 import * as Application from "expo-application";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
+import PushPreview from "../../../modules/supacode-push-preview";
 
 import { runtime } from "../../lib/runtime";
 import * as MobilePushStore from "../../persistence/mobile-push-store";
@@ -43,6 +44,20 @@ const savePushRecord = (record: MobilePushStore.MobilePushRecord) =>
   );
 
 const isPushError = Schema.is(PushNotificationError);
+
+async function bindPreview(record: MobilePushStore.MobilePushRecord) {
+  if (PushPreview === null || record.registration === null || record.hostSigningKey === undefined)
+    return;
+  await PushPreview.bind(
+    record.environmentId,
+    record.registration.recipientId,
+    record.registration.generation,
+    record.hostSigningKey,
+    record.registration.status === "active" &&
+      record.preferences.enabled &&
+      record.preferences.previews,
+  );
+}
 
 function publish(
   environmentId: EnvironmentId,
@@ -70,7 +85,9 @@ async function confirmRegistration(
     deviceId: await pushDeviceId(),
   });
   const record = await ensurePushRecord(environmentId);
-  await savePushRecord({ ...record, registration, preferences: registration.preferences });
+  const confirmed = { ...record, registration, preferences: registration.preferences };
+  await bindPreview(confirmed);
+  await savePushRecord(confirmed);
   publish(environmentId, registration);
 }
 
@@ -79,6 +96,10 @@ async function refreshRegistration(environmentId: EnvironmentId, requestedEnable
   let record = await ensurePushRecord(environmentId);
   const deviceId = await pushDeviceId();
   const prior = await runPushCommand(pushCommands.state, environmentId, { deviceId });
+  if (prior.hostSigningKey !== undefined) {
+    record = { ...record, hostSigningKey: prior.hostSigningKey };
+    await savePushRecord(record);
+  }
   const ownedRegistration = prior.registration ?? record.registration;
   if (
     record.revocationPending ||
@@ -106,6 +127,7 @@ async function refreshRegistration(environmentId: EnvironmentId, requestedEnable
     enabled: requestedEnabled ?? record.preferences.enabled,
   };
   if (!preferences.enabled) {
+    if (record.registration !== null) await PushPreview?.disable(record.registration.recipientId);
     publish(environmentId, record.registration);
     return;
   }
@@ -131,10 +153,16 @@ async function refreshRegistration(environmentId: EnvironmentId, requestedEnable
       ),
     );
     record = { ...record, previousRevocationToken: record.revocationToken, revocationToken };
+    await PushPreview?.rotate(environmentId);
     await savePushRecord(record);
   }
   publish(environmentId, prior.registration, "registering");
   try {
+    const previewKey = await PushPreview?.ensure(environmentId);
+    if (preferences.previews && record.hostSigningKey === undefined)
+      throw new Error("Update this environment to enable notification previews.");
+    if (preferences.previews && previewKey === undefined)
+      throw new Error("Install a Supacode build with notification preview support.");
     const registration = await runPushCommand(pushCommands.register, environmentId, {
       deviceId,
       token: nativeToken.data,
@@ -145,9 +173,12 @@ async function refreshRegistration(environmentId: EnvironmentId, requestedEnable
         ? {}
         : { previousRevocationToken: record.previousRevocationToken }),
       preferences,
+      ...(previewKey === undefined ? {} : { previewKey }),
     });
     const { previousRevocationToken: _, ...registeredRecord } = record;
-    await savePushRecord({ ...registeredRecord, registration, preferences });
+    const registered = { ...registeredRecord, registration, preferences };
+    await bindPreview(registered);
+    await savePushRecord(registered);
     publish(
       environmentId,
       registration,
@@ -165,6 +196,7 @@ async function disableRegistration(environmentId: EnvironmentId) {
   if (record === null || record.registration === null) return;
   const registration = record.registration;
   const preferences = { ...record.preferences, enabled: false };
+  await PushPreview?.disable(registration.recipientId);
   await savePushRecord({ ...record, preferences, revocationPending: true });
   const direct = fetch(`${registration.gatewayUrl}/v1/push/device-revoke`, {
     method: "POST",
@@ -211,14 +243,28 @@ async function updatePreferences(
   environmentId: EnvironmentId,
   patch: Partial<Omit<PushPreferences, "enabled">>,
 ) {
-  const record = await ensurePushRecord(environmentId);
+  let record = await ensurePushRecord(environmentId);
   const preferences = { ...record.preferences, ...patch };
+  if (patch.previews !== undefined) {
+    if (record.hostSigningKey === undefined)
+      throw new Error("Update this environment to enable notification previews.");
+    if (PushPreview === null)
+      throw new Error("Install a Supacode build with notification preview support.");
+    if (!patch.previews) {
+      await bindPreview({ ...record, preferences });
+      record = { ...record, preferences };
+      await savePushRecord(record);
+      if (record.registration !== null)
+        publish(environmentId, { ...record.registration, preferences });
+    }
+  }
   const registration = await runPushCommand(pushCommands.preferences, environmentId, {
     deviceId: await pushDeviceId(),
     preferences,
   });
   await savePushRecord({ ...record, registration, preferences });
   publish(environmentId, registration);
+  if (patch.previews === true) await bindPreview({ ...record, registration, preferences });
 }
 
 async function enableRegistration(environmentId: EnvironmentId) {
@@ -290,6 +336,7 @@ export const removePushRegistration = (environmentId: EnvironmentId) =>
     const record = await loadPushRecord(environmentId);
     if (record !== null && record.registration !== null && record.registration.status !== "revoked")
       await disableRegistration(environmentId);
+    await PushPreview?.remove(environmentId);
     await runtime.runPromise(
       MobilePushStore.MobilePushStore.pipe(Effect.flatMap((store) => store.remove(environmentId))),
     );

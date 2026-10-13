@@ -7,10 +7,31 @@ import {
 } from "@supacode/contracts/push";
 import * as Effect from "effect/Effect";
 
-const mocks = vi.hoisted(() => ({ rpc: vi.fn(), token: vi.fn(), direct: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  rpc: vi.fn(),
+  token: vi.fn(),
+  direct: vi.fn(),
+  bind: vi.fn(),
+  disablePreview: vi.fn(),
+}));
 vi.mock("expo-secure-store", () => ({}));
 vi.mock("../../lib/uuid", () => ({ uuidv4: () => "3369f9f0-77a8-46db-8ab5-c36f3d689563" }));
 vi.mock("react-native", () => ({ Platform: { OS: "ios" } }));
+vi.mock("../../../modules/supacode-push-preview", () => ({
+  default: {
+    ensure: async () => ({
+      keyId: "a33bc794-cd24-4a2a-90a7-b6b28f97569c",
+      publicKey: "a".repeat(43),
+    }),
+    rotate: async () => ({
+      keyId: "a33bc794-cd24-4a2a-90a7-b6b28f97569c",
+      publicKey: "a".repeat(43),
+    }),
+    bind: mocks.bind,
+    disable: mocks.disablePreview,
+    remove: async () => undefined,
+  },
+}));
 vi.mock("expo-application", () => ({
   applicationId: "com.supaterm.supacode",
   getIosPushNotificationServiceEnvironmentAsync: async () => "development",
@@ -120,13 +141,17 @@ beforeEach(() => {
   mocks.rpc.mockReset();
   mocks.token.mockReset();
   mocks.direct.mockReset();
+  mocks.bind.mockReset();
+  mocks.disablePreview.mockReset();
+  mocks.bind.mockResolvedValue(undefined);
+  mocks.disablePreview.mockResolvedValue(undefined);
   mocks.token.mockResolvedValue({ type: "ios", data: "ab".repeat(32) });
   mocks.direct.mockResolvedValue({ ok: true });
   vi.stubGlobal("fetch", mocks.direct);
   mocks.rpc.mockImplementation(async (command, _environmentId, input) => {
     switch (command) {
       case "state":
-        return { gatewayUrl: host.gatewayUrl, registration: host };
+        return { gatewayUrl: host.gatewayUrl, registration: host, hostSigningKey: "a".repeat(43) };
       case "register":
         host = {
           ...host,
@@ -288,4 +313,73 @@ it("retains the previous secret across an enrollment failure and retry", async (
   expect(inputs[0].revocationToken).toBe(inputs[1].revocationToken);
   expect(inputs[0].previousRevocationToken).toBe(inputs[1].previousRevocationToken);
   expect((await loadPushRecord(environmentId))?.previousRevocationToken).toBeUndefined();
+});
+
+it("keeps previews disabled locally while an offline host still has the old preference", async () => {
+  const environmentId = EnvironmentId.make("offline-preview-disable");
+  await seed(environmentId);
+  await refreshPushRegistration(environmentId);
+  await updatePushPreferences(environmentId, { previews: true });
+  expect(host.preferences.previews).toBe(true);
+  expect(mocks.bind.mock.calls.at(-1)?.[4]).toBe(true);
+  const defaultRpc = mocks.rpc.getMockImplementation();
+  mocks.rpc.mockImplementation(async (command, environmentId, input) => {
+    if (command === "preferences") throw new Error("Host offline");
+    return defaultRpc?.(command, environmentId, input);
+  });
+  await expect(updatePushPreferences(environmentId, { previews: false })).rejects.toThrow(
+    "Host offline",
+  );
+  expect((await loadPushRecord(environmentId))?.preferences.previews).toBe(false);
+  expect(mocks.bind.mock.calls.at(-1)?.[4]).toBe(false);
+  expect(host.preferences.previews).toBe(true);
+  if (defaultRpc === undefined) throw new Error("RPC fixture missing");
+  mocks.rpc.mockImplementation(defaultRpc);
+  await refreshPushRegistration(environmentId);
+  expect(host.preferences.previews).toBe(false);
+});
+
+it("enrolls a public preview key and disables the local binding before network revocation", async () => {
+  const environmentId = EnvironmentId.make("local-preview-revocation");
+  await seed(environmentId);
+  await refreshPushRegistration(environmentId);
+  const input = mocks.rpc.mock.calls.find(([command]) => command === "register")?.[2];
+  expect(input.previewKey).toEqual({
+    keyId: "a33bc794-cd24-4a2a-90a7-b6b28f97569c",
+    publicKey: "a".repeat(43),
+  });
+  expect(input.previewKey.privateKey).toBeUndefined();
+  await disablePushRegistration(environmentId);
+  expect(mocks.disablePreview).toHaveBeenCalledWith(host.recipientId);
+  expect(mocks.disablePreview.mock.invocationCallOrder[0]).toBeLessThan(
+    mocks.direct.mock.invocationCallOrder[0]!,
+  );
+});
+
+it("keeps local decryption disabled when an offline host rejects preview enable", async () => {
+  const environmentId = EnvironmentId.make("offline-preview-enable");
+  await seed(environmentId);
+  await refreshPushRegistration(environmentId);
+  mocks.bind.mockClear();
+  const defaultRpc = mocks.rpc.getMockImplementation();
+  mocks.rpc.mockImplementation(async (command, environmentId, input) => {
+    if (command === "preferences") throw new Error("Host offline");
+    return defaultRpc?.(command, environmentId, input);
+  });
+  await expect(updatePushPreferences(environmentId, { previews: true })).rejects.toThrow(
+    "Host offline",
+  );
+  expect((await loadPushRecord(environmentId))?.preferences.previews).toBe(false);
+  expect(mocks.bind).not.toHaveBeenCalled();
+});
+
+it("reports local preview revocation failure without publishing notifications off", async () => {
+  const environmentId = EnvironmentId.make("preview-revocation-failure");
+  await seed(environmentId);
+  mocks.disablePreview.mockRejectedValueOnce(new Error("Keychain unavailable"));
+  await expect(disablePushRegistration(environmentId)).rejects.toThrow("Keychain unavailable");
+  expect((await loadPushRecord(environmentId))?.preferences.enabled).toBe(true);
+  expect(host.status).toBe("active");
+  await disablePushRegistration(environmentId);
+  expect((await loadPushRecord(environmentId))?.preferences.enabled).toBe(false);
 });

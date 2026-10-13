@@ -23,6 +23,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as PushGateway from "./PushGateway.ts";
+import * as PushPreview from "./PushPreview.ts";
 
 interface RegistrationRow {
   readonly recipient_id: string;
@@ -32,6 +33,7 @@ interface RegistrationRow {
   readonly token_hash: string;
   readonly gateway_url: string;
   readonly preferences_json: string;
+  readonly preview_key_json: string | null;
 }
 
 export class PushNotifications extends Context.Service<
@@ -88,6 +90,7 @@ const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
   const gateway = yield* PushGateway.PushGateway;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
+  const preview = yield* PushPreview.PushPreview;
   const read = (session: AuthSessionId, deviceId: string) =>
     sql<RegistrationRow>`SELECT * FROM push_registrations WHERE session_id = ${session} AND device_id = ${deviceId}`.pipe(
       Effect.map((rows) => rows[0]),
@@ -131,6 +134,7 @@ const make = Effect.gen(function* () {
     return {
       gatewayUrl: configuration.pushGatewayUrl,
       registration: row === undefined ? null : fromRow(row),
+      hostSigningKey: yield* preview.hostSigningKey,
     };
   }, mapError("state"));
 
@@ -147,8 +151,13 @@ const make = Effect.gen(function* () {
       input.topic,
       input.environment,
       input.revocationToken,
+      input.previewKey ?? null,
     ]);
     const preferencesJson = yield* encodePreferences(input.preferences);
+    const previewKeyJson =
+      input.previewKey === undefined ? null : yield* encodeJson(input.previewKey);
+    if (input.preferences.previews && input.previewKey === undefined)
+      return yield* new PushNotificationError({ operation: "register", reason: "rejected" });
     const digest = yield* crypto.digest("SHA-256", new TextEncoder().encode(fingerprintInput));
     const fingerprint = Buffer.from(digest).toString("hex");
     const revocationHash = yield* secretHash(input.revocationToken);
@@ -181,14 +190,14 @@ const make = Effect.gen(function* () {
         const generation = same ? prior.generation : (prior?.generation ?? 0) + 1;
         if (prior === undefined) {
           yield* sql`
-            INSERT INTO push_registrations(recipient_id, session_id, device_id, generation, status, token_hash, revocation_hash, topic, environment, gateway_url, preferences_json)
-            VALUES (${recipientId}, ${session}, ${input.deviceId}, ${generation}, 'pending', ${fingerprint}, ${revocationHash}, ${input.topic}, ${input.environment}, ${url}, ${preferencesJson})
+            INSERT INTO push_registrations(recipient_id, session_id, device_id, generation, status, token_hash, revocation_hash, topic, environment, gateway_url, preferences_json, preview_key_json)
+            VALUES (${recipientId}, ${session}, ${input.deviceId}, ${generation}, 'pending', ${fingerprint}, ${revocationHash}, ${input.topic}, ${input.environment}, ${url}, ${preferencesJson}, ${previewKeyJson})
           `;
         } else {
           yield* sql`
             UPDATE push_registrations SET session_id = ${session}, generation = ${generation}, status = ${same ? prior.status : "pending"},
               token_hash = ${fingerprint}, revocation_hash = ${revocationHash}, topic = ${input.topic}, environment = ${input.environment},
-              gateway_url = ${url}, preferences_json = ${preferencesJson},
+              gateway_url = ${url}, preferences_json = ${preferencesJson}, preview_key_json = ${previewKeyJson},
               foreground_until = CASE WHEN ${same} THEN foreground_until ELSE 0 END,
               foreground_thread_id = CASE WHEN ${same} THEN foreground_thread_id ELSE NULL END,
               acknowledged_sequence = CASE WHEN ${same} THEN acknowledged_sequence ELSE 0 END
@@ -252,7 +261,9 @@ const make = Effect.gen(function* () {
     session: AuthSessionId,
     input: typeof PushPreferencesInput.Type,
   ) {
-    yield* requireRegistration(session, input.deviceId, "preferences");
+    const row = yield* requireRegistration(session, input.deviceId, "preferences");
+    if (input.preferences.previews && row.preview_key_json === null)
+      return yield* new PushNotificationError({ operation: "preferences", reason: "rejected" });
     const preferencesJson = yield* encodePreferences(input.preferences);
     yield* sql`UPDATE push_registrations SET preferences_json = ${preferencesJson} WHERE session_id = ${session} AND device_id = ${input.deviceId}`;
     return fromRow(yield* requireRegistration(session, input.deviceId, "preferences"));

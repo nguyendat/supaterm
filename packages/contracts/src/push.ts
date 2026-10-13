@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import * as Effect from "effect/Effect";
 
 import { ThreadId } from "./baseSchemas.ts";
 
@@ -27,6 +28,35 @@ export const PushDeviceId = Schema.String.check(
 export const PushRecipientId = PushDeviceId;
 export const PushGeneration = Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1));
 export const PushSecret = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{43}$/));
+export const PushPreviewKey = Schema.Struct({ keyId: PushDeviceId, publicKey: PushSecret });
+export type PushPreviewKey = typeof PushPreviewKey.Type;
+export const PushPreviewContent = Schema.Struct({
+  title: Schema.String.check(Schema.isMaxLength(120)),
+  body: Schema.String.check(Schema.isMaxLength(400)),
+});
+export type PushPreviewContent = typeof PushPreviewContent.Type;
+export const PushPreviewEnvelope = Schema.Struct({
+  version: Schema.Literal(1),
+  keyId: PushDeviceId,
+  enc: PushSecret,
+  ciphertext: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{22,1046}$/)),
+  signature: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{86}$/)),
+});
+export type PushPreviewEnvelope = typeof PushPreviewEnvelope.Type;
+export const PushDeliveryMetadata = Schema.Struct({
+  version: Schema.Literal(1),
+  recipientId: PushRecipientId,
+  generation: PushGeneration,
+  notificationId: PushRecipientId,
+  createdAt: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+  expiresAt: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+});
+export type PushDeliveryMetadata = typeof PushDeliveryMetadata.Type;
+export const PushDeliveryPayload = Schema.Struct({
+  ...PushDeliveryMetadata.fields,
+  preview: Schema.optionalKey(PushPreviewEnvelope),
+});
+export type PushDeliveryPayload = typeof PushDeliveryPayload.Type;
 export const PushNotificationKind = Schema.Literals([
   "approval",
   "input",
@@ -42,6 +72,7 @@ export const PushPreferences = Schema.Struct({
   completion: Schema.Boolean,
   failure: Schema.Boolean,
   "usage-limit": Schema.Boolean,
+  previews: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 });
 export type PushPreferences = typeof PushPreferences.Type;
 export const DEFAULT_PUSH_PREFERENCES: PushPreferences = {
@@ -51,6 +82,7 @@ export const DEFAULT_PUSH_PREFERENCES: PushPreferences = {
   completion: true,
   failure: true,
   "usage-limit": true,
+  previews: false,
 };
 
 export const PushRegistration = Schema.Struct({
@@ -65,6 +97,7 @@ export const PushDeviceInput = Schema.Struct({ deviceId: PushDeviceId });
 export const PushState = Schema.Struct({
   gatewayUrl: Schema.NullOr(Schema.String),
   registration: Schema.NullOr(PushRegistration),
+  hostSigningKey: Schema.optionalKey(PushSecret),
 });
 export const PushRegisterInput = Schema.Struct({
   ...PushDeviceInput.fields,
@@ -76,6 +109,7 @@ export const PushRegisterInput = Schema.Struct({
   environment: Schema.Literals(["sandbox", "production"]),
   revocationToken: PushSecret,
   previousRevocationToken: Schema.optionalKey(PushSecret),
+  previewKey: Schema.optionalKey(PushPreviewKey),
   preferences: PushPreferences,
 });
 export const PushConfirmInput = Schema.Struct({

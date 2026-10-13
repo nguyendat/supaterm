@@ -72,6 +72,7 @@ import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as PushNotifications from "./notifications/PushNotifications.ts";
 import * as PushGateway from "./notifications/PushGateway.ts";
+import * as PushPreview from "./notifications/PushPreview.ts";
 import * as PushOutbox from "./notifications/PushOutbox.ts";
 import * as PushDeliveryWorker from "./notifications/PushDeliveryWorker.ts";
 import * as ProjectEnrichmentService from "./project/ProjectEnrichmentService.ts";
@@ -422,6 +423,7 @@ const layerRelayAccess = RelayAccess.layer.pipe(
 const layerPush = Layer.mergeAll(PushNotifications.layer, PushDeliveryWorker.layer).pipe(
   Layer.provideMerge(PushOutbox.layer.pipe(Layer.provide(ProjectionStoreV2.layer))),
   Layer.provide(PushGateway.layer.pipe(Layer.provide(ServerSecretStore.layer))),
+  Layer.provide(PushPreview.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provide(ProjectionStoreV2.layer),
   Layer.provide(layerServerSettings),
 );

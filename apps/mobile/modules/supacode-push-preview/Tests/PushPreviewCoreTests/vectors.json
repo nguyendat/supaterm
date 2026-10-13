@@ -1,0 +1,52 @@
+{
+  "supacode": {
+    "payload": {
+      "version": 1,
+      "recipientId": "ddb9b169-4492-4845-82e4-34a728c92877",
+      "generation": 2,
+      "notificationId": "3369f9f0-77a8-46db-8ab5-c36f3d689563",
+      "createdAt": 1791840000000,
+      "expiresAt": 1791926400000,
+      "preview": {
+        "version": 1,
+        "keyId": "a33bc794-cd24-4a2a-90a7-b6b28f97569c",
+        "enc": "ZCLNNNDRepmJuaOauOlI-jvdk6vSCamp1opbK19Swlk",
+        "ciphertext": "Cps0bcgWhIRavrVJdIh4WvWUWEp3ZFQc-9MyvjFJSM2ghFMWQSy9zQcgxoOX4drRQ3WcBjgD2BfSZi1gNQm8KrTAKQg0sNTyhczttyO6nyRuPQcqFKL6M6JBAiGUT6nG62HxrQ",
+        "signature": "PGu1g2kMrAdIvFV5CDg4d4EyYY4i-Jd--dyj_dKdeogL1XVLX4zR4gZAuYpFRw0nJxNaKeE-i6pAEkV2jj9XBQ"
+      }
+    },
+    "binding": {
+      "recipientId": "ddb9b169-4492-4845-82e4-34a728c92877",
+      "generation": 2,
+      "keyId": "a33bc794-cd24-4a2a-90a7-b6b28f97569c",
+      "privateKey": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+      "hostSigningKey": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
+      "enabled": true
+    },
+    "content": {
+      "title": "Private thread 🔐",
+      "body": "Approval needed: deploy the reviewed change"
+    }
+  },
+  "rfc9180": {
+    "source": "https://github.com/cfrg/draft-irtf-cfrg-hpke/blob/b1f7cb0cdeab6906c61b3d6574e8bdfdbe1cd3fb/test-vectors.json",
+    "info": "4f6465206f6e2061204772656369616e2055726e",
+    "privateKey": "8057991eef8f1f1af18f4a9491d16a1ce333f695d4db8e38da75975c4478e0fb",
+    "publicKey": "4310ee97d88cc1f088a5576c77ab0cf5c3ac797f3d95139c6c84b5429c59662a",
+    "enc": "1afa08d3dec047a643885163f1180476fa7ddb54c6a8029ea33f95796bf2ac4a",
+    "encryptions": [
+      {
+        "aad": "436f756e742d30",
+        "ct": "1c5250d8034ec2b784ba2cfd69dbdb8af406cfe3ff938e131f0def8c8b60b4db21993c62ce81883d2dd1b51a28",
+        "nonce": "5c4d98150661b848853b547f",
+        "pt": "4265617574792069732074727574682c20747275746820626561757479"
+      },
+      {
+        "aad": "436f756e742d31",
+        "ct": "6b53c051e4199c518de79594e1c4ab18b96f081549d45ce015be002090bb119e85285337cc95ba5f59992dc98c",
+        "nonce": "5c4d98150661b848853b547e",
+        "pt": "4265617574792069732074727574682c20747275746820626561757479"
+      }
+    ]
+  }
+}

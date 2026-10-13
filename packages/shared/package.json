@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./pushPreviewEnvelope": {
+      "types": "./src/pushPreviewEnvelope.ts",
+      "import": "./src/pushPreviewEnvelope.ts"
+    },
     "./threadNotificationAttention": {
       "types": "./src/threadNotificationAttention.ts",
       "import": "./src/threadNotificationAttention.ts"
