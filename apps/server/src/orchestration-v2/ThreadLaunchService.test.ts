@@ -2458,7 +2458,11 @@ it.effect("shared intake preserves durable attachment bytes after a lost launch 
 it.effect("cancels tracked setup before provider work is released", () =>
   Effect.gen(function* () {
     const entered = yield* Deferred.make<void>();
+    const releaseRename = yield* Deferred.make<void>();
+    const renameRejected = yield* Deferred.make<boolean>();
     const harness = makeHarness({
+      generateBranchName: () =>
+        Deferred.await(releaseRename).pipe(Effect.as({ branch: "late-branch" })),
       runSetup: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)),
     });
     yield* Effect.gen(function* () {
@@ -2472,14 +2476,30 @@ it.effect("cancels tracked setup before provider work is released", () =>
         message: "Start",
         workspace: { type: "worktree", baseRef: "main" },
       });
+      const dispatch = threads.dispatch;
+      const dispatchSpy = vi
+        .spyOn(threads, "dispatch")
+        .mockImplementation((command) =>
+          dispatch(command).pipe(
+            Effect.onExit((exit) =>
+              command.commandId === `${input.commandId}:branch-rename`
+                ? Deferred.succeed(renameRejected, Exit.isFailure(exit))
+                : Effect.void,
+            ),
+          ),
+        );
       const launched = yield* launches.launch(input);
       yield* Deferred.await(entered);
       assert.equal((yield* tracker.get(launched.threadId))?.phase, "running");
       assert.isTrue(yield* tracker.cancel(launched.threadId));
       assert.equal((yield* tracker.get(launched.threadId))?.phase, "cancelled");
+      yield* Deferred.succeed(releaseRename, undefined);
+      assert.isTrue(yield* Deferred.await(renameRejected));
+      dispatchSpy.mockRestore();
       const projection = yield* threads.getThreadProjection(launched.threadId);
       assert.equal(projection.runs[0]?.status, "failed");
       assert.isNull(projection.thread.worktreePath);
+      assert.isNull(projection.thread.branch);
       assert.isEmpty(yield* outbox.listByCommandId(CommandId.make(`${input.commandId}:release`)));
     }).pipe(Effect.provide(harness.layer));
   }),
