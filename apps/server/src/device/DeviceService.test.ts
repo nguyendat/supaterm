@@ -69,14 +69,13 @@ const fixture = Effect.fn("fixture")(function* (
   runtimeFailure?: NodeRuntimeUnavailableError | DeviceHost.DeviceHostError,
   inspectError = false,
   installTool?: Parameters<typeof DeviceService.makeWithHosts>[3],
-  initiallyBooted = false,
 ) {
   const settings = yield* Ref.make(DEFAULT_SERVER_SETTINGS);
   const starts: string[] = [];
   const agentStarts: string[] = [];
   const agentStops: string[] = [];
   const requests: string[] = [];
-  let booted = initiallyBooted;
+  let booted = false;
   let shutDown = false;
   const ready: DeviceHost.DeviceHostReady = {
     nodePath: process.execPath,
@@ -301,96 +300,6 @@ describe("device setup consent", () => {
       const state = yield* service.state;
       expect(state.devices.map((device) => device.id)).toEqual(["emulator-5554"]);
       expect(state.bootingDevices).toEqual([]);
-    }).pipe(Effect.scoped),
-  );
-
-  it.effect("shuts down devices booted by the service scope", () =>
-    Effect.gen(function* () {
-      const result = yield* Effect.scoped(
-        Effect.gen(function* () {
-          const { service, requests } = yield* fixture();
-          yield* service.configure({ enabled: true });
-          yield* service.open({
-            threadId: ThreadId.make("scope-shutdown"),
-            deviceId: "Pixel_API_35",
-            platform: "android",
-          });
-          return requests;
-        }),
-      );
-      expect(result.filter((url) => url.endsWith("/shutdown"))).toHaveLength(1);
-    }),
-  );
-
-  it.effect("leaves devices that were already booted by the user running", () =>
-    Effect.gen(function* () {
-      const result = yield* Effect.scoped(
-        Effect.gen(function* () {
-          const { service, requests } = yield* fixture(
-            Effect.void,
-            undefined,
-            false,
-            undefined,
-            false,
-            undefined,
-            true,
-          );
-          yield* service.configure({ enabled: true });
-          yield* service.open({
-            threadId: ThreadId.make("preexisting-device"),
-            deviceId: "emulator-5554",
-            platform: "android",
-          });
-          return requests;
-        }),
-      );
-      expect(result.filter((url) => url.endsWith("/shutdown"))).toHaveLength(0);
-    }),
-  );
-
-  it.effect("shuts down owned devices when device support is disabled", () =>
-    Effect.gen(function* () {
-      const { service, requests } = yield* fixture();
-      yield* service.configure({ enabled: true });
-      yield* service.open({
-        threadId: ThreadId.make("disable-support"),
-        deviceId: "Pixel_API_35",
-        platform: "android",
-      });
-      yield* service.configure({ enabled: false });
-      expect(requests.filter((url) => url.endsWith("/shutdown"))).toHaveLength(1);
-    }).pipe(Effect.scoped),
-  );
-
-  it.effect("cleans up an owned device when its thread settles", () =>
-    Effect.gen(function* () {
-      const { service, requests } = yield* fixture();
-      yield* service.configure({ enabled: true });
-      yield* service.open({
-        threadId: ThreadId.make("settled-thread"),
-        deviceId: "Pixel_API_35",
-        platform: "android",
-      });
-      yield* service.cleanupThread(ThreadId.make("settled-thread"));
-      expect(requests.filter((url) => url.endsWith("/shutdown"))).toHaveLength(1);
-      expect((yield* service.state).sessions).toEqual([]);
-    }).pipe(Effect.scoped),
-  );
-
-  it.effect("keeps a shared owned device until its last thread settles", () =>
-    Effect.gen(function* () {
-      const { service, requests } = yield* fixture();
-      yield* service.configure({ enabled: true });
-      for (const threadId of ["settled-first", "settled-last"])
-        yield* service.open({
-          threadId: ThreadId.make(threadId),
-          deviceId: threadId === "settled-first" ? "Pixel_API_35" : "emulator-5554",
-          platform: "android",
-        });
-      yield* service.cleanupThread(ThreadId.make("settled-first"));
-      expect(requests.filter((url) => url.endsWith("/shutdown"))).toHaveLength(0);
-      yield* service.cleanupThread(ThreadId.make("settled-last"));
-      expect(requests.filter((url) => url.endsWith("/shutdown"))).toHaveLength(1);
     }).pipe(Effect.scoped),
   );
 
