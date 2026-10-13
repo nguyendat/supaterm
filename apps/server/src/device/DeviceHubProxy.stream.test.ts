@@ -17,7 +17,7 @@ import * as DeviceHubProxy from "./DeviceHubProxy.ts";
 it.effect("preserves binary input and admission frames through the real socket proxy", () =>
   Effect.gen(function* () {
     const hub = yield* Effect.acquireRelease(
-      Effect.sync(() => new NodeWS.WebSocketServer({ port: 0 })),
+      Effect.sync(() => new NodeWS.WebSocketServer({ port: 0, perMessageDeflate: true })),
       (server) =>
         Effect.promise(
           () =>
@@ -32,6 +32,7 @@ it.effect("preserves binary input and admission frames through the real socket p
     const address = hub.address();
     if (typeof address !== "object" || !address) throw new Error("Missing hub port");
     hub.on("connection", (socket) => {
+      expect(socket.extensions).toBe("");
       socket.send(Uint8Array.of(0x83));
       socket.on("message", (data, binary) => socket.send(data, { binary }));
     });
@@ -66,8 +67,9 @@ it.effect("preserves binary input and admission frames through the real socket p
     const client = yield* Effect.acquireRelease(
       Effect.sync(
         () =>
-          new WebSocket(
+          new NodeWS.WebSocket(
             `${origin}/api/device-hub/vendor/serve-sim/helper/ws?device=test&wsTicket=test`,
+            { perMessageDeflate: true },
           ),
       ),
       (socket) => Effect.sync(() => socket.close()),
@@ -85,5 +87,6 @@ it.effect("preserves binary input and admission frames through the real socket p
     });
     yield* Effect.promise(() => received.promise);
     expect(frames).toEqual([[0x83], [0x03, 1], [0x03, 2]]);
+    expect(client.extensions).toBe("");
   }),
 );

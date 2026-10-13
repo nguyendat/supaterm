@@ -15,6 +15,14 @@ export interface DeviceStreamConfiguration {
   };
 }
 
+export const deviceStreamBaseUrl = (nativePlatform: string, access: DeviceHubAccess) =>
+  nativePlatform === "android" ||
+  (access.httpBase.startsWith("https://") &&
+    access.wsBase.startsWith("wss://") &&
+    (!access.mediaV1WsBase || access.mediaV1WsBase.startsWith("wss://")))
+    ? "https://localhost/"
+    : "file:///";
+
 export function deviceStreamDocument(configuration: string, script: string) {
   // Tickets and device names are data, including any HTML delimiter characters.
   const safeConfiguration = configuration.replace(/</g, "\\u003c");

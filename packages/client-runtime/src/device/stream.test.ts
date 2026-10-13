@@ -1,4 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  DEVICE_MEDIA_HEADER_BYTES,
+  DEVICE_MEDIA_MAX_CONFIG_BYTES,
+  DEVICE_MEDIA_MAX_PACKET_BYTES,
+  DEVICE_MEDIA_WINDOW_BYTES,
+  DEVICE_MEDIA_WINDOW_FRAMES,
+} from "@supacode/contracts";
 
 import {
   createDeviceStreamClient,
@@ -41,6 +48,42 @@ describe("AvccDemuxer", () => {
     expect(avcCodecString(new Uint8Array([1, 0x64, 0x00, 0x1f]))).toBe("avc1.64001f");
     expect(avcCodecString(new Uint8Array([1]))).toBe("avc1.42E01E");
   });
+
+  it.each([0, 1, 4 * 1024 * 1024 + 2, 0xffffffff])(
+    "rejects envelope length %s as soon as its fragmented prefix arrives",
+    (length) => {
+      const demuxer = new AvccDemuxer();
+      const prefix = new Uint8Array(4);
+      new DataView(prefix.buffer).setUint32(0, length);
+      expect(demuxer.push(prefix.subarray(0, 3))).toEqual([]);
+      expect(() => demuxer.push(prefix.subarray(3))).toThrow("envelope length");
+      demuxer.reset();
+      expect(demuxer.push(new Uint8Array(envelope(2, [1])))[0]!.payload).toEqual(Uint8Array.of(1));
+    },
+  );
+
+  it("rejects an oversized codec description before buffering its body", () => {
+    const prefix = new Uint8Array(5);
+    new DataView(prefix.buffer).setUint32(0, 64 * 1024 + 2);
+    prefix[4] = 1;
+    expect(() => new AvccDemuxer().push(prefix)).toThrow("description is too large");
+  });
+
+  it.each([1, 4, 5, 6])("detects an envelope truncated after %s bytes", (length) => {
+    const demuxer = new AvccDemuxer();
+    demuxer.push(new Uint8Array(envelope(2, [1, 2, 3])).subarray(0, length));
+    expect(() => demuxer.end()).toThrow("truncated");
+  });
+
+  it("owns completed payloads across fragmented following frames and reset", () => {
+    const demuxer = new AvccDemuxer();
+    const first = demuxer.push(new Uint8Array(envelope(2, [1, 2])))[0]!;
+    demuxer.push(new Uint8Array(envelope(3, [4, 5])).subarray(0, 6));
+    demuxer.reset();
+    demuxer.push(new Uint8Array(envelope(2, [6, 7])));
+    expect(first.payload).toEqual(Uint8Array.of(1, 2));
+    expect(() => demuxer.end()).not.toThrow();
+  });
 });
 
 describe("native device stream transport", () => {
@@ -51,7 +94,12 @@ describe("native device stream transport", () => {
 
   function setup(platform: "ios" | "android") {
     vi.useFakeTimers();
-    vi.stubGlobal("VideoDecoder", vi.fn());
+    vi.stubGlobal(
+      "VideoDecoder",
+      Object.assign(vi.fn(), {
+        isConfigSupported: vi.fn(async () => ({ supported: true })),
+      }),
+    );
     vi.stubGlobal("EncodedVideoChunk", vi.fn());
     let resolveOpened!: (socket: FakeSocket) => void;
     const waitForSocket = () =>
@@ -216,6 +264,19 @@ describe("native device stream transport", () => {
 });
 
 describe("serve-emu frames", () => {
+  it.each([0, 4 * 1024 * 1024 + 1, 4 * 1024 * 1024 + 17])(
+    "rejects invalid packet length %s",
+    (length) => {
+      expect(() => parseSemuPacket(new ArrayBuffer(length))).toThrow("packet length");
+    },
+  );
+
+  it.each([4, 5, 15, 16])("rejects a truncated SEMU header of %s bytes", (length) => {
+    const bytes = new Uint8Array(length);
+    new DataView(bytes.buffer).setUint32(0, 0x53454d55);
+    expect(() => parseSemuPacket(bytes.buffer)).toThrow("packet header");
+  });
+
   it("strips the SEMU header and reads the keyframe flag and timestamp", () => {
     const buffer = new ArrayBuffer(16 + 3);
     const view = new DataView(buffer);
@@ -242,6 +303,8 @@ describe("serve-emu frames", () => {
     expect(scanned.isKey).toBe(true);
     expect(scanned.sps && avcCodecString(scanned.sps)).toBe("avc1.64001f");
     expect(scanAccessUnit(new Uint8Array([0, 0, 1, 0x41, 0x00])).isKey).toBe(false);
+    expect(scanAccessUnit(new Uint8Array([0, 0, 1])).isKey).toBe(false);
+    expect(scanAccessUnit(new Uint8Array([0, 0, 1, 0x67])).sps).toBeNull();
   });
 });
 
@@ -365,7 +428,7 @@ class MjpegImage extends EventTarget {
   }
 }
 
-function recoveryFixture(platform: "ios" | "android" = "ios", preferMjpeg = true) {
+function recoveryFixture(platform: "ios" | "android" = "ios", preferMjpeg = true, mediaV1 = false) {
   vi.useFakeTimers();
   const sockets: Socket[] = [];
   class Socket {
@@ -377,7 +440,9 @@ function recoveryFixture(platform: "ios" | "android" = "ios", preferMjpeg = true
     onclose: ((event: { code: number; reason: string }) => void) | null = null;
     send = vi.fn();
     close = vi.fn();
-    constructor() {
+    readonly url: string;
+    constructor(url: string) {
+      this.url = url;
       sockets.push(this);
     }
   }
@@ -405,7 +470,12 @@ function recoveryFixture(platform: "ios" | "android" = "ios", preferMjpeg = true
     }
   }
   vi.stubGlobal("VideoDecoder", Decoder);
-  vi.stubGlobal("EncodedVideoChunk", vi.fn());
+  vi.stubGlobal(
+    "EncodedVideoChunk",
+    vi.fn(function (chunk: EncodedVideoChunkInit) {
+      return chunk;
+    }),
+  );
   const videoBodies: ReadableStreamDefaultController<Uint8Array>[] = [];
   const signals: AbortSignal[] = [];
   const fetch = vi.fn((url: string, init: RequestInit) => {
@@ -443,6 +513,7 @@ function recoveryFixture(platform: "ios" | "android" = "ios", preferMjpeg = true
       access: {
         httpBase: "https://test/api/device-hub",
         wsBase: "wss://test/api/device-hub",
+        ...(mediaV1 ? { mediaV1WsBase: "wss://test/api/device-media/v1" } : {}),
         credentials: true,
         query: {},
       },
@@ -461,6 +532,9 @@ function recoveryFixture(platform: "ios" | "android" = "ios", preferMjpeg = true
     decoders[index]!.callbacks.output({
       displayWidth: 400,
       displayHeight: 800,
+      timestamp:
+        (decoders[index]!.decode.mock.calls.at(-1)?.[0] as EncodedVideoChunk | undefined)
+          ?.timestamp ?? 0,
       close,
     } as unknown as VideoFrame);
     return close;
@@ -483,10 +557,294 @@ function recoveryFixture(platform: "ios" | "android" = "ios", preferMjpeg = true
   };
 }
 
+const mediaHello = JSON.stringify({
+  type: "hello",
+  version: 1,
+  timestampOrigin: "server-receipt-monotonic",
+  windowBytes: DEVICE_MEDIA_WINDOW_BYTES,
+  windowFrames: DEVICE_MEDIA_WINDOW_FRAMES,
+  maxPacketBytes: DEVICE_MEDIA_MAX_PACKET_BYTES,
+  maxConfigBytes: DEVICE_MEDIA_MAX_CONFIG_BYTES,
+});
+
+const mediaPacket = (sequence: number, kind: number, epoch = 1, configId = epoch) => {
+  const payload = kind === 1 ? Uint8Array.of(1, 0x64, 0, 0x1f) : Uint8Array.of(kind);
+  const buffer = new ArrayBuffer(DEVICE_MEDIA_HEADER_BYTES + payload.byteLength);
+  const view = new DataView(buffer);
+  view.setUint8(0, 1);
+  view.setUint8(1, kind);
+  view.setUint32(4, epoch);
+  view.setUint32(8, configId);
+  view.setUint32(12, sequence);
+  view.setFloat64(16, 10_000);
+  view.setUint32(24, payload.byteLength);
+  new Uint8Array(buffer, DEVICE_MEDIA_HEADER_BYTES).set(payload);
+  return buffer;
+};
+
+describe("negotiated iOS media decoding", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("reopens a media socket that stalls after its JPEG seed without disconnecting input", async () => {
+    const { client, sockets, events, decoders, decodedFrame } = recoveryFixture("ios", false, true);
+    const close = vi.fn();
+    vi.stubGlobal("createImageBitmap", async () => ({ width: 400, height: 800, close }));
+    client.start();
+    const socket = sockets[0]!;
+    socket.onmessage?.({ data: mediaHello });
+    socket.onmessage?.({ data: mediaPacket(1, 4, 1, 0) });
+    await vi.advanceTimersByTimeAsync(0);
+    const input = sockets[1]!;
+    input.onmessage?.({ data: Uint8Array.of(0x83).buffer });
+    expect(events.onStatus).toHaveBeenLastCalledWith("streaming", undefined);
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(socket.close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(socket.close).toHaveBeenCalledOnce();
+    expect(events.onStatus).toHaveBeenLastCalledWith(
+      "connecting",
+      expect.stringContaining("stopped receiving video"),
+    );
+    expect(input.close).not.toHaveBeenCalled();
+    expect(events.onInputConnected).toHaveBeenLastCalledWith(true);
+    expect(events.onMjpegFallback).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1_000);
+    const replacement = sockets[2]!;
+    replacement.onmessage?.({ data: mediaHello });
+    replacement.onmessage?.({ data: mediaPacket(1, 1) });
+    replacement.onmessage?.({ data: mediaPacket(2, 2) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(decoders[0]!.decode).toHaveBeenCalledOnce();
+    decodedFrame();
+    expect(events.onStatus).toHaveBeenLastCalledWith("streaming", undefined);
+    socket.onmessage?.({ data: mediaPacket(2, 3) });
+    expect(decoders[0]!.decode).toHaveBeenCalledOnce();
+    client.stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("waits for bounded configuration acceptance before acknowledging and decoding its reference chain", async () => {
+    const { client, sockets, Decoder, decoders, fetch } = recoveryFixture("ios", false, true);
+    let resolveSupport!: (support: { supported: boolean }) => void;
+    Decoder.isConfigSupported.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSupport = resolve;
+        }),
+    );
+    client.start();
+    const socket = sockets[0]!;
+    expect(socket.url).toBe("wss://test/api/device-media/v1?device=test-device");
+    socket.onmessage?.({ data: mediaHello });
+    socket.onmessage?.({ data: mediaPacket(1, 1) });
+    socket.onmessage?.({ data: mediaPacket(2, 2) });
+    socket.onmessage?.({ data: mediaPacket(3, 3) });
+    expect(socket.send).not.toHaveBeenCalled();
+    resolveSupport({ supported: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(decoders[0]!.decode).toHaveBeenCalledTimes(2);
+    expect(socket.send.mock.calls.map(([message]) => JSON.parse(message as string))).toEqual([
+      { type: "ack", accountedThrough: 1 },
+      { type: "ack", accountedThrough: 2 },
+      { type: "ack", accountedThrough: 3 },
+    ]);
+    expect(fetch.mock.calls.every(([url]) => !url.includes("stream.avcc"))).toBe(true);
+    client.stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("drops an overloaded decoder and stale deltas until a new epoch supplies a keyframe", async () => {
+    const { client, sockets, decoders, decodedFrame, drawImage } = recoveryFixture(
+      "ios",
+      false,
+      true,
+    );
+    client.start();
+    const socket = sockets[0]!;
+    socket.onmessage?.({ data: mediaHello });
+    socket.onmessage?.({ data: mediaPacket(1, 1) });
+    await vi.advanceTimersByTimeAsync(0);
+    for (let sequence = 2; sequence <= 6; sequence++) {
+      socket.onmessage?.({ data: mediaPacket(sequence, sequence === 2 ? 2 : 3) });
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(decoders[0]!.decode).toHaveBeenCalledTimes(4);
+    expect(decoders[0]!.state).toBe("closed");
+    expect(
+      socket.send.mock.calls.slice(-2).map(([message]) => JSON.parse(message as string)),
+    ).toEqual([{ type: "recover" }, { type: "ack", accountedThrough: 6 }]);
+    expect(decodedFrame(0)).toHaveBeenCalledOnce();
+    expect(drawImage).not.toHaveBeenCalled();
+    socket.onmessage?.({ data: mediaPacket(7, 3) });
+    socket.onmessage?.({ data: mediaPacket(8, 1, 2) });
+    socket.onmessage?.({ data: mediaPacket(9, 3, 2) });
+    socket.onmessage?.({ data: mediaPacket(10, 2, 2) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(decoders[1]!.decode).toHaveBeenCalledOnce();
+    decodedFrame();
+    expect(drawImage).toHaveBeenCalledOnce();
+    client.stop();
+  });
+
+  it("accepts a JPEG seed before configuration and closes its bitmap after presentation", async () => {
+    const { client, sockets, events, drawImage } = recoveryFixture("ios", false, true);
+    const close = vi.fn();
+    vi.stubGlobal("createImageBitmap", async () => ({ width: 400, height: 800, close }));
+    client.start();
+    const socket = sockets[0]!;
+    socket.onmessage?.({ data: mediaHello });
+    socket.onmessage?.({ data: mediaPacket(1, 4, 1, 0) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(drawImage).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+    expect(events.onStatus).toHaveBeenLastCalledWith("streaming", undefined);
+    expect(socket.send).toHaveBeenCalledExactlyOnceWith(
+      JSON.stringify({ type: "ack", accountedThrough: 1 }),
+    );
+    client.stop();
+  });
+
+  it("falls back to authenticated MJPEG for an unsupported negotiated profile", async () => {
+    const { client, sockets, Decoder, events, imageReady } = recoveryFixture("ios", false, true);
+    Decoder.isConfigSupported.mockResolvedValue({ supported: false });
+    client.start();
+    const socket = sockets[0]!;
+    socket.onmessage?.({ data: mediaHello });
+    socket.onmessage?.({ data: mediaPacket(1, 1) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.close).toHaveBeenCalledOnce();
+    expect(events.onMjpegFallback).toHaveBeenCalledOnce();
+    imageReady();
+    expect(events.onStatus).toHaveBeenLastCalledWith("streaming", undefined);
+    client.stop();
+  });
+
+  it("ignores a support result and closes late output after the media viewer is hidden", async () => {
+    const { client, sockets, Decoder, decoders, decodedFrame, drawImage } = recoveryFixture(
+      "ios",
+      false,
+      true,
+    );
+    let resolveSupport!: (support: { supported: boolean }) => void;
+    Decoder.isConfigSupported.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSupport = resolve;
+        }),
+    );
+    client.start();
+    sockets[0]!.onmessage?.({ data: mediaHello });
+    sockets[0]!.onmessage?.({ data: mediaPacket(1, 1) });
+    client.stop();
+    resolveSupport({ supported: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(decoders).toHaveLength(0);
+    expect(sockets[0]!.send).not.toHaveBeenCalled();
+    client.start();
+    const socket = sockets.at(-1)!;
+    socket.onmessage?.({ data: mediaHello });
+    socket.onmessage?.({ data: mediaPacket(1, 1) });
+    await vi.advanceTimersByTimeAsync(0);
+    client.stop();
+    expect(decodedFrame()).toHaveBeenCalledOnce();
+    expect(drawImage).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
 describe("shared device stream readiness and recovery", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("decodes the first Android keyframe without restarting the shared encoder", async () => {
+    const { client, sockets, sps, decoders } = recoveryFixture("android");
+    client.start();
+    const socket = sockets[0]!;
+    socket.onmessage?.({ data: JSON.stringify({ type: "video-session" }) });
+    socket.onmessage?.({ data: sps });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(decoders[0]!.decode).toHaveBeenCalledOnce();
+    expect(socket.send).not.toHaveBeenCalled();
+    client.stop();
+  });
+
+  it("retains the Android reference chain while capability detection is pending", async () => {
+    const { client, sockets, sps, Decoder, decoders } = recoveryFixture("android");
+    let resolveSupport!: (support: { supported: boolean }) => void;
+    Decoder.isConfigSupported.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSupport = resolve;
+        }),
+    );
+    client.start();
+    const socket = sockets[0]!;
+    socket.onmessage?.({ data: sps });
+    socket.onmessage?.({ data: Uint8Array.of(0, 0, 1, 0x41, 1).buffer });
+    resolveSupport({ supported: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(decoders[0]!.decode).toHaveBeenCalledTimes(2);
+    expect(socket.send).not.toHaveBeenCalled();
+    client.stop();
+  });
+
+  it("can configure a fresh Android keyframe after malformed input interrupts a pending support probe", async () => {
+    const { client, sockets, sps, Decoder, decoders } = recoveryFixture("android");
+    let resolveSupport!: (support: { supported: boolean }) => void;
+    Decoder.isConfigSupported.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSupport = resolve;
+        }),
+    );
+    client.start();
+    const socket = sockets[0]!;
+    socket.onmessage?.({ data: sps });
+    socket.onmessage?.({ data: Uint8Array.of(0x53, 0x45, 0x4d, 0x55).buffer });
+    socket.onmessage?.({ data: sps });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(Decoder.isConfigSupported).toHaveBeenCalledTimes(2);
+    expect(decoders).toHaveLength(1);
+    expect(decoders[0]!.decode).toHaveBeenCalledOnce();
+    resolveSupport({ supported: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(decoders).toHaveLength(1);
+    expect(decoders[0]!.state).toBe("configured");
+    expect(decoders[0]!.decode).toHaveBeenCalledOnce();
+    client.stop();
+  });
+
+  it("bounds a pending Android reference chain and requests recovery once after dropping it", async () => {
+    const { client, sockets, sps, Decoder, decoders } = recoveryFixture("android");
+    let resolveSupport!: (support: { supported: boolean }) => void;
+    Decoder.isConfigSupported.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSupport = resolve;
+        }),
+    );
+    client.start();
+    const socket = sockets[0]!;
+    socket.onmessage?.({ data: sps });
+    for (let i = 0; i < 5; i++)
+      socket.onmessage?.({ data: Uint8Array.of(0, 0, 1, 0x41, i).buffer });
+    resolveSupport({ supported: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(decoders[0]!.decode).not.toHaveBeenCalled();
+    expect(socket.send).toHaveBeenCalledExactlyOnceWith(
+      JSON.stringify({ type: "reset-video", ack: false }),
+    );
+    socket.onmessage?.({ data: Uint8Array.of(0, 0, 1, 0x41, 6).buffer });
+    expect(decoders[0]!.decode).not.toHaveBeenCalled();
+    expect(socket.send).toHaveBeenCalledOnce();
+    socket.onmessage?.({ data: sps });
+    expect(decoders[0]!.decode).toHaveBeenCalledOnce();
+    client.stop();
   });
 
   it("waits for iOS input admission and respects native input loss and recovery", async () => {
@@ -588,7 +946,7 @@ describe("shared device stream readiness and recovery", () => {
     await vi.advanceTimersByTimeAsync(0);
     decodedFrame();
     const decoder = decoders[0]!;
-    decoder.decodeQueueSize = 9;
+    decoder.decodeQueueSize = 4;
     body.enqueue(new Uint8Array([...envelope(3, [2]), ...envelope(3, [3])]));
     await vi.advanceTimersByTimeAsync(0);
     expect(signals[1]!.aborted).toBe(true);

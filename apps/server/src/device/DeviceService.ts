@@ -46,6 +46,7 @@ import {
   writeAgentDeviceConfig,
 } from "./AgentDeviceTarget.ts";
 import * as Context from "effect/Context";
+import * as Config from "effect/Config";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -201,6 +202,10 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
     ),
   );
   const initialSettings = yield* readDeviceSettings;
+  const supportsDeviceMediaV1 = yield* Config.Boolean("SUPACODE_DEVICE_MEDIA_V1").pipe(
+    Config.withDefault(false),
+    Effect.orDie,
+  );
 
   const httpClient = (yield* HttpClient.HttpClient).pipe(HttpClient.withScope);
   const statePubSub = yield* PubSub.unbounded<DeviceServiceState>();
@@ -208,6 +213,7 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
   let publishedHosts = new Map(hosts);
   const stateRef = yield* SynchronizedRef.make<ServiceState>({
     state: {
+      supportsDeviceMediaV1,
       supportsHostRetry: true,
       supportsToolUpdate: installTool !== undefined,
       supportsToolInspection: true,

@@ -128,6 +128,7 @@ export const DeviceSession = Schema.Struct({
 export type DeviceSession = typeof DeviceSession.Type;
 
 export const DeviceServiceState = Schema.Struct({
+  supportsDeviceMediaV1: Schema.optional(Schema.Boolean),
   supportsHostRetry: Schema.optional(Schema.Boolean),
   supportsToolUpdate: Schema.optional(Schema.Boolean),
   supportsToolInspection: Schema.optional(Schema.Boolean),

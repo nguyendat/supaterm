@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./device/avcc": {
+      "types": "./src/device/avcc.ts",
+      "import": "./src/device/avcc.ts"
+    },
     "./githubMarkdownLinks": {
       "types": "./src/githubMarkdownLinks.ts",
       "import": "./src/githubMarkdownLinks.ts"

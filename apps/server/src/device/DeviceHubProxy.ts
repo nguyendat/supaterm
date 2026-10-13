@@ -21,11 +21,11 @@ import {
   HttpServerRequest,
   HttpServerResponse,
 } from "effect/http";
-import * as Socket from "effect/socket/Socket";
-import * as NodeSocket from "@effect/platform-node/NodeSocket";
+import * as NodeHttpServerRequest from "@effect/platform-node/NodeHttpServerRequest";
 
 import { authenticateMediaRequest } from "../auth/http.ts";
 import * as DeviceService from "./DeviceService.ts";
+import { bridgeDeviceSocket } from "./DeviceHubSocket.ts";
 
 const ALLOWED_PATHS: ReadonlyArray<RegExp> = [
   /^\/api\/devices$/,
@@ -89,32 +89,15 @@ const proxyWebSocket = Effect.fn("DeviceHubProxy.proxyWebSocket")(function* (
   request: HttpServerRequest.HttpServerRequest,
   upstreamUrl: string,
 ) {
+  const incoming = NodeHttpServerRequest.toIncomingMessage(request);
+  delete incoming.headers["sec-websocket-extensions"];
   const client = yield* request.upgrade;
-  const upstream = yield* Socket.makeWebSocket(upstreamUrl, {
-    openTimeout: "10 seconds",
-  }).pipe(Effect.provide(NodeSocket.layerWebSocketConstructor));
-  yield* Effect.scoped(
-    Effect.gen(function* () {
-      const writeToClient = yield* client.writer;
-      const writeToUpstream = yield* upstream.writer;
-      // Whichever side closes first ends the other via scope teardown: a close
-      // fails the pull with a SocketError, which loses the race.
-      return yield* Effect.raceFirst(
-        pumpFrames(upstream, writeToClient),
-        pumpFrames(client, writeToUpstream),
-      );
-    }),
-  ).pipe(Effect.ignoreCause);
+  yield* bridgeDeviceSocket(client, incoming.socket, upstreamUrl).pipe(
+    Effect.scoped,
+    Effect.ignoreCause,
+  );
   return HttpServerResponse.empty();
 });
-
-const pumpFrames = (source: Socket.Socket, sink: Socket.Writer) =>
-  Effect.gen(function* () {
-    const { pull } = yield* source.reader;
-    while (true) {
-      yield* sink.writeAll(yield* pull);
-    }
-  });
 
 const proxyHttp = Effect.fn("DeviceHubProxy.proxyHttp")(function* (
   request: HttpServerRequest.HttpServerRequest,

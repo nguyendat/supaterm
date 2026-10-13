@@ -27,9 +27,11 @@ import {
 } from "./duoControl.ts";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
-import { createCanvasFrameSink, type DeviceFrameSink } from "./frame.ts";
+import { createCanvasFrameSink, isDeviceFrameSize, type DeviceFrameSink } from "./frame.ts";
 import { type DeviceHubAccess, withDeviceHubQuery } from "./hubAccess.ts";
-import type { DevicePlatform } from "@supacode/contracts";
+import { createDeviceMediaTransport } from "./mediaStream.ts";
+import { DEVICE_MEDIA_MAX_PACKET_BYTES, type DevicePlatform } from "@supacode/contracts";
+import { AvccEnvelopeParser } from "@supacode/shared/device/avcc";
 
 export type DeviceStreamStatus = "connecting" | "streaming" | "error";
 
@@ -121,7 +123,7 @@ const FRAME_DURATION_US = 16_667;
 const SEMU_MAGIC = 0x53454d55;
 const SEMU_HEADER_BYTES = 16;
 const SEMU_FLAG_KEY = 1;
-const SOFT_DECODE_QUEUE = 8;
+const MAX_DECODE_QUEUE = 4;
 
 // serve-sim binary WS message tags (browser -> helper).
 const IOS_MSG_TOUCH = 0x03;
@@ -137,8 +139,9 @@ const decoder = new TextDecoder();
 
 const isWebCodecsSupported = (): boolean =>
   typeof globalThis !== "undefined" &&
-  "VideoDecoder" in globalThis &&
-  "EncodedVideoChunk" in globalThis;
+  typeof globalThis.VideoDecoder === "function" &&
+  typeof globalThis.VideoDecoder.isConfigSupported === "function" &&
+  typeof globalThis.EncodedVideoChunk === "function";
 
 function taggedJson(tag: number, payload: unknown): Uint8Array<ArrayBuffer> {
   const json = encoder.encode(JSON.stringify(payload));
@@ -162,9 +165,16 @@ export function parseSemuPacket(raw: ArrayBuffer): {
   readonly timestamp: number | null;
 } {
   const bytes = new Uint8Array(raw);
-  if (bytes.byteLength > SEMU_HEADER_BYTES) {
-    const view = new DataView(raw, 0, SEMU_HEADER_BYTES);
-    if (view.getUint32(0, false) === SEMU_MAGIC && view.getUint8(4) === 1) {
+  if (
+    bytes.byteLength === 0 ||
+    bytes.byteLength > DEVICE_MEDIA_MAX_PACKET_BYTES + SEMU_HEADER_BYTES
+  )
+    throw new Error("Invalid device video packet length.");
+  if (bytes.byteLength >= 4) {
+    const view = new DataView(raw);
+    if (view.getUint32(0, false) === SEMU_MAGIC) {
+      if (bytes.byteLength <= SEMU_HEADER_BYTES || view.getUint8(4) !== 1)
+        throw new Error("Invalid device video packet header.");
       const pts = view.getBigUint64(8, false);
       return {
         data: bytes.subarray(SEMU_HEADER_BYTES),
@@ -173,6 +183,8 @@ export function parseSemuPacket(raw: ArrayBuffer): {
       };
     }
   }
+  if (bytes.byteLength > DEVICE_MEDIA_MAX_PACKET_BYTES)
+    throw new Error("Invalid device video packet length.");
   return { data: bytes, isKey: null, timestamp: null };
 }
 
@@ -197,8 +209,10 @@ export function scanAccessUnit(buf: Uint8Array): { isKey: boolean; sps: Uint8Arr
       if (buf[i + 2] === 1) codeLen = 3;
       else if (i + 3 < len && buf[i + 2] === 0 && buf[i + 3] === 1) codeLen = 4;
       if (codeLen) {
+        if (i + codeLen >= len) break;
         const nalType = buf[i + codeLen]! & 0x1f;
-        if (nalType === 7 && !sps) sps = buf.subarray(i + codeLen);
+        if (nalType === 7 && !sps && i + codeLen + 3 < len)
+          sps = buf.subarray(i + codeLen, i + codeLen + 4);
         if (nalType === 5) isKey = true;
         i += codeLen + 1;
         continue;
@@ -214,52 +228,30 @@ export type AvccChunk = {
   readonly payload: Uint8Array;
 };
 
-const AVCC_TAGS: Record<number, AvccChunk["type"] | undefined> = {
+const AVCC_TAGS = {
   1: "description",
   2: "keyframe",
   3: "delta",
   4: "seed",
-};
+} as const;
 
 /** Turns a fragmented AVCC byte stream into complete envelopes. */
 export class AvccDemuxer {
-  private buffer = new Uint8Array(64 * 1024);
-  private length = 0;
+  private readonly parser = new AvccEnvelopeParser({ unknownTags: "skip" });
 
   push(bytes: Uint8Array): AvccChunk[] {
-    if (this.length + bytes.length > this.buffer.length) {
-      let capacity = this.buffer.length;
-      while (capacity < this.length + bytes.length) capacity *= 2;
-      const grown = new Uint8Array(capacity);
-      grown.set(this.buffer.subarray(0, this.length));
-      this.buffer = grown;
-    }
-    this.buffer.set(bytes, this.length);
-    this.length += bytes.length;
+    return Array.from(this.parser.push(bytes), ({ tag, payload }) => ({
+      type: AVCC_TAGS[tag],
+      payload,
+    }));
+  }
 
-    const chunks: AvccChunk[] = [];
-    let offset = 0;
-    while (this.length - offset >= 4) {
-      const view = new DataView(this.buffer.buffer, this.buffer.byteOffset + offset, 4);
-      const frameLength = view.getUint32(0, false);
-      if (this.length - offset - 4 < frameLength) break;
-      if (frameLength >= 1) {
-        const type = AVCC_TAGS[this.buffer[offset + 4]!];
-        if (type) {
-          chunks.push({ type, payload: this.buffer.slice(offset + 5, offset + 4 + frameLength) });
-        }
-      }
-      offset += 4 + frameLength;
-    }
-    if (offset > 0) {
-      this.buffer.copyWithin(0, offset, this.length);
-      this.length -= offset;
-    }
-    return chunks;
+  end(): void {
+    this.parser.end();
   }
 
   reset(): void {
-    this.length = 0;
+    this.parser.reset();
   }
 }
 
@@ -365,11 +357,21 @@ export function createDeviceStreamClient(
   const retryTimers = new Map<"video" | "input", ReturnType<typeof setTimeout>>();
   let primeController: AbortController | null = null;
   let videoDecoder: VideoDecoder | null = null;
+  let mediaTransport: ReturnType<typeof createDeviceMediaTransport> | null = null;
+  let mediaEpoch = 0;
+  let mediaConfigId = 0;
+  let recoveringMediaEpoch: number | null = null;
+  const submittedFrames = new Map<number, number>();
+  let submittedBytes = 0;
   let decodedVideoGeneration: number | null = null;
   let iosInputAdmitted = false;
   let iosInputUnavailable = false;
   let timestamp = 0;
   let awaitingKeyframe = true;
+  let keyframeRequested = false;
+  let pendingAndroidFrames: ReturnType<typeof parseSemuPacket>[] = [];
+  let pendingAndroidBytes = 0;
+  let androidConfigurationLost = false;
   let screen: DeviceScreenSize | null = null;
   let firstFrame = false;
   let configuring = false;
@@ -500,6 +502,8 @@ export function createDeviceStreamClient(
     mjpeg = true;
     controller?.abort();
     controller = null;
+    mediaTransport?.stop();
+    mediaTransport = null;
     closeDecoder();
     connecting();
     events.onMjpegFallback(mjpegUrl());
@@ -508,11 +512,19 @@ export function createDeviceStreamClient(
 
   const paint = (source: CanvasImageSource, width: number, height: number) => {
     if (stopped) return;
+    if (!isDeviceFrameSize(width, height)) {
+      fail("The device stream has invalid frame dimensions.");
+      return;
+    }
     if (platform === "android" && (screen?.width !== width || screen.height !== height)) {
       screen = { width, height, orientation: width > height ? "landscape_left" : "portrait" };
       events.onScreen(screen);
     }
-    if (!sink.present(source, width, height)) {
+    let presented = false;
+    try {
+      presented = sink.present(source, width, height);
+    } catch {}
+    if (!presented) {
       fail("Could not display the device stream. Reconnect to try again.");
       return;
     }
@@ -527,12 +539,24 @@ export function createDeviceStreamClient(
       // Already closed.
     }
     videoDecoder = null;
+    configuring = false;
     awaitingKeyframe = true;
+    submittedFrames.clear();
+    submittedBytes = 0;
+    pendingAndroidFrames = [];
+    pendingAndroidBytes = 0;
+    androidConfigurationLost = false;
   };
 
   const recoverDecoder = () => {
-    if (platform === "ios") fallBackToMjpeg();
-    else {
+    if (platform === "ios") {
+      closeDecoder();
+      if (mediaTransport) {
+        recoveringMediaEpoch = mediaEpoch;
+        connecting("Video decoder restarted.");
+        mediaTransport.recover();
+      } else controller?.abort();
+    } else {
       closeDecoder();
       connecting("Video decoder restarted.");
       requestKeyframe();
@@ -548,6 +572,11 @@ export function createDeviceStreamClient(
             videoDecoder === decoder &&
             (platform !== "ios" || feedGeneration === videoGeneration)
           ) {
+            const bytes = submittedFrames.get(frame.timestamp);
+            if (bytes !== undefined) {
+              submittedFrames.delete(frame.timestamp);
+              submittedBytes -= bytes;
+            }
             decodedVideoGeneration = feedGeneration;
             paint(frame, frame.displayWidth, frame.displayHeight);
           }
@@ -593,12 +622,13 @@ export function createDeviceStreamClient(
 
   const decode = (isKey: boolean, data: Uint8Array, pts?: number | null) => {
     if (!videoDecoder || videoDecoder.state !== "configured") return;
-    if (awaitingKeyframe) {
-      if (!isKey) return;
-      awaitingKeyframe = false;
-    }
-    if (videoDecoder.decodeQueueSize > SOFT_DECODE_QUEUE) {
-      if (platform !== "ios") {
+    if (awaitingKeyframe && !isKey) return;
+    if (
+      videoDecoder.decodeQueueSize >= MAX_DECODE_QUEUE ||
+      submittedFrames.size >= MAX_DECODE_QUEUE ||
+      submittedBytes + data.byteLength > DEVICE_MEDIA_MAX_PACKET_BYTES
+    ) {
+      if (mediaTransport || platform !== "ios") {
         recoverDecoder();
         return;
       }
@@ -609,21 +639,27 @@ export function createDeviceStreamClient(
       return;
     }
     try {
+      awaitingKeyframe = false;
+      if (isKey) keyframeRequested = false;
+      const frameTimestamp = Math.max(pts ?? timestamp, timestamp);
+      submittedFrames.set(frameTimestamp, data.byteLength);
+      submittedBytes += data.byteLength;
       videoDecoder.decode(
         new EncodedVideoChunk({
           type: isKey ? "key" : "delta",
-          timestamp: pts ?? timestamp,
+          timestamp: frameTimestamp,
           data,
         }),
       );
-      timestamp += FRAME_DURATION_US;
+      timestamp = frameTimestamp + FRAME_DURATION_US;
     } catch {
       recoverDecoder();
     }
   };
 
   const requestKeyframe = () => {
-    if (platform === "android" && socket?.readyState === WebSocket.OPEN) {
+    if (platform === "android" && !keyframeRequested && socket?.readyState === WebSocket.OPEN) {
+      keyframeRequested = true;
       socket.send(JSON.stringify({ type: "reset-video", ack: false }));
     }
   };
@@ -643,6 +679,97 @@ export function createDeviceStreamClient(
     stop();
     events.onInputConnected(false);
     events.onUnauthorized();
+  };
+
+  const connectIosMedia = () => {
+    if (stopped || !access.mediaV1WsBase) return;
+    const lifecycle = generation;
+    const feedGeneration = ++videoGeneration;
+    mediaEpoch = 0;
+    mediaConfigId = 0;
+    recoveringMediaEpoch = null;
+    const query = new URLSearchParams({ device: deviceId });
+    if (target.panelId) query.set("panel", String(target.panelId));
+    const isCurrent = () =>
+      !stopped &&
+      generation === lifecycle &&
+      videoGeneration === feedGeneration &&
+      mediaTransport === transport;
+    const transport = createDeviceMediaTransport(
+      withDeviceHubQuery(`${access.mediaV1WsBase}?${query}`, access),
+      {
+        async onPacket(packet) {
+          if (!isCurrent()) return;
+          if (packet.kind === 1) {
+            if (
+              packet.epoch < mediaEpoch ||
+              (recoveringMediaEpoch !== null && packet.epoch <= recoveringMediaEpoch)
+            )
+              return;
+            closeDecoder();
+            mediaEpoch = packet.epoch;
+            mediaConfigId = packet.configId;
+            recoveringMediaEpoch = null;
+            const configured = await configureDecoder(
+              { codec: avcCodecString(packet.payload), description: packet.payload },
+              isCurrent,
+            );
+            if (!isCurrent()) return;
+            if (!configured) {
+              if (target.videoOnly)
+                fail(
+                  `This browser cannot decode the Duo panel's ${avcCodecString(packet.payload)} stream.`,
+                );
+              else fallBackToMjpeg();
+            }
+            return;
+          }
+          if (packet.kind === 4) {
+            if (packet.epoch < mediaEpoch || recoveringMediaEpoch !== null) return;
+            const bitmap = await createImageBitmap(
+              new Blob([packet.payload as BlobPart], { type: "image/jpeg" }),
+            ).catch(() => null);
+            if (!bitmap) return;
+            try {
+              if (isCurrent() && decodedVideoGeneration !== feedGeneration)
+                paint(bitmap, bitmap.width, bitmap.height);
+            } finally {
+              bitmap.close();
+            }
+            return;
+          }
+          if (
+            recoveringMediaEpoch !== null ||
+            packet.epoch !== mediaEpoch ||
+            packet.configId !== mediaConfigId
+          )
+            return;
+          decode(packet.kind === 2, packet.payload);
+        },
+        onClose(code, detail) {
+          if (!isCurrent()) return;
+          mediaTransport = null;
+          closeDecoder();
+          if (code === 1008 || code === 4401 || (code === 1006 && access.query.wsTicket))
+            return handleUnauthorized();
+          connecting(detail);
+          scheduleRetry("video", connectIosMedia);
+        },
+        onError(detail) {
+          if (!isCurrent()) return;
+          mediaTransport = null;
+          closeDecoder();
+          if (target.videoOnly) fail(detail);
+          else fallBackToMjpeg();
+        },
+      },
+    );
+    mediaTransport = transport;
+  };
+
+  const startIosVideo = () => {
+    if (access.mediaV1WsBase) connectIosMedia();
+    else void readIosVideo();
   };
 
   // iOS video: fetch the AVCC body and demux into the decoder.
@@ -692,7 +819,10 @@ export function createDeviceStreamClient(
         }
         const { done, value } = result;
         if (!isCurrent()) return;
-        if (done) break;
+        if (done) {
+          demuxer.end();
+          break;
+        }
         for (const chunk of demuxer.push(value)) {
           if (videoController.signal.aborted) break;
           switch (chunk.type) {
@@ -920,21 +1050,49 @@ export function createDeviceStreamClient(
         if (isVideoSessionMessage(event.data)) {
           closeDecoder();
           configuring = false;
+          keyframeRequested = false;
           connecting();
-          requestKeyframe();
         }
         return;
       }
       if (!(event.data instanceof ArrayBuffer)) return;
-      const packet = parseSemuPacket(event.data);
+      let packet: ReturnType<typeof parseSemuPacket>;
+      try {
+        packet = parseSemuPacket(event.data);
+      } catch {
+        recoverDecoder();
+        return;
+      }
       const needsScan =
         packet.isKey === null ||
         (packet.isKey && (!videoDecoder || videoDecoder.state !== "configured"));
       const scanned = needsScan ? scanAccessUnit(packet.data) : null;
       const isKey = packet.isKey ?? scanned?.isKey ?? false;
+      if (configuring) {
+        if (androidConfigurationLost) return;
+        if (isKey) {
+          pendingAndroidFrames = [];
+          pendingAndroidBytes = 0;
+        }
+        if (pendingAndroidFrames.length === 0 && !isKey) return;
+        if (
+          pendingAndroidFrames.length >= MAX_DECODE_QUEUE ||
+          pendingAndroidBytes + packet.data.byteLength > DEVICE_MEDIA_MAX_PACKET_BYTES
+        ) {
+          pendingAndroidFrames = [];
+          pendingAndroidBytes = 0;
+          androidConfigurationLost = true;
+          return;
+        }
+        pendingAndroidFrames.push({ ...packet, isKey });
+        pendingAndroidBytes += packet.data.byteLength;
+        return;
+      }
       if (scanned?.sps && (!videoDecoder || videoDecoder.state !== "configured")) {
-        if (configuring) return;
         configuring = true;
+        pendingAndroidFrames = isKey ? [{ ...packet, isKey }] : [];
+        pendingAndroidBytes = isKey ? packet.data.byteLength : 0;
+        androidConfigurationLost = false;
         const epoch = decoderEpoch;
         const isCurrent = () => !stopped && socket === ws;
         void configureDecoder({ codec: avcCodecString(scanned.sps) }, isCurrent).then(
@@ -942,7 +1100,15 @@ export function createDeviceStreamClient(
             if (!isCurrent() || epoch !== decoderEpoch) return;
             configuring = false;
             awaitingKeyframe = true;
-            if (configured) requestKeyframe();
+            const pending = pendingAndroidFrames;
+            pendingAndroidFrames = [];
+            pendingAndroidBytes = 0;
+            if (configured) {
+              if (androidConfigurationLost || pending.length === 0) requestKeyframe();
+              else
+                for (const frame of pending)
+                  decode(frame.isKey === true, frame.data, frame.timestamp);
+            }
           },
         );
         return;
@@ -977,12 +1143,13 @@ export function createDeviceStreamClient(
     stopped = false;
     generation++;
     configuring = false;
+    keyframeRequested = false;
     iosInputAdmitted = false;
     iosInputUnavailable = false;
     connecting();
     if (platform === "ios") {
       if (!target.videoOnly) void connectIosInput();
-      if (useWebCodecs) void readIosVideo();
+      if (useWebCodecs) startIosVideo();
       else fallBackToMjpeg();
     } else if (useWebCodecs) {
       connectAndroid();
@@ -1014,6 +1181,8 @@ export function createDeviceStreamClient(
     primeController = null;
     controller?.abort();
     controller = null;
+    mediaTransport?.stop();
+    mediaTransport = null;
     const discarded = socket;
     socket = null;
     discarded?.close();
@@ -1060,6 +1229,8 @@ export function createDeviceStreamClient(
       videoGeneration++;
       controller?.abort();
       controller = null;
+      mediaTransport?.stop();
+      mediaTransport = null;
       closeDecoder();
       const retry = retryTimers.get("video");
       if (retry) clearTimeout(retry);
@@ -1067,7 +1238,7 @@ export function createDeviceStreamClient(
       for (const panel of panelClients) panel.stop();
       panelClients = [];
       if (!panels) {
-        if (useWebCodecs) void readIosVideo();
+        if (useWebCodecs) startIosVideo();
         return;
       }
       startDuoVideo(panels);

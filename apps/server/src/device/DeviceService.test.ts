@@ -9,6 +9,7 @@ import {
 } from "@supacode/contracts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as Effect from "effect/Effect";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as Exit from "effect/Exit";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
@@ -661,6 +662,25 @@ it.effect("version discovery does not grant consent or start device tools", () =
     expect(starts).toEqual([]);
     expect(agentStarts).toEqual([]);
     expect(requests).toEqual([]);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("advertises bounded device media only when explicitly enabled", () =>
+  Effect.gen(function* () {
+    for (const enabled of [undefined, "false", "true", "1"]) {
+      const { service } = yield* fixture().pipe(
+        Effect.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromEnv({
+              env: enabled === undefined ? {} : { SUPACODE_DEVICE_MEDIA_V1: enabled },
+            }),
+          ),
+        ),
+      );
+      expect((yield* service.state).supportsDeviceMediaV1).toBe(
+        enabled === "true" || enabled === "1",
+      );
+    }
   }).pipe(Effect.scoped),
 );
 

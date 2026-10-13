@@ -4,6 +4,7 @@ export interface DeviceHubAccess {
   readonly httpBase: string;
   /** Same base with the `ws(s)` scheme. */
   readonly wsBase: string;
+  readonly mediaV1WsBase?: string;
   /** Empty for cookie sessions; includes a short-lived ticket for bearer sessions. */
   readonly query: Readonly<Record<string, string>>;
   /** Whether requests must include session cookies. */

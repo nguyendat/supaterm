@@ -82,16 +82,13 @@ it("delivers borrowed decoded frames, reports presentation failure, and discards
   present.mockImplementationOnce(() => {
     throw new Error("renderer failed");
   });
-  expect(() => decoderOutput?.(frame)).toThrow("renderer failed");
+  expect(() => decoderOutput?.(frame)).not.toThrow();
   expect(frame.close).toHaveBeenCalledTimes(2);
-  present.mockReturnValueOnce(false);
-  decoderOutput?.(frame);
   expect(events.onStatus).toHaveBeenLastCalledWith(
     "error",
     "Could not display the device stream. Reconnect to try again.",
   );
-  expect(frame.close).toHaveBeenCalledTimes(3);
   decoderOutput?.(frame);
-  expect(present).toHaveBeenCalledTimes(3);
-  expect(frame.close).toHaveBeenCalledTimes(4);
+  expect(present).toHaveBeenCalledTimes(2);
+  expect(frame.close).toHaveBeenCalledTimes(3);
 });

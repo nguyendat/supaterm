@@ -5,7 +5,11 @@ import {
   type DeviceHubAccess,
   resolveDeviceHubAccess,
 } from "@supacode/client-runtime/state/deviceHubAccess";
-import type { DeviceServiceState, EnvironmentId } from "@supacode/contracts";
+import {
+  DEVICE_MEDIA_V1_PATH,
+  type DeviceServiceState,
+  type EnvironmentId,
+} from "@supacode/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -60,15 +64,27 @@ export function useDeviceHubAccess(
   environmentId: EnvironmentId | null,
   hostId = "local",
 ): DeviceHubAccess | null {
+  const { state } = useDeviceState(environmentId);
   const result = useAtomValue(
     environmentId === null ? EMPTY_ACCESS_ATOM : deviceHubAccessAtom(environmentId),
   );
   return useMemo(
     () =>
       AsyncResult.isSuccess(result)
-        ? { ...result.value, query: { ...result.value.query, hostId } }
+        ? {
+            ...result.value,
+            query: { ...result.value.query, hostId },
+            ...(state.supportsDeviceMediaV1
+              ? {
+                  mediaV1WsBase: result.value.wsBase.replace(
+                    /\/api\/device-hub$/,
+                    DEVICE_MEDIA_V1_PATH,
+                  ),
+                }
+              : {}),
+          }
         : null,
-    [result, hostId],
+    [result, hostId, state.supportsDeviceMediaV1],
   );
 }
 

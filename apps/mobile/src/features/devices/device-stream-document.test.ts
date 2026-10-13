@@ -1,7 +1,55 @@
 import * as NodeVM from "node:vm";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { deviceStreamDocument, deviceStreamMessage } from "./device-stream-document";
+import {
+  deviceStreamBaseUrl,
+  deviceStreamDocument,
+  deviceStreamMessage,
+} from "./device-stream-document";
+import type { DeviceHubAccess } from "@supacode/client-runtime/device/hub-access";
+
+describe("native device stream origin", () => {
+  const access: DeviceHubAccess = {
+    httpBase: "https://relay.test/environments/test/api/device-hub",
+    wsBase: "wss://relay.test/environments/test/api/device-hub",
+    mediaV1WsBase: "wss://relay.test/environments/test/api/device-media/v1",
+    credentials: false,
+    query: { wsTicket: "ticket" },
+  };
+
+  it("keeps iOS direct HTTP video and controls outside an HTTPS mixed-content document", () => {
+    expect(
+      deviceStreamBaseUrl("ios", {
+        ...access,
+        httpBase: "http://192.168.1.10:3773/api/device-hub",
+        wsBase: "ws://192.168.1.10:3773/api/device-hub",
+        mediaV1WsBase: "ws://192.168.1.10:3773/api/device-media/v1",
+      }),
+    ).toBe("file:///");
+  });
+
+  it("retains a secure codec document for HTTPS and WSS relay routes", () => {
+    expect(deviceStreamBaseUrl("ios", access)).toBe("https://localhost/");
+  });
+
+  it.each(["httpBase", "wsBase", "mediaV1WsBase"] as const)(
+    "avoids active mixed content when only %s is insecure",
+    (route) => {
+      const url = access[route]!.replace("https:", "http:").replace("wss:", "ws:");
+      expect(deviceStreamBaseUrl("ios", { ...access, [route]: url })).toBe("file:///");
+    },
+  );
+
+  it("preserves Android's secure codec document for direct HTTP access", () => {
+    expect(
+      deviceStreamBaseUrl("android", {
+        ...access,
+        httpBase: "http://device.test",
+        wsBase: "ws://device.test",
+      }),
+    ).toBe("https://localhost/");
+  });
+});
 
 describe("native device stream document", () => {
   it("keeps ticket and device values from terminating the embedded script", () => {
