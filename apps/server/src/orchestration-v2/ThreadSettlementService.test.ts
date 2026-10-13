@@ -39,6 +39,7 @@ import * as ServerActivation from "../serverActivation.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as ProjectStore from "./ProjectStore.ts";
+import * as ResourceCleanupService from "./ResourceCleanupService.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ThreadSettlementService from "./ThreadSettlementService.ts";
@@ -545,6 +546,7 @@ interface HarnessOptions {
   ) => Effect.Effect<void>;
   /** Runs inside each `closeIdle` call. */
   readonly onCloseIdle?: () => Effect.Effect<void>;
+  readonly onCleanupDevices?: (threadId: string) => Effect.Effect<void>;
   /** Threads `getThread` returns when a `thread.settled` event is handled. */
   readonly currentThreads?: ReadonlyArray<OrchestrationV2AppThread>;
 }
@@ -573,6 +575,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
   const invalidatedCwds = yield* Ref.make<ReadonlyArray<string>>([]);
   const domainEvents = yield* PubSub.unbounded<OrchestrationV2DomainEvent>();
   const closedIdle = yield* Queue.unbounded<{ readonly threadId: string }>();
+  const cleanedDevices = yield* Queue.unbounded<{ readonly threadId: string }>();
   const scriptRuns =
     yield* Queue.unbounded<ProjectSetupScriptRunner.ProjectSetupScriptRunnerInput>();
   const threadCommandLock = yield* KeyedLock.make<ThreadId>();
@@ -687,6 +690,12 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
       closeIdle: (input) =>
         Queue.offer(closedIdle, input).pipe(Effect.andThen(options.onCloseIdle?.() ?? Effect.void)),
     }),
+    Layer.mock(ResourceCleanupService.ResourceCleanupService)({
+      cleanupDevices: (threadId) =>
+        Queue.offer(cleanedDevices, { threadId }).pipe(
+          Effect.andThen(options.onCleanupDevices?.(threadId) ?? Effect.void),
+        ),
+    }),
     Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({
       runForThread,
     }),
@@ -720,6 +729,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
     summaryRecovery,
     invalidatedCwds,
     closedIdle,
+    cleanedDevices,
     scriptRuns,
     withThreadCommandLock: <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) =>
       threadCommandLock.withLock(threadId, effect),
@@ -1199,6 +1209,9 @@ describe("ThreadSettlementServiceV2 terminals", () => {
           yield* startHarness(service, fixture.activation, fixture.snapshotReads);
           yield* fixture.publishEvent(settledEvent(thread));
           assert.deepStrictEqual(yield* Queue.take(fixture.closedIdle), { threadId: thread.id });
+          assert.deepStrictEqual(yield* Queue.take(fixture.cleanedDevices), {
+            threadId: thread.id,
+          });
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),

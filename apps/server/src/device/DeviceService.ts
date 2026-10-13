@@ -132,6 +132,7 @@ export class DeviceService extends Context.Service<
     readonly retryHost: (hostId: DeviceHostId) => Effect.Effect<DeviceServiceState, DeviceError>;
     readonly open: (input: DeviceOpenInput) => Effect.Effect<DeviceSession, DeviceError>;
     readonly close: (input: DeviceCloseInput) => Effect.Effect<void, DeviceError>;
+    readonly cleanupThread: (threadId: ThreadId) => Effect.Effect<void, DeviceError>;
     readonly shutdown: (input: DeviceShutdownInput) => Effect.Effect<void, DeviceError>;
     /** Current settings and foreground app for one device. */
     readonly detail: (input: DeviceDetailInput) => Effect.Effect<DeviceDetail, DeviceError>;
@@ -160,6 +161,12 @@ export class DeviceService extends Context.Service<
 
 interface ServiceState {
   readonly state: DeviceServiceState;
+}
+
+interface OwnedDevice {
+  readonly hostId: DeviceHostId;
+  readonly deviceId: DeviceId;
+  readonly platform: DevicePlatform;
 }
 
 const vendorPrefix = (platform: DevicePlatform) =>
@@ -222,6 +229,21 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
       revision: 0,
     },
   });
+  const ownedDevicesRef = yield* SynchronizedRef.make<ReadonlyMap<string, OwnedDevice>>(new Map());
+  const ownedDeviceKey = (device: OwnedDevice) =>
+    `${device.hostId}:${device.platform}:${device.deviceId}`;
+  const rememberOwnedDevice = (device: OwnedDevice) =>
+    SynchronizedRef.update(ownedDevicesRef, (owned) => {
+      const next = new Map(owned);
+      next.set(ownedDeviceKey(device), device);
+      return next;
+    });
+  const forgetOwnedDevice = (device: OwnedDevice) =>
+    SynchronizedRef.update(ownedDevicesRef, (owned) => {
+      const next = new Map(owned);
+      next.delete(ownedDeviceKey(device));
+      return next;
+    });
 
   const publish = (update: (state: DeviceServiceState) => DeviceServiceState) =>
     SynchronizedRef.updateAndGetEffect(stateRef, ({ state }) => {
@@ -529,6 +551,7 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
       const currentSettings = yield* readDeviceSettings;
       const nextEnabled = input.enabled ?? currentSettings.enabled;
       const nextAgentAccess = input.agentAccessEnabled ?? currentSettings.agentAccessEnabled;
+      if (!nextEnabled && currentSettings.enabled) yield* shutdownOwnedDevices();
       yield* lifecycleLock.withPermit(
         Effect.gen(function* () {
           yield* settings
@@ -677,6 +700,11 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
           })),
         ),
       );
+      yield* rememberOwnedDevice({
+        hostId: host.id,
+        deviceId: bootedId,
+        platform: device.platform,
+      });
       state = yield* refresh(ready);
       device = findDevice(state, host.id, bootedId) ?? findDevice(state, host.id, device.id);
       if (!device) {
@@ -736,12 +764,11 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
     return session;
   });
 
-  const shutdownDevice = Effect.fn("DeviceService.shutdownDevice")(function* (
-    hostId: DeviceHostId,
+  const shutdownDeviceWithReady = Effect.fn("DeviceService.shutdownDeviceWithReady")(function* (
+    ready: DeviceReadiness,
     deviceId: DeviceId,
     platform: DevicePlatform,
   ) {
-    const ready = yield* readiness(hostId);
     const postShutdown = (path: string, body: Record<string, string>) =>
       HttpClientRequest.post(`${ready.hub.origin}${path}`).pipe(
         HttpClientRequest.bodyJson(body),
@@ -797,6 +824,83 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
       Effect.catch((cause) =>
         Effect.logWarning("Device discovery unavailable after shutdown", { cause }),
       ),
+    );
+    yield* forgetOwnedDevice({ hostId: ready.hostId, deviceId, platform });
+  });
+
+  const shutdownDevice = Effect.fn("DeviceService.shutdownDevice")(function* (
+    hostId: DeviceHostId,
+    deviceId: DeviceId,
+    platform: DevicePlatform,
+  ) {
+    const ready = yield* readiness(hostId);
+    yield* shutdownDeviceWithReady(ready, deviceId, platform);
+  });
+
+  const shutdownOwnedDevices = Effect.fn("DeviceService.shutdownOwnedDevices")(function* () {
+    const owned = yield* SynchronizedRef.get(ownedDevicesRef);
+    yield* Effect.forEach(
+      owned.values(),
+      (device) =>
+        Effect.gen(function* () {
+          const current = yield* currentReadiness(device.hostId);
+          if (current) {
+            yield* shutdownDeviceWithReady(current, device.deviceId, device.platform);
+          } else {
+            yield* shutdownDevice(device.hostId, device.deviceId, device.platform);
+          }
+        }).pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("Owned device could not be shut down", {
+              hostId: device.hostId,
+              deviceId: device.deviceId,
+              platform: device.platform,
+              cause,
+            }),
+          ),
+        ),
+      { concurrency: 4, discard: true },
+    );
+  });
+  yield* Effect.addFinalizer(() => shutdownOwnedDevices());
+
+  const cleanupThread = Effect.fn("DeviceService.cleanupThread")(function* (threadId: ThreadId) {
+    const { state } = yield* SynchronizedRef.get(stateRef);
+    const closing = state.sessions.filter((session) => session.threadId === threadId);
+    if (closing.length === 0) return;
+    const remaining = state.sessions.filter((session) => session.threadId !== threadId);
+    yield* publish((current) => ({ ...current, sessions: remaining }));
+    const owned = yield* SynchronizedRef.get(ownedDevicesRef);
+    const devices = new Map(closing.map((session) => [ownedDeviceKey(session), session] as const));
+    yield* Effect.forEach(
+      devices.values(),
+      (session) => {
+        if (
+          remaining.some(
+            (other) => other.hostId === session.hostId && other.deviceId === session.deviceId,
+          )
+        )
+          return Effect.void;
+        if (!owned.has(ownedDeviceKey(session))) return Effect.void;
+        return Effect.gen(function* () {
+          const current = yield* currentReadiness(session.hostId);
+          if (current) {
+            yield* shutdownDeviceWithReady(current, session.deviceId, session.platform);
+          } else {
+            yield* shutdownDevice(session.hostId, session.deviceId, session.platform);
+          }
+        }).pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("Owned device could not be shut down", {
+              hostId: session.hostId,
+              deviceId: session.deviceId,
+              platform: session.platform,
+              cause,
+            }),
+          ),
+        );
+      },
+      { concurrency: 4, discard: true },
     );
   });
 
@@ -958,6 +1062,7 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
       list,
       open,
       close,
+      cleanupThread,
       shutdown,
       detail,
       action,
