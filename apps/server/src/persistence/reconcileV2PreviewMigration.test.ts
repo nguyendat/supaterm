@@ -41,6 +41,8 @@ describe("V2 preview upgrade", () => {
         [58, "McpAppModelContext"],
         [59, "ThreadSnapshotWindowIndexes"],
         [60, "PullRequestReviewGuides"],
+        [61, "PushNotifications"],
+        [62, "PushPreviews"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -124,6 +126,8 @@ describe("V2 preview upgrade", () => {
         [58, "McpAppModelContext"],
         [59, "ThreadSnapshotWindowIndexes"],
         [60, "PullRequestReviewGuides"],
+        [61, "PushNotifications"],
+        [62, "PushPreviews"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
