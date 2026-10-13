@@ -11,7 +11,8 @@ internal class TunnelMux(
   private val sendRecord: (ByteArray) -> Unit,
   private val schedulePump: () -> Unit,
   private val onDataSent: (Int) -> Unit,
-  private val onPong: () -> Unit = {}
+  private val onPong: () -> Unit = {},
+  private val canSend: () -> Boolean = { true }
 ) {
   companion object {
     const val SESSION_WINDOW = 8 * 1024 * 1024
@@ -166,7 +167,7 @@ internal class TunnelMux(
   }
 
   fun pump() {
-    while (!closed) {
+    while (!closed && canSend()) {
       val plain = ByteArrayOutputStream(MAX_PLAIN)
       val callbacks = ArrayList<CompletableFuture<Unit>>()
       var dataBytes = 0

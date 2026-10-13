@@ -13,6 +13,7 @@ import {
 import {
   createTunnelSession,
   TUNNEL_MAX_PLAIN_BYTES,
+  TUNNEL_TRANSPORT_BUFFER_BYTES,
   type TunnelSession,
   type TunnelStream,
 } from "@supacode/shared/relay/tunnel";
@@ -92,7 +93,17 @@ export function startRelayTransport(input: {
           cipher: handshake.cipher,
           initiator: false,
           onStream: input.acceptStream,
-          send: (message) => socket.send(message),
+          send: (message) => {
+            if (socket.bufferedAmount + message.length < TUNNEL_TRANSPORT_BUFFER_BYTES) {
+              socket.send(message, (error) => {
+                if (error) session?.close(error);
+              });
+              return;
+            }
+            return new Promise<void>((resolve, reject) =>
+              socket.send(message, (error) => (error ? reject(error) : resolve())),
+            );
+          },
           onClose: stop,
         });
         cancelHandshake();

@@ -1,5 +1,5 @@
-import type { WebSocketLike } from "effect/socket/Socket";
 import { after, every } from "./timer.ts";
+import { createSocketWriter, type BufferedWebSocket } from "./socketWriter.ts";
 import { DEFAULT_PUBLIC_RELAY_URL } from "@supacode/contracts";
 import {
   createClientHandshake,
@@ -17,6 +17,7 @@ const PING = 6;
 const PONG = 7;
 const HEADER_BYTES = 9;
 export const TUNNEL_MAX_PLAIN_BYTES = 64 * 1024;
+export const TUNNEL_TRANSPORT_BUFFER_BYTES = 256 * 1024;
 const SESSION_WINDOW = 8 * 1024 * 1024;
 const MIN_MESSAGE_COST = 48 * 1024;
 export const TUNNEL_STREAM_WINDOW = 2 * 1024 * 1024;
@@ -47,6 +48,7 @@ export interface TunnelSession {
 interface StreamState {
   readonly stream: TunnelStream;
   readonly pending: { data: Uint8Array; sent?: (error?: Error) => void }[];
+  readonly awaiting: Set<(error?: Error) => void>;
   pendingBytes: number;
   unconsumed: number;
   sendCredit: number;
@@ -60,7 +62,7 @@ interface StreamState {
 
 export function createTunnelSession(input: {
   readonly cipher: RelayCipher;
-  readonly send: (message: Uint8Array<ArrayBuffer>) => void;
+  readonly send: (message: Uint8Array<ArrayBuffer>) => void | Promise<void>;
   readonly initiator: boolean;
   readonly onStream?: (stream: TunnelStream) => void;
   readonly onClose?: (error?: Error) => void;
@@ -74,6 +76,7 @@ export function createTunnelSession(input: {
   let nextId = input.initiator ? 1 : 2;
   let lastRemoteId = 0;
   let scheduled = false;
+  let sending = false;
   let closed = false;
   let receivedSinceTick = false;
   let idleTicks = 0;
@@ -93,7 +96,7 @@ export function createTunnelSession(input: {
     return frame(WINDOW, id, payload);
   };
   const schedule = () => {
-    if (scheduled || closed) return;
+    if (scheduled || sending || closed) return;
     scheduled = true;
     queueMicrotask(pump);
   };
@@ -120,8 +123,8 @@ export function createTunnelSession(input: {
     streams.delete(state.stream.id);
     const index = ready.indexOf(state);
     if (index >= 0) ready.splice(index, 1);
-    for (const item of state.pending.splice(0))
-      item.sent?.(error ?? new Error("Tunnel stream closed"));
+    state.pending.length = 0;
+    for (const sent of state.awaiting) sent(error ?? new Error("Tunnel stream closed"));
     state.pendingBytes = 0;
     grantSession(state.unconsumed);
     state.unconsumed = 0;
@@ -132,6 +135,7 @@ export function createTunnelSession(input: {
       state.finQueued &&
       state.remoteEnded &&
       state.pending.length === 0 &&
+      state.awaiting.size === 0 &&
       state.unconsumed === 0
     )
       finish(state);
@@ -139,6 +143,7 @@ export function createTunnelSession(input: {
 
   function pump() {
     scheduled = false;
+    if (sending) return;
     // eslint-disable-next-line no-unmodified-loop-condition -- Socket sends and consumer callbacks can close the session.
     while (!closed) {
       const parts: Uint8Array[] = [];
@@ -198,7 +203,23 @@ export function createTunnelSession(input: {
         offset += part.length;
       }
       try {
-        input.send(input.cipher.seal(plain));
+        const completion = input.send(input.cipher.seal(plain));
+        if (completion) {
+          sending = true;
+          void completion.then(
+            () => {
+              sending = false;
+              if (closed) return;
+              for (const callback of callbacks) callback();
+              schedule();
+            },
+            (error: unknown) => {
+              sending = false;
+              session.close(error instanceof Error ? error : new Error("Relay send failed"));
+            },
+          );
+          return;
+        }
       } catch (error) {
         const failure = error instanceof Error ? error : new Error("Relay send failed");
         for (const callback of callbacks) callback(failure);
@@ -223,7 +244,17 @@ export function createTunnelSession(input: {
           if (state.pendingBytes + bytes.length > STREAM_SEND_QUEUE_BYTES)
             throw new Error("Tunnel stream send queue full");
           state.pendingBytes += bytes.length;
-          state.pending.push({ data: bytes, ...(sent ? { sent } : {}) });
+          const pending = { data: bytes, ...(sent ? { sent } : {}) };
+          if (sent) {
+            const complete = (error?: Error) => {
+              if (!state.awaiting.delete(complete)) return;
+              sent(error);
+              maybeFinish(state);
+            };
+            pending.sent = complete;
+            state.awaiting.add(complete);
+          }
+          state.pending.push(pending);
           if (state.sendCredit > 0) markReady(state);
         },
         end() {
@@ -257,6 +288,7 @@ export function createTunnelSession(input: {
         onClose: () => {},
       },
       pending: [],
+      awaiting: new Set(),
       pendingBytes: 0,
       unconsumed: 0,
       sendCredit: TUNNEL_STREAM_WINDOW,
@@ -428,7 +460,7 @@ export function createTunnelSession(input: {
 }
 
 export interface TunnelClientOptions {
-  readonly createSocket: (url: string) => WebSocketLike;
+  readonly createSocket: (url: string) => BufferedWebSocket;
   readonly randomBytes: (size: number) => Uint8Array;
   readonly relayUrl?: string;
   readonly handshakeTimeoutMs?: number;
@@ -485,11 +517,13 @@ function connectTunnel(
         const cipher = handshake.finish(event.data);
         cancelTimeout();
         options.signal?.removeEventListener("abort", abort);
+        const writer = createSocketWriter(socket, TUNNEL_TRANSPORT_BUFFER_BYTES);
         session = createTunnelSession({
           cipher,
           initiator: true,
-          send: (message) => socket.send(message),
+          send: writer.send,
           onClose: (error) => {
+            writer.close(error);
             socket.close();
             onClose?.(error);
           },

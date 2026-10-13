@@ -140,6 +140,44 @@ class ProtocolTest {
   }
 
   @Test
+  fun waitsForTransportCapacityWithoutDroppingOrReorderingRecords() {
+    val emitted = ArrayList<ByteArray>()
+    var capacity = 1
+    val mux = TunnelMux(cipher(), { emitted.add(it); capacity-- }, {}, {}, canSend = { capacity > 0 })
+    val peer = cipher()
+    val bulk = mux.open({}, {}, {})
+    val bulkSent = CompletableFuture<Unit>()
+    mux.write(bulk, ByteArray(TunnelMux.MAX_PLAIN), bulkSent)
+    mux.pump()
+    val rpc = mux.open({}, {}, {})
+    val rpcSent = CompletableFuture<Unit>()
+    mux.write(rpc, byteArrayOf(1), rpcSent)
+    mux.pump()
+    assertEquals(1, emitted.size)
+    assertFalse(bulkSent.isDone)
+    assertFalse(rpcSent.isDone)
+    capacity = 10
+    mux.pump()
+    val frames = emitted.flatMap { frameHeaders(peer.open(it)) }
+    assertEquals(listOf(bulk.id, bulk.id, rpc.id), frames.filter { it.first == 2 }.map { it.second })
+    assertTrue(bulkSent.isDone)
+    assertTrue(rpcSent.isDone)
+    mux.close(IllegalStateException("done"))
+  }
+
+  @Test
+  fun failsWritersWhenClosedWhileWaitingForTransportCapacity() {
+    val mux = TunnelMux(cipher(), { error("Transport full") }, {}, {}, canSend = { false })
+    val stream = mux.open({}, {}, {})
+    val sent = CompletableFuture<Unit>()
+    mux.write(stream, byteArrayOf(1), sent)
+    mux.pump()
+    assertFalse(sent.isDone)
+    mux.close(IllegalStateException("Disconnected"))
+    assertTrue(sent.isCompletedExceptionally)
+  }
+
+  @Test
   fun sendsOpenBeforeDataAndFin() {
     val emitted = ArrayList<ByteArray>()
     val mux = TunnelMux(cipher(), emitted::add, {}, {})

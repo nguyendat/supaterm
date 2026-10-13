@@ -16,7 +16,11 @@ import {
   type TunnelStream,
 } from "./tunnel.ts";
 
-function pair(onStream: (stream: TunnelStream) => void = () => {}, failSend = false) {
+function pair(
+  onStream: (stream: TunnelStream) => void = () => {},
+  failSend = false,
+  sent?: () => void | Promise<void>,
+) {
   const identity = NodeCrypto.randomBytes(32);
   const handshake = createClientHandshake(relayPublicKey(identity), NodeCrypto.randomBytes);
   const accepted = acceptClientHandshake(handshake.hello, identity, NodeCrypto.randomBytes);
@@ -29,12 +33,15 @@ function pair(onStream: (stream: TunnelStream) => void = () => {}, failSend = fa
     send: (data) => {
       if (failSend) throw new Error("Socket send failed");
       toHost.push(data);
+      return sent?.();
     },
   });
   const host = createTunnelSession({
     cipher: accepted.cipher,
     initiator: false,
-    send: (data) => toClient.push(data),
+    send: (data) => {
+      toClient.push(data);
+    },
     onStream,
   });
   async function drain() {
@@ -50,6 +57,125 @@ function pair(onStream: (stream: TunnelStream) => void = () => {}, failSend = fa
 }
 
 describe("encrypted relay multiplexing", () => {
+  it("waits for the outer transport and lets another stream progress after it drains", async () => {
+    const stalled = Promise.withResolvers<void>();
+    let sends = 0;
+    const received: { id: number; data: Uint8Array }[] = [];
+    const p = pair(
+      (stream) => {
+        stream.onData = (data) => {
+          received.push({ id: stream.id, data });
+          stream.consumed(data.length);
+        };
+      },
+      false,
+      () => (sends++ === 0 ? stalled.promise : undefined),
+    );
+    try {
+      const bulk = p.client.open();
+      const bulkSent = vi.fn();
+      const payload = NodeCrypto.randomBytes(4 * TUNNEL_MAX_PLAIN_BYTES);
+      bulk.write(payload, bulkSent);
+      await p.drain();
+      const rpc = p.client.open();
+      rpc.write(Uint8Array.of(1, 2, 3));
+      await p.drain();
+      expect(sends).toBe(1);
+      expect(bulkSent).not.toHaveBeenCalled();
+      stalled.resolve();
+      await stalled.promise;
+      await p.drain();
+      const rpcIndex = received.findIndex((item) => item.id === rpc.id);
+      expect(rpcIndex).toBeGreaterThan(0);
+      expect(rpcIndex).toBeLessThan(3);
+      expect(
+        Buffer.concat(received.flatMap((item) => (item.id === bulk.id ? [item.data] : []))).equals(
+          payload,
+        ),
+      ).toBe(true);
+      expect(bulkSent).toHaveBeenCalledExactlyOnceWith(undefined);
+    } finally {
+      p.client.close();
+      p.host.close();
+    }
+  });
+
+  it.each(["reset", "close"])("settles a stalled writer once on %s", async (operation) => {
+    const stalled = Promise.withResolvers<void>();
+    const p = pair(undefined, false, () => stalled.promise);
+    const sent = vi.fn();
+    try {
+      const stream = p.client.open();
+      stream.write(Uint8Array.of(1), sent);
+      await p.drain();
+      expect(sent).not.toHaveBeenCalled();
+      if (operation === "reset") stream.reset();
+      else p.client.close();
+      expect(sent).toHaveBeenCalledExactlyOnceWith(expect.any(Error));
+      stalled.resolve();
+      await stalled.promise;
+      await p.drain();
+      expect(sent).toHaveBeenCalledTimes(1);
+    } finally {
+      p.client.close();
+      p.host.close();
+    }
+  });
+
+  it("fails queued and in-flight writers when the outer transport rejects", async () => {
+    const stalled = Promise.withResolvers<void>();
+    const p = pair(undefined, false, () => stalled.promise);
+    const sent = vi.fn();
+    const queued = vi.fn();
+    try {
+      const stream = p.client.open();
+      stream.write(Uint8Array.of(1), sent);
+      await p.drain();
+      stream.write(Uint8Array.of(2), queued);
+      const error = new Error("Transport disconnected");
+      stalled.reject(error);
+      await p.drain();
+      expect(sent).toHaveBeenCalledExactlyOnceWith(error);
+      expect(queued).toHaveBeenCalledExactlyOnceWith(error);
+      expect(p.client.closed).toBe(true);
+    } finally {
+      p.client.close();
+      p.host.close();
+    }
+  });
+
+  it("delivers a reset before queued data when the transport becomes writable", async () => {
+    const stalled = Promise.withResolvers<void>();
+    const events: string[] = [];
+    let sends = 0;
+    const p = pair(
+      (stream) => {
+        stream.onData = (data) => {
+          events.push(`data:${stream.id}`);
+          stream.consumed(data.length);
+        };
+        stream.onClose = () => events.push(`close:${stream.id}`);
+      },
+      false,
+      () => (sends++ === 0 ? stalled.promise : undefined),
+    );
+    try {
+      const canceled = p.client.open();
+      canceled.write(new Uint8Array(TUNNEL_MAX_PLAIN_BYTES * 2));
+      await p.drain();
+      const active = p.client.open();
+      active.write(Uint8Array.of(1));
+      canceled.reset();
+      stalled.resolve();
+      await stalled.promise;
+      await p.drain();
+      expect(events).toEqual([`data:${canceled.id}`, `close:${canceled.id}`, `data:${active.id}`]);
+    } finally {
+      p.client.close();
+      p.host.close();
+    }
+  });
+
   it("stops opening streams when a callback closes the session", async () => {
     let opened = 0;
     const p = pair(() => {
@@ -84,6 +210,7 @@ describe("encrypted relay multiplexing", () => {
         randomBytes: NodeCrypto.randomBytes,
         createSocket: () => ({
           readyState: 0,
+          bufferedAmount: 0,
           addEventListener: () => {},
           removeEventListener: () => {},
           send: () => {},

@@ -37,6 +37,7 @@ class NativeTunnel(
   companion object {
     const val BACKGROUND_GRACE_MILLIS = 15_000L
     private const val SWITCHING_PROTOCOLS = 101
+    private const val TRANSPORT_BUFFER_BYTES = 256 * 1024
   }
 
   data class Timing(
@@ -68,6 +69,7 @@ class NativeTunnel(
   private var mux: TunnelMux? = null
   private var webSocket: WebSocket? = null
   private var keepalive: ScheduledFuture<*>? = null
+  private var drainPump: ScheduledFuture<*>? = null
   private var backgroundClose: ScheduledFuture<*>? = null
   private var probeDeadline: ScheduledFuture<*>? = null
   private var cooldownFailure: RelayAttemptException? = null
@@ -211,6 +213,18 @@ class NativeTunnel(
                   probeDeadline?.cancel(false)
                   probeDeadline = null
                 },
+                {
+                  if (socket.queueSize() < TRANSPORT_BUFFER_BYTES) true
+                  else {
+                    if (drainPump == null) {
+                      drainPump = actor.schedule({
+                        drainPump = null
+                        schedulePump()
+                      }, 4, TimeUnit.MILLISECONDS)
+                    }
+                    false
+                  }
+                },
               )
               mux = session
               cooldownFailure = null
@@ -293,6 +307,8 @@ class NativeTunnel(
     attempt = null
     keepalive?.cancel(false)
     keepalive = null
+    drainPump?.cancel(false)
+    drainPump = null
     probeDeadline?.cancel(false)
     probeDeadline = null
     mux?.close(error)
@@ -308,7 +324,7 @@ class NativeTunnel(
   }
 
   private fun schedulePump() {
-    if (pumpScheduled || stopped.get()) return
+    if (pumpScheduled || drainPump != null || stopped.get()) return
     pumpScheduled = true
     actor.execute {
       pumpScheduled = false
