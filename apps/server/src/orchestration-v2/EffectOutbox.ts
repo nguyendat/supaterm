@@ -112,6 +112,9 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
       Schema.Struct({ type: Schema.Literal("regenerate") }),
     ]),
   }),
+  Schema.Struct({
+    type: Schema.Literal("thread-recap.generate"),
+  }),
   /** Follows a Stop: sends `thread.stop` to every delegated task under the stopped thread. */
   Schema.Struct({
     type: Schema.Literal("delegated-tasks.stop"),
@@ -129,6 +132,7 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "preview.cleanup",
   "attachment.cleanup",
   "thread-title.generate",
+  "thread-recap.generate",
   "delegated-tasks.stop",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
 

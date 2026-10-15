@@ -75,6 +75,17 @@ export interface ThreadTitleGenerationResult {
   needsRefinement?: boolean | undefined;
 }
 
+export interface RecapGenerationInput {
+  cwd: string;
+  history: string;
+  modelSelection: ModelSelection;
+}
+
+export interface RecapGenerationResult {
+  summary: string;
+  nextAction?: string | undefined;
+}
+
 export interface ReviewGuideStackLayer {
   readonly number: number;
   readonly title: string | null;
@@ -132,6 +143,10 @@ export interface ProviderTextGeneration {
   readonly generateThreadTitle: (
     input: ThreadTitleGenerationInput,
   ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
+
+  readonly generateRecap: (
+    input: RecapGenerationInput,
+  ) => Effect.Effect<RecapGenerationResult, TextGenerationError>;
 
   /** Explain a change request to the maintainer deciding whether it lands. */
   readonly generateReviewGuide: (

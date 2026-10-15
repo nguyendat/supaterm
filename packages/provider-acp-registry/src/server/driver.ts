@@ -83,6 +83,7 @@ const makeUnsupportedTextGeneration = (): ProviderTextGeneration => {
     generatePrContent: () => unsupported("generatePrContent"),
     generateBranchName: () => unsupported("generateBranchName"),
     generateThreadTitle: () => unsupported("generateThreadTitle"),
+    generateRecap: () => unsupported("generateRecap"),
     generateReviewGuide: () => unsupported("generateReviewGuide"),
   };
 };

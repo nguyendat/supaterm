@@ -8893,6 +8893,30 @@ export default function ChatView(props: ChatViewProps) {
       notifyDirectAnnotationAttached();
       return;
     }
+    if (
+      !directAnnotation &&
+      !composerHasNonPromptContent &&
+      /^\/recap\s*$/u.test(promptRef.current.trim())
+    ) {
+      const result = await updateThreadMetadata({
+        environmentId: activeThread.environmentId,
+        input: { threadId: activeThread.id, generateRecap: true },
+      });
+      if (result._tag === "Success") {
+        promptRef.current = "";
+        clearComposerDraftContent(composerDraftTarget);
+        composerRef.current?.resetCursorState();
+      } else if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add({
+          type: "error",
+          title: "Could not generate a recap",
+          description:
+            error instanceof Error ? error.message : "Try again when the thread is idle.",
+        });
+      }
+      return;
+    }
     if (needsLoadBalancing) {
       toastManager.add({
         type: "warning",

@@ -4,6 +4,7 @@ import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
+  buildRecapPrompt,
   buildReviewGuidePrompt,
   buildThreadTitlePrompt,
 } from "./textGenerationPrompts.ts";
@@ -312,6 +313,23 @@ describe("buildThreadTitlePrompt", () => {
       `Thread contents:\n[Earlier content truncated]\n\n${retainedContext}`,
     );
     expect(result.prompt.match(/\[Earlier content truncated\]/g)).toHaveLength(1);
+  });
+});
+
+describe("buildRecapPrompt", () => {
+  it("requests a bounded structured catch-up from conversation history", () => {
+    const result = buildRecapPrompt({
+      history: "User: Investigate reconnect failures\n\nAssistant: The session marker is stale.",
+    });
+    expect(result.prompt).toContain("Write a brief catch-up");
+    expect(result.prompt).toContain("The session marker is stale.");
+    expect(toJsonSchemaObject(result.outputSchema)).toMatchObject({
+      required: ["summary", "nextAction"],
+      properties: {
+        summary: { type: "string" },
+        nextAction: { anyOf: [{ type: "string" }, { type: "null" }] },
+      },
+    });
   });
 });
 

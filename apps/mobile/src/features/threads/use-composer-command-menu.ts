@@ -72,6 +72,13 @@ export function buildComposerSlashCommandItems(input: {
       label: "/model",
       description: "Switch model",
     },
+    {
+      id: "cmd:recap",
+      type: "slash-command",
+      command: "recap",
+      label: "/recap",
+      description: "Catch up on the current conversation",
+    },
   ] satisfies ComposerCommandItem[];
   const items: ComposerCommandItem[] = builtIn.filter((item) => item.command.includes(query));
 

@@ -199,6 +199,9 @@ export function useThreadComposerState() {
   const uploadThreadFeedback = useAtomCommand(threadEnvironment.uploadFeedback, {
     reportFailure: false,
   });
+  const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
+    reportFailure: false,
+  });
   const editQueuedRun = useAtomCommand(threadEnvironment.editQueuedRun, {
     label: "edit queued message",
     reportFailure: false,
@@ -592,6 +595,19 @@ export function useThreadComposerState() {
         return null;
       }
 
+      if (attachments.length === 0 && /^\/recap\s*$/u.test(text)) {
+        const result = await updateThreadMetadata({
+          environmentId: thread.environmentId,
+          input: { threadId: thread.id, generateRecap: true },
+        });
+        if (result._tag === "Success") {
+          clearComposerDraftContent(threadKey);
+        } else {
+          Alert.alert("Could not generate a recap", "Try again when the thread is idle.");
+        }
+        return null;
+      }
+
       const contextBlockReason = composerContextSendBlockReason(draft.context);
       if (contextBlockReason) {
         Alert.alert("Too much context", contextBlockReason);
@@ -737,6 +753,7 @@ export function useThreadComposerState() {
       selectedThreadRuntime?.status,
       selectedThreadShell,
       uploadThreadFeedback,
+      updateThreadMetadata,
     ],
   );
 

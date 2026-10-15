@@ -19,6 +19,7 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildReviewGuidePrompt,
+  buildRecapPrompt,
   buildThreadTitlePrompt,
 } from "./textGenerationPrompts.ts";
 import {
@@ -205,6 +206,23 @@ export function fromRunner(
     });
   });
 
+  const generateRecap: ProviderTextGeneration["generateRecap"] = Effect.fn(`${name}.generateRecap`)(
+    function* (input) {
+      const generated = yield* run({
+        operation: "generateRecap",
+        cwd: input.cwd,
+        modelSelection: input.modelSelection,
+        ...buildRecapPrompt({ history: input.history }),
+      });
+      return {
+        summary: generated.summary.trim(),
+        ...(generated.nextAction === null || generated.nextAction === undefined
+          ? {}
+          : { nextAction: generated.nextAction.trim() }),
+      };
+    },
+  );
+
   return {
     supportsReviewGuides: options.supportsReviewGuides ?? false,
     generateCommitMessage,
@@ -212,5 +230,6 @@ export function fromRunner(
     generateBranchName,
     generateThreadTitle,
     generateReviewGuide,
+    generateRecap,
   } satisfies ProviderTextGeneration;
 }
