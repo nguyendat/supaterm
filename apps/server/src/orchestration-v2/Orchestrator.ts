@@ -25,7 +25,6 @@ import {
   isForkableSourceRunStatus,
   isProviderNativeSubagentThread,
   MessageId,
-  TurnItemId,
   type NodeId,
   type ModelSelection,
   OrchestrationV2Command,
@@ -63,6 +62,7 @@ import {
   RuntimeMode,
   ThreadLinkedPullRequest,
   ThreadId,
+  type TurnItemId,
 } from "@supaterm/contracts";
 import { modelSelectionsEqual } from "@supaterm/shared/model";
 import {
@@ -469,7 +469,6 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.workflow-run-watch.end":
     case "thread.pull-request.sync":
     case "thread.title.regeneration.complete":
-    case "thread.recap.complete":
     case "thread.runtime-mode.set":
     case "thread.interaction-mode.set":
     case "thread.model-selection.set":
@@ -521,18 +520,6 @@ function pendingThreadTitleGenerationEffect(
     commandId,
     threadId,
     request: { type: "thread-title.generate", kind },
-  };
-}
-
-function pendingThreadRecapGenerationEffect(
-  commandId: CommandId,
-  threadId: ThreadId,
-): PendingOrchestrationEffectV2 {
-  return {
-    id: `effect:${commandId}:thread-recap.generate`,
-    commandId,
-    threadId,
-    request: { type: "thread-recap.generate" },
   };
 }
 
@@ -3041,9 +3028,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               : command.regenerateTitle === false || command.title !== undefined
                 ? { titleRegeneration: null }
                 : {}),
-            ...(command.generateRecap === true && thread.recapGeneration == null
-              ? { recapGeneration: { requestId: command.commandId, startedAt: now } }
-              : {}),
             updatedAt: now,
           };
         }
@@ -3353,16 +3337,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         pendingThreadTitleGenerationEffect(command.commandId, command.threadId, {
           type: "regenerate",
         }),
-      ]);
-    }
-    if (
-      command.type === "thread.metadata.update" &&
-      command.generateRecap === true &&
-      updatedThread.recapGeneration?.requestId === command.commandId
-    ) {
-      yield* Ref.update(effects, (existing) => [
-        ...existing,
-        pendingThreadRecapGenerationEffect(command.commandId, command.threadId),
       ]);
     }
 
@@ -4579,94 +4553,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         } satisfies PendingOrchestrationEffectV2,
       ]);
     });
-
-  const dispatchRecapComplete = Effect.fn("orchestrationV2.dispatch.recapComplete")(function* (
-    command: Extract<OrchestrationV2ServerCommand, { readonly type: "thread.recap.complete" }>,
-    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
-  ) {
-    const projection = yield* projectionStore.getThreadRecords(command.threadId, [
-      "messages",
-      "turnItems",
-    ]);
-    const emitEvent = emit(events, command);
-    const now = yield* DateTime.now;
-    if (projection.thread.recapGeneration?.requestId !== command.requestId) {
-      yield* emitEvent({
-        type: "thread.metadata-updated",
-        threadId: command.threadId,
-        providerInstanceId: projection.thread.providerInstanceId,
-        occurredAt: now,
-        payload: projection.thread,
-      });
-      return;
-    }
-
-    const thread = { ...projection.thread, recapGeneration: null, updatedAt: now };
-    yield* emitEvent({
-      type: "thread.metadata-updated",
-      threadId: command.threadId,
-      providerInstanceId: thread.providerInstanceId,
-      occurredAt: now,
-      payload: thread,
-    });
-    if (command.summary === undefined) return;
-
-    const text = [
-      command.summary,
-      ...(command.nextAction === undefined ? [] : [`Next: ${command.nextAction}`]),
-    ].join("\n\n");
-    const messageId = MessageId.make(`message:recap:${command.requestId}`);
-    const itemId = TurnItemId.make(`turn-item:recap:${command.requestId}`);
-    const message: OrchestrationV2ConversationMessage = {
-      createdBy: "system",
-      creationSource: "server",
-      id: messageId,
-      threadId: command.threadId,
-      runId: null,
-      nodeId: null,
-      role: "assistant",
-      text,
-      attachments: [],
-      streaming: false,
-      createdAt: now,
-      updatedAt: now,
-    };
-    const item: OrchestrationV2TurnItem = {
-      id: itemId,
-      threadId: command.threadId,
-      runId: null,
-      nodeId: null,
-      providerThreadId: null,
-      providerTurnId: null,
-      nativeItemRef: null,
-      parentItemId: null,
-      ordinal: yield* nextTurnItemOrdinal(projection),
-      status: "completed",
-      title: "Conversation recap",
-      startedAt: now,
-      completedAt: now,
-      updatedAt: now,
-      type: "assistant_message",
-      messageId,
-      text,
-      attachments: [],
-      streaming: false,
-    };
-    yield* emitEvent({
-      type: "message.updated",
-      threadId: command.threadId,
-      providerInstanceId: thread.providerInstanceId,
-      occurredAt: now,
-      payload: message,
-    });
-    yield* emitEvent({
-      type: "turn-item.updated",
-      threadId: command.threadId,
-      providerInstanceId: thread.providerInstanceId,
-      occurredAt: now,
-      payload: item,
-    });
-  });
 
   const dispatchMessage = (
     command: Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>,
@@ -10918,9 +10804,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.model-selection.set":
       case "provider.switch":
         yield* dispatchThreadMutation(command, events, effects);
-        break;
-      case "thread.recap.complete":
-        yield* dispatchRecapComplete(command, events).pipe(mapDispatchError(command));
         break;
       case "thread.workflow-run.unwatch":
       case "thread.workflow-run-watch.start":

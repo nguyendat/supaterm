@@ -19,8 +19,6 @@ export type {
   PrContentGenerationResult,
   ReviewGuideGenerationInput,
   ReviewGuideGenerationResult,
-  RecapGenerationInput,
-  RecapGenerationResult,
   ThreadTitleGenerationInput,
   ThreadTitleGenerationResult,
 } from "@supaterm/provider-core/server/textGeneration";
@@ -37,7 +35,6 @@ type TextGenerationOp =
   | "generatePrContent"
   | "generateBranchName"
   | "generateThreadTitle"
-  | "generateRecap"
   | "generateReviewGuide";
 
 const resolveInstance = (
@@ -94,10 +91,6 @@ export const make = Effect.gen(function* () {
             return yield* textGeneration.generateThreadTitle({ ...input, linkedContext });
           }),
         ),
-      ),
-    generateRecap: (input) =>
-      resolveInstance(registry, "generateRecap", input.modelSelection.instanceId).pipe(
-        Effect.flatMap((textGeneration) => textGeneration.generateRecap(input)),
       ),
   });
 });

@@ -22,7 +22,6 @@ import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
-  buildRecapPrompt,
   buildThreadTitlePrompt,
 } from "@supaterm/provider-core/server/textGenerationPrompts";
 import {
@@ -341,21 +340,6 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
     });
     return { title: sanitizeThreadTitle(generated.title) };
   });
-  const generateRecap: ProviderTextGeneration["generateRecap"] = Effect.fn(
-    "MuseTextGeneration.generateRecap",
-  )(function* (input) {
-    const generated = yield* runMuseJson({
-      operation: "generateRecap",
-      ...buildRecapPrompt({ history: input.history }),
-      modelSelection: input.modelSelection,
-    });
-    return {
-      summary: generated.summary.trim(),
-      ...(generated.nextAction === null || generated.nextAction === undefined
-        ? {}
-        : { nextAction: generated.nextAction.trim() }),
-    };
-  });
   // Muse runs in an empty read-only directory and cannot be pointed at a checkout to read.
   const generateReviewGuide: ProviderTextGeneration["generateReviewGuide"] = () =>
     Effect.fail(investigationUnsupported("generateReviewGuide", "Muse Code"));
@@ -365,7 +349,6 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
-    generateRecap,
     generateReviewGuide,
   } satisfies ProviderTextGeneration;
 });

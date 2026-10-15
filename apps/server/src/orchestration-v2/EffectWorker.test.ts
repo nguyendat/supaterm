@@ -29,7 +29,6 @@ import * as ProviderTurnControlService from "./ProviderTurnControlService.ts";
 import * as ProviderTurnStartService from "./ProviderTurnStartService.ts";
 import * as RuntimeRequestService from "./RuntimeRequestService.ts";
 import * as ThreadTitleRegenerationService from "./ThreadTitleRegenerationService.ts";
-import * as ThreadRecapGenerationService from "./ThreadRecapGenerationService.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 
@@ -145,12 +144,6 @@ function layerExecutorFor(input: {
     Layer.succeed(
       ThreadTitleRegenerationService.ThreadTitleRegenerationService,
       ThreadTitleRegenerationService.ThreadTitleRegenerationService.of({
-        execute: () => Effect.void,
-      }),
-    ),
-    Layer.succeed(
-      ThreadRecapGenerationService.ThreadRecapGenerationService,
-      ThreadRecapGenerationService.ThreadRecapGenerationService.of({
         execute: () => Effect.void,
       }),
     ),

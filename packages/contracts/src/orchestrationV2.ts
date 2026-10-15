@@ -447,14 +447,6 @@ export const OrchestrationV2AppThread = Schema.Struct({
       }),
     ),
   ),
-  recapGeneration: Schema.optional(
-    Schema.NullOr(
-      Schema.Struct({
-        requestId: CommandId,
-        startedAt: Schema.DateTimeUtc,
-      }),
-    ),
-  ),
   /** Latest accepted rollback. Only its failure is recorded in `rollbackFailure`. */
   rollbackRequestId: Schema.optional(CommandId),
   /** Latest rollback that failed after every retry; cleared when the next rollback starts. */
@@ -2150,14 +2142,6 @@ export const OrchestrationV2AppThreadJson = OrchestrationV2AppThread.mapFields((
       }),
     ),
   ),
-  recapGeneration: Schema.optional(
-    Schema.NullOr(
-      Schema.Struct({
-        requestId: CommandId,
-        startedAt: Schema.DateTimeUtcFromString,
-      }),
-    ),
-  ),
   deletedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
 }));
 export type OrchestrationV2AppThreadJson = typeof OrchestrationV2AppThreadJson.Type;
@@ -2897,7 +2881,6 @@ export const OrchestrationV2Command = Schema.Union([
     limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecoveryUpdate)),
     /** Link (object) or unlink (null) a pull request (#8160); absent leaves it unchanged. */
     linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
-    generateRecap: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.pull-request.link"),
@@ -3233,14 +3216,6 @@ const OrchestrationV2InternalCommand = Schema.Union([
     threadId: ThreadId,
     requestId: RuntimeRequestId,
     deadline: Schema.DateTimeUtc,
-  }),
-  Schema.Struct({
-    type: Schema.Literal("thread.recap.complete"),
-    commandId: CommandId,
-    threadId: ThreadId,
-    requestId: CommandId,
-    summary: Schema.optional(TrimmedNonEmptyString),
-    nextAction: Schema.optional(TrimmedNonEmptyString),
   }),
   /**
    * Records what a pull request watch saw, and wakes the agent in the same transaction when
