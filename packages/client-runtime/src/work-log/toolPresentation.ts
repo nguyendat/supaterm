@@ -1,10 +1,11 @@
-import { isWorkspaceImagePreviewPath } from "@supacode/shared/filePreview";
+import { isWorkspaceImagePreviewPath } from "@supaterm/shared/filePreview";
+import { COMPUTER_USE_TOOL_SOURCE, dynamicToolSurface } from "@supaterm/shared/toolActivity";
 import type {
   ToolActivityIcon,
   ToolActivityNativeAppReference,
   ToolActivitySource,
   ToolActivitySurface,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 
 export interface ExtractedToolActivityPresentation {
   readonly viewedImagePath?: string;
@@ -111,12 +112,23 @@ export function extractToolActivityPresentation(
   payloadValue: unknown,
 ): ExtractedToolActivityPresentation {
   const payload = asRecord(payloadValue);
+  const retainedSource = activitySource(payload?.toolSource);
   const toolSurface =
     payload?.toolSurface === "browser" || payload?.toolSurface === "computer"
       ? payload.toolSurface
-      : undefined;
+      : retainedSource?.kind === "computer" || retainedSource?.kind === "browser"
+        ? retainedSource.kind
+        : payload?.type === "dynamic_tool"
+          ? dynamicToolSurface(
+              typeof payload.toolName === "string" ? payload.toolName : undefined,
+              payload.input,
+            )
+          : undefined;
+  const toolSource =
+    toolSurface === "computer" && retainedSource?.kind !== "computer"
+      ? COMPUTER_USE_TOOL_SOURCE
+      : retainedSource;
   const toolIcon = activityIcon(payload?.toolIcon);
-  const toolSource = activitySource(payload?.toolSource);
   const viewedImagePath = trimmedString(payload?.viewedImagePath, 4096);
   return {
     ...(toolSurface ? { toolSurface } : {}),

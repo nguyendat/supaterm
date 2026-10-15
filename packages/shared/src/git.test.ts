@@ -1,5 +1,5 @@
-import { SourceControlProviderKind } from "@supacode/contracts";
-import type { VcsStatusRemoteResult, VcsStatusResult } from "@supacode/contracts";
+import { SourceControlProviderKind } from "@supaterm/contracts";
+import type { VcsStatusRemoteResult, VcsStatusResult } from "@supaterm/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -9,6 +9,9 @@ import {
   flattenTemporaryWorktreeBranchName,
   isTemporaryWorktreeBranch,
   normalizeGitRemoteUrl,
+  parseGitRemoteFetchUrls,
+  parseGitRemoteVerboseOutput,
+  parseGitRemoteVerboseUrls,
   repositoryBranchPrefix,
   parseGitHubRepositoryNameWithOwnerFromRemoteUrl,
   parseOriginUrlFromGitConfig,
@@ -31,11 +34,11 @@ describe("normalizeGitRemoteUrl", () => {
   });
 
   it("preserves nested group paths for providers like GitLab", () => {
-    expect(normalizeGitRemoteUrl("git@gitlab.com:Supacode/platform/Supacode.git")).toBe(
-      "gitlab.com/supacode/platform/supacode",
+    expect(normalizeGitRemoteUrl("git@gitlab.com:Supaterm/platform/Supaterm.git")).toBe(
+      "gitlab.com/supaterm/platform/supaterm",
     );
-    expect(normalizeGitRemoteUrl("https://gitlab.com/Supacode/platform/Supacode.git")).toBe(
-      "gitlab.com/supacode/platform/supacode",
+    expect(normalizeGitRemoteUrl("https://gitlab.com/Supaterm/platform/Supaterm.git")).toBe(
+      "gitlab.com/supaterm/platform/supaterm",
     );
   });
 
@@ -58,31 +61,31 @@ describe("normalizeGitRemoteUrl", () => {
   });
 
   it("gives an Azure DevOps repository the same key over SSH as over HTTPS", () => {
-    expect(normalizeGitRemoteUrl("git@ssh.dev.azure.com:v3/Supacode/Platform/Supacode")).toBe(
-      "dev.azure.com/supacode/platform/_git/supacode",
+    expect(normalizeGitRemoteUrl("git@ssh.dev.azure.com:v3/Supaterm/Platform/Supaterm")).toBe(
+      "dev.azure.com/supaterm/platform/_git/supaterm",
     );
     expect(
-      normalizeGitRemoteUrl("ssh://git@ssh.dev.azure.com:22/v3/Supacode/Platform/Supacode"),
-    ).toBe("dev.azure.com/supacode/platform/_git/supacode");
+      normalizeGitRemoteUrl("ssh://git@ssh.dev.azure.com:22/v3/Supaterm/Platform/Supaterm"),
+    ).toBe("dev.azure.com/supaterm/platform/_git/supaterm");
     expect(
-      normalizeGitRemoteUrl("https://Supacode@dev.azure.com/Supacode/Platform/_git/Supacode"),
-    ).toBe("dev.azure.com/supacode/platform/_git/supacode");
+      normalizeGitRemoteUrl("https://Supaterm@dev.azure.com/Supaterm/Platform/_git/Supaterm"),
+    ).toBe("dev.azure.com/supaterm/platform/_git/supaterm");
   });
 
   it("puts the organization back in the host on the name dev.azure.com replaced", () => {
     expect(
-      normalizeGitRemoteUrl("Supacode@vs-ssh.visualstudio.com:v3/Supacode/Platform/Supacode"),
-    ).toBe("supacode.visualstudio.com/platform/_git/supacode");
-    expect(normalizeGitRemoteUrl("https://Supacode.visualstudio.com/Platform/_git/Supacode")).toBe(
-      "supacode.visualstudio.com/platform/_git/supacode",
+      normalizeGitRemoteUrl("Supaterm@vs-ssh.visualstudio.com:v3/Supaterm/Platform/Supaterm"),
+    ).toBe("supaterm.visualstudio.com/platform/_git/supaterm");
+    expect(normalizeGitRemoteUrl("https://Supaterm.visualstudio.com/Platform/_git/Supaterm")).toBe(
+      "supaterm.visualstudio.com/platform/_git/supaterm",
     );
   });
 
   it("leaves an Azure SSH host it cannot read as the path it was given", () => {
     // Not `v3`, and not four segments: rewriting either would invent a repository that the web
     // spelling has no name for, so the remote stands as it arrived.
-    expect(normalizeGitRemoteUrl("git@ssh.dev.azure.com:v4/Supacode/Platform/Supacode")).toBe(
-      "ssh.dev.azure.com/v4/supacode/platform/supacode",
+    expect(normalizeGitRemoteUrl("git@ssh.dev.azure.com:v4/Supaterm/Platform/Supaterm")).toBe(
+      "ssh.dev.azure.com/v4/supaterm/platform/supaterm",
     );
     expect(normalizeGitRemoteUrl("git@ssh.dev.azure.com:v3/supabitapp/supacode-next")).toBe(
       "ssh.dev.azure.com/v3/supabitapp/supacode-next",
@@ -156,6 +159,60 @@ describe("parseOriginUrlFromGitConfig", () => {
   });
 });
 
+describe("parseGitRemoteVerboseOutput", () => {
+  it("keeps partial-clone fetch remotes with trailing Git annotations", () => {
+    expect(
+      parseGitRemoteVerboseOutput(
+        [
+          "origin\thttps://github.com/acme/repo.git (fetch) [blob:none]",
+          "origin\thttps://github.com/acme/repo.git (push)",
+          "upstream\tgit@github.com:acme/repo.git (fetch)",
+        ].join("\n"),
+      ),
+    ).toEqual([
+      {
+        name: "origin",
+        url: "https://github.com/acme/repo.git",
+        direction: "fetch",
+      },
+      {
+        name: "origin",
+        url: "https://github.com/acme/repo.git",
+        direction: "push",
+      },
+      {
+        name: "upstream",
+        url: "git@github.com:acme/repo.git",
+        direction: "fetch",
+      },
+    ]);
+
+    expect(
+      parseGitRemoteVerboseUrls(
+        [
+          "origin\thttps://github.com/acme/repo.git (fetch) [blob:none]",
+          "origin\thttps://github.com/acme/repo.git (push)",
+          "upstream\tgit@github.com:acme/repo.git (fetch)",
+        ].join("\n"),
+      ),
+    ).toEqual(
+      new Map([
+        [
+          "origin",
+          {
+            fetchUrl: "https://github.com/acme/repo.git",
+            pushUrl: "https://github.com/acme/repo.git",
+          },
+        ],
+        ["upstream", { fetchUrl: "git@github.com:acme/repo.git" }],
+      ]),
+    );
+    expect(
+      parseGitRemoteFetchUrls("origin\thttps://github.com/acme/repo.git (fetch) [blob:none]"),
+    ).toEqual(new Map([["origin", "https://github.com/acme/repo.git"]]));
+  });
+});
+
 describe("parseGitHubRepositoryNameWithOwnerFromRemoteUrl", () => {
   it("extracts the owner and repository from common GitHub remote shapes", () => {
     expect(
@@ -217,7 +274,7 @@ describe("isTemporaryWorktreeBranch", () => {
     ).toBe(false);
   });
 
-  it("matches the flat fallback used when a plain supacode branch exists", () => {
+  it("matches the flat fallback used when a plain supaterm branch exists", () => {
     const flat = flattenTemporaryWorktreeBranchName(`${WORKTREE_BRANCH_PREFIX}/deadbeef`);
     expect(flat).toBe(`${WORKTREE_BRANCH_PREFIX}-deadbeef`);
     expect(isTemporaryWorktreeBranch(flat)).toBe(true);
@@ -354,10 +411,10 @@ describe("resolveAutoFeatureBranchName", () => {
 });
 
 describe("formatGeneratedBranchName", () => {
-  it.each(["supacode", "supacode/"])("joins static prefix %s with one slash", (prefix) => {
+  it.each(["supaterm", "supaterm/"])("joins static prefix %s with one slash", (prefix) => {
     expect(
       formatGeneratedBranchName("Add Search", { mode: "static", prefix, instructions: "" }),
-    ).toBe("supacode/add-search");
+    ).toBe("supaterm/add-search");
   });
   it("supports an empty prefix and preserves user prefix casing", () => {
     expect(
@@ -385,7 +442,7 @@ describe("formatGeneratedBranchName", () => {
     expect(
       formatGeneratedBranchName("feat/Add Search", {
         mode: "semantic",
-        prefix: "supacode",
+        prefix: "supaterm",
         instructions: "",
       }),
     ).toBe("feat/add-search");

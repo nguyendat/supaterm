@@ -197,6 +197,8 @@ import {
   PullRequestOperationError,
   PullRequestReactionInput,
   PullRequestRef,
+  PullRequestWorkflowRun,
+  PullRequestWorkflowRunRef,
   PullRequestRoutingResult,
   PullRequestRoutingIdentityInput,
   PullRequestRoutingIdentityResult,
@@ -536,6 +538,7 @@ export const WS_METHODS = {
   pullRequestsDetail: "pullRequests.detail",
   pullRequestsPreview: "pullRequests.preview",
   pullRequestsChecks: "pullRequests.checks",
+  pullRequestsWorkflowRun: "pullRequests.workflowRun",
   pullRequestsActivity: "pullRequests.activity",
   pullRequestsReviewGuide: "pullRequests.reviewGuide",
   pullRequestsGenerateReviewGuide: "pullRequests.generateReviewGuide",
@@ -630,7 +633,7 @@ const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProviders, 
     /** With `instanceId` and `cwd`: rescan the workspace's skills and slash
      * commands even when a snapshot for that cwd already exists. */
     fresh: Schema.optional(Schema.Boolean),
-    /** Explicit user request: bypass Supacode-owned caches and rediscover models.
+    /** Explicit user request: bypass Supaterm-owned caches and rediscover models.
      * Background status refreshes must not open agent sessions. */
     refreshModels: Schema.optional(Schema.Boolean),
   }),
@@ -1030,6 +1033,13 @@ const WsPullRequestsPreviewRpc = Rpc.make(WS_METHODS.pullRequestsPreview, {
 const WsPullRequestsChecksRpc = Rpc.make(WS_METHODS.pullRequestsChecks, {
   payload: PullRequestRef,
   success: Schema.NullOr(PullRequestChecks),
+  error: PullRequestRpcError,
+});
+
+/** Null where the host has no workflow runs to read. */
+const WsPullRequestsWorkflowRunRpc = Rpc.make(WS_METHODS.pullRequestsWorkflowRun, {
+  payload: PullRequestWorkflowRunRef,
+  success: Schema.NullOr(PullRequestWorkflowRun),
   error: PullRequestRpcError,
 });
 
@@ -1444,7 +1454,7 @@ const WsVcsInitRpc = Rpc.make(WS_METHODS.vcsInit, {
 
 /**
  * Ephemeral live diff preview for compact/mobile surfaces.
- * Not the persisted Supacode Review model. Future review sessions should use
+ * Not the persisted Supaterm Review model. Future review sessions should use
  * review.open* + review.getSnapshot.
  */
 const WsReviewGetDiffPreviewRpc = Rpc.make(WS_METHODS.reviewGetDiffPreview, {
@@ -1901,7 +1911,7 @@ const WsSubscribeResourceTelemetryRpc = Rpc.make(WS_METHODS.subscribeResourceTel
  * be added without authorization.
  */
 export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthorization>()(
-  "supacode/contracts/RpcScopeAuthorization",
+  "supaterm/contracts/RpcScopeAuthorization",
   { error: EnvironmentAuthorizationError },
 ) {}
 
@@ -1978,6 +1988,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestsDetailRpc,
   WsPullRequestsPreviewRpc,
   WsPullRequestsChecksRpc,
+  WsPullRequestsWorkflowRunRpc,
   WsPullRequestsActivityRpc,
   WsPullRequestsReviewGuideRpc,
   WsPullRequestsGenerateReviewGuideRpc,

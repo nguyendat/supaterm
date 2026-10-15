@@ -1,19 +1,19 @@
-import { pendingThreadCreationLabel } from "@supacode/client-runtime/pending-thread-creation";
+import { pendingThreadCreationLabel } from "@supaterm/client-runtime/pending-thread-creation";
 import { useSelectedThreadComposerMetadata } from "../../state/use-thread-detail";
 import { useAtomValue } from "@effect/atom-react";
 import { useChildThreadInputs } from "../../state/entities";
 import { UsageLimitRecoveryCard } from "./UsageLimitRecoveryCard";
 import { useNavigation } from "@react-navigation/native";
 import type { WorktreeSetupCardProps } from "./worktree-setup-card";
-import type { ComposerTextPaste } from "../../native/SupacodeComposerEditor.types";
-import { type EnvironmentConnectionPhase } from "@supacode/client-runtime/connection";
-import type { EnvironmentThreadShell } from "@supacode/client-runtime/state/shell";
+import type { ComposerTextPaste } from "../../native/SupatermComposerEditor.types";
+import { type EnvironmentConnectionPhase } from "@supaterm/client-runtime/connection";
+import type { EnvironmentThreadShell } from "@supaterm/client-runtime/state/shell";
 import type {
   CodexFeedbackSubmission,
   EnvironmentThreadStatus,
-} from "@supacode/client-runtime/state/threads";
+} from "@supaterm/client-runtime/state/threads";
 import { useKeyboardChatComposerInset, useKeyboardScrollToEnd } from "@legendapp/list/keyboard";
-import { resolveProviderSkillsForCwd } from "@supacode/client-runtime/providerSkills";
+import { resolveProviderSkillsForCwd } from "@supaterm/client-runtime/providerSkills";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { HeaderHeightContext } from "@react-navigation/elements";
 import { NativeLayoutObserver } from "../../native/NativeLayoutObserver";
@@ -25,29 +25,29 @@ import type {
   ProviderApprovalDecision,
   RuntimeMode,
   RuntimeRequestId,
-  ServerConfig as SupacodeServerConfig,
+  ServerConfig as SupatermServerConfig,
   ThreadId,
   UsageLimitsReport,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import {
   appendCodexArtifactTemplateUsePrompt,
   type CodexArtifactTemplate,
-} from "@supacode/shared/codexArtifactTemplates";
-import type { ThreadUserInputQuestion } from "@supacode/client-runtime/state/thread-requests";
+} from "@supaterm/shared/codexArtifactTemplates";
+import type { ThreadUserInputQuestion } from "@supaterm/client-runtime/state/thread-requests";
 import {
   presentPendingBackgroundWork,
   presentProviderGoal,
-} from "@supacode/client-runtime/state/thread-execution";
-import { resolveSubagentPillSegment } from "@supacode/client-runtime/state/thread-subagents";
+} from "@supaterm/client-runtime/state/thread-execution";
+import { resolveSubagentPillSegment } from "@supaterm/client-runtime/state/thread-subagents";
 import {
   formatModelSelectionEffort,
   type ProviderSubagentStatus,
-} from "@supacode/client-runtime/state/thread-execution";
-import { formatModelSlugName, resolveSelectableModel } from "@supacode/shared/model";
-import { isProviderNativeSubagentThread } from "@supacode/contracts";
+} from "@supaterm/client-runtime/state/thread-execution";
+import { formatModelSlugName, resolveSelectableModel } from "@supaterm/shared/model";
+import { isProviderNativeSubagentThread } from "@supaterm/contracts";
 import type { QueuedRunEdit } from "../../state/queued-run-edit";
 import type { FollowUpBehavior } from "../../lib/followUpBehavior";
-import type { ActiveTurnComposerAction } from "@supacode/client-runtime/state/composer-dispatch";
+import type { ActiveTurnComposerAction } from "@supaterm/client-runtime/state/composer-dispatch";
 import * as Haptics from "expo-haptics";
 import {
   memo,
@@ -90,7 +90,7 @@ import { useWorkspaceContentWidth } from "../layout/workspace-content-width";
 import { useNativeWorkspaceColumnsSupported } from "../../native/NativeWorkspaceColumns";
 import { useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
-import { collectProviderUsageLimits } from "@supacode/shared/usageLimits";
+import { collectProviderUsageLimits } from "@supaterm/shared/usageLimits";
 import type { ComposerEditorHandle } from "../../components/ComposerEditor";
 import type { StatusTone } from "../../components/StatusPill";
 import type { DraftComposerAttachment } from "../../lib/composerImages";
@@ -138,10 +138,12 @@ import {
   USER_INPUT_TOGGLE_DURATION_MS,
 } from "./pendingUserInputLayout";
 import {
-  COMPOSER_COLLAPSED_CHROME,
-  COMPOSER_EXPANDED_CHROME,
   COMPOSER_LAYOUT_TRANSITION,
   COMPOSER_TRANSITION_DURATION_MS,
+} from "../../components/composerLayoutTransition";
+import {
+  COMPOSER_COLLAPSED_CHROME,
+  COMPOSER_EXPANDED_CHROME,
   ThreadComposer,
 } from "./ThreadComposer";
 import { ComposerPopoverHost } from "./ComposerPopoverHost";
@@ -214,7 +216,7 @@ export interface ThreadDetailScreenProps {
   readonly selectedThreadQueueCount: number;
   readonly queuedMessages: ReadonlyArray<QueuedThreadMessage>;
   readonly dispatchingMessageId: MessageId | null;
-  readonly serverConfig: SupacodeServerConfig | null;
+  readonly serverConfig: SupatermServerConfig | null;
   readonly layoutVariant?: LayoutVariant;
   readonly usesAutomaticContentInsets?: boolean;
   readonly onHeaderMaterialVisibilityChange?: (visible: boolean) => void;
@@ -510,9 +512,10 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     ? 0
     : Math.max(insets.bottom, 12);
   const contentPresentationKind = props.contentPresentation.kind;
-  // The raw sync status enters "synchronizing" on every full fetch, cached or
-  // not. Whether messages are already on screen decides the pill label: no
-  // data yet → "Loading messages", cached data reconciling → "Syncing".
+  const clientCreation =
+    props.creationState?.kind === "preparing" && !props.creationState.serverOwned
+      ? props.creationState
+      : null;
   const realThreadSyncLabel = (() => {
     switch (props.threadSyncStatus) {
       case "empty":
@@ -521,7 +524,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
         if (contentPresentationKind === "ready") {
           return "Syncing messages...";
         }
-        return contentPresentationKind === "loading" ? "Loading messages..." : null;
+        return null;
       default:
         return null;
     }
@@ -536,9 +539,6 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
       props.connectionStateLabel === "unsupported" ||
       props.connectionStateLabel === "available",
   );
-  // One floating pill above the composer: it reads the connection phase while
-  // disconnected, the sync state while messages load, then the working timer
-  // once the feed is settled.
   // The shell's roster is the server's post-settlement view of what still runs.
   const pendingBackgroundWork = presentPendingBackgroundWork(
     props.selectedThread.pendingBackgroundTasks,
@@ -1256,6 +1256,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
               worktreeSetup={props.worktreeSetup}
               setupWorkingStartedAt={props.setupWorkingStartedAt}
               queuedMessages={props.queuedMessages}
+              creatingThread={clientCreation !== null}
               dispatchingMessageId={props.dispatchingMessageId}
               // A native subagent has no composer to edit a pending message in;
               // Cancel on the edit banner would discard it.
@@ -1552,11 +1553,10 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                         // the draft: queueing them against a thread id the server may
                         // still reject would strand them in the outbox.
                         sendBlockedReason={
-                          props.creationState?.kind === "preparing" &&
-                          !props.creationState.serverOwned
+                          clientCreation
                             ? pendingThreadCreationLabel({
                                 connected: props.connectionStateLabel === "connected",
-                                preparingWorktree: props.creationState.preparingWorktree,
+                                preparingWorktree: clientCreation.preparingWorktree,
                               })
                             : null
                         }

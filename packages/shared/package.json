@@ -1,5 +1,5 @@
 {
-  "name": "@supacode/shared",
+  "name": "@supaterm/shared",
   "private": true,
   "type": "module",
   "exports": {
@@ -159,9 +159,9 @@
       "types": "./src/projectSettings.ts",
       "import": "./src/projectSettings.ts"
     },
-    "./supacodeProjectFile": {
-      "types": "./src/supacodeProjectFile.ts",
-      "import": "./src/supacodeProjectFile.ts"
+    "./supatermProjectFile": {
+      "types": "./src/supatermProjectFile.ts",
+      "import": "./src/supatermProjectFile.ts"
     },
     "./orchestrationTiming": {
       "types": "./src/orchestrationTiming.ts",
@@ -315,9 +315,9 @@
       "types": "./src/devHome.ts",
       "import": "./src/devHome.ts"
     },
-    "./supacodeHome": {
-      "types": "./src/supacodeHome.ts",
-      "import": "./src/supacodeHome.ts"
+    "./supatermHome": {
+      "types": "./src/supatermHome.ts",
+      "import": "./src/supatermHome.ts"
     },
     "./devProxy": {
       "types": "./src/devProxy.ts",
@@ -355,9 +355,9 @@
       "types": "./src/orchestrationV2Timeline.ts",
       "import": "./src/orchestrationV2Timeline.ts"
     },
-    "./supacodeMcpToolPresentation": {
-      "types": "./src/supacodeMcpToolPresentation.ts",
-      "import": "./src/supacodeMcpToolPresentation.ts"
+    "./supatermMcpToolPresentation": {
+      "types": "./src/supatermMcpToolPresentation.ts",
+      "import": "./src/supatermMcpToolPresentation.ts"
     },
     "./Array": {
       "types": "./src/Array.ts",
@@ -504,7 +504,7 @@
     "@noble/ciphers": "2.2.0",
     "@noble/curves": "2.2.0",
     "@noble/hashes": "catalog:",
-    "@supacode/contracts": "workspace:*",
+    "@supaterm/contracts": "workspace:*",
     "effect": "catalog:",
     "mdast-util-directive": "catalog:",
     "micromark-extension-directive": "catalog:",

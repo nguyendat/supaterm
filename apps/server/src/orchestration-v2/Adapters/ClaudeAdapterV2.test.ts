@@ -44,7 +44,7 @@ import {
   RunAttemptId,
   RunId,
   ThreadId,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -60,19 +60,20 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
+import * as Scheduler from "effect/Scheduler";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { Tool } from "effect/ai";
-import { formatClaudeResumeCompactionQuestion } from "@supacode/shared/claudeCompaction";
-import * as HostProcess from "@supacode/shared/HostProcess";
-import { getModelSelectionStringOptionValue } from "@supacode/shared/model";
-import { SpawnExecutableResolution } from "@supacode/shared/shell";
+import { formatClaudeResumeCompactionQuestion } from "@supaterm/shared/claudeCompaction";
+import * as HostProcess from "@supaterm/shared/HostProcess";
+import { getModelSelectionStringOptionValue } from "@supaterm/shared/model";
+import { SpawnExecutableResolution } from "@supaterm/shared/shell";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
-import * as McpProviderSession from "@supacode/provider-core/server/mcpSession";
-import * as McpProviderSessions from "@supacode/provider-core/server/McpProviderSessions";
+import * as McpProviderSession from "@supaterm/provider-core/server/mcpSession";
+import * as McpProviderSessions from "@supaterm/provider-core/server/McpProviderSessions";
 import { PreviewControlsToolkit } from "../../mcp/toolkits/previewControls/tools.ts";
 import { HtmlToolkit } from "../../mcp/toolkits/html/tools.ts";
 import { EnvironmentToolkit } from "../../mcp/toolkits/environment/tools.ts";
@@ -81,12 +82,12 @@ import { WorktreeToolkit } from "../../mcp/toolkits/worktree/tools.ts";
 import { ThreadToolkit } from "../../mcp/toolkits/thread/tools.ts";
 import { OrchestratorToolkit } from "../../mcp/toolkits/orchestrator/tools.ts";
 import { ClaudeExecutableFileCheck } from "../../provider/Drivers/ClaudeExecutable.ts";
-import * as ProviderEventLoggers from "@supacode/provider-core/server/ProviderEventLoggers";
-import * as ProviderAdapter from "@supacode/provider-core/server/ProviderAdapter";
-import type * as ProviderContinuationRequests from "@supacode/provider-core/server/ProviderContinuationRequests";
-import { makeProviderFailure } from "@supacode/provider-core/server/failure";
+import * as ProviderEventLoggers from "@supaterm/provider-core/server/ProviderEventLoggers";
+import * as ProviderAdapter from "@supaterm/provider-core/server/ProviderAdapter";
+import type * as ProviderContinuationRequests from "@supaterm/provider-core/server/ProviderContinuationRequests";
+import { makeProviderFailure } from "@supaterm/provider-core/server/failure";
 import * as ClaudeAdapterV2 from "./ClaudeAdapterV2.ts";
-import * as IdAllocator from "@supacode/provider-core/server/IdAllocator";
+import * as IdAllocator from "@supaterm/provider-core/server/IdAllocator";
 import { ClaudeOrchestratorReplayHarness } from "./ClaudeAdapterV2.testkit.ts";
 import { provideDeterministicTestRuntime } from "../testkit/DeterministicRuntime.ts";
 import { runOrchestratorV2Scenario } from "../testkit/OrchestratorScenario.ts";
@@ -523,14 +524,14 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
 });
 
 describe("ClaudeAdapterV2 MCP query overrides", () => {
-  const SUPACODE_MCP_SERVERS = {
-    supacode: {
+  const SUPATERM_MCP_SERVERS = {
+    supaterm: {
       type: "http",
       url: "http://127.0.0.1:43123/mcp",
       headers: {
         Authorization: "Bearer secret-claude-token",
       },
-      timeout: ClaudeAdapterV2.CLAUDE_SUPACODE_MCP_TOOL_TIMEOUT_MS,
+      timeout: ClaudeAdapterV2.CLAUDE_SUPATERM_MCP_TOOL_TIMEOUT_MS,
     },
   } as const;
 
@@ -566,7 +567,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     assert.deepEqual(overrides, { allowedTools: ["Read"] });
   });
 
-  it("pre-approves all Supacode tools when attaching an MCP session without an allowlist", () => {
+  it("pre-approves all Supaterm tools when attaching an MCP session without an allowlist", () => {
     const threadId = ThreadId.make("thread-claude-mcp-no-allowlist");
     const mcpSession = mcpSessionFor(threadId);
     const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
@@ -575,27 +576,27 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     });
 
     assert.deepEqual(overrides, {
-      allowedTools: [ClaudeAdapterV2.CLAUDE_SUPACODE_MCP_TOOL_WILDCARD],
-      mcpServers: SUPACODE_MCP_SERVERS,
+      allowedTools: [ClaudeAdapterV2.CLAUDE_SUPATERM_MCP_TOOL_WILDCARD],
+      mcpServers: SUPATERM_MCP_SERVERS,
     });
   });
 
-  it("extends an explicit allowlist with the Supacode wildcard", () => {
+  it("extends an explicit allowlist with the Supaterm wildcard", () => {
     const threadId = ThreadId.make("thread-claude-mcp-with-allowlist");
     const mcpSession = mcpSessionFor(threadId);
     const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
       mcpSession,
       readOnlySandbox: false,
-      allowedTools: ["Read", "mcp__supacode__*"],
+      allowedTools: ["Read", "mcp__supaterm__*"],
     });
 
     assert.deepEqual(overrides, {
-      allowedTools: ["Read", "mcp__supacode__*"],
-      mcpServers: SUPACODE_MCP_SERVERS,
+      allowedTools: ["Read", "mcp__supaterm__*"],
+      mcpServers: SUPATERM_MCP_SERVERS,
     });
   });
 
-  it("pre-approves only read-only Supacode tools in a read-only sandbox", () => {
+  it("pre-approves only read-only Supaterm tools in a read-only sandbox", () => {
     const threadId = ThreadId.make("thread-claude-mcp-read-only");
     const mcpSession = mcpSessionFor(threadId);
     const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
@@ -607,16 +608,16 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     assert.deepEqual(overrides, {
       allowedTools: [
         ...ClaudeAdapterV2.CLAUDE_READ_ONLY_ALLOWED_TOOLS,
-        ...ClaudeAdapterV2.CLAUDE_READ_ONLY_SUPACODE_MCP_ALLOWED_TOOLS,
+        ...ClaudeAdapterV2.CLAUDE_READ_ONLY_SUPATERM_MCP_ALLOWED_TOOLS,
       ],
-      mcpServers: SUPACODE_MCP_SERVERS,
+      mcpServers: SUPATERM_MCP_SERVERS,
     });
     assert.isFalse(
-      overrides.allowedTools?.includes(ClaudeAdapterV2.CLAUDE_SUPACODE_MCP_TOOL_WILDCARD),
+      overrides.allowedTools?.includes(ClaudeAdapterV2.CLAUDE_SUPATERM_MCP_TOOL_WILDCARD),
     );
   });
 
-  it("pre-approves only read-only Supacode tools in a read-only sandbox without an allowlist", () => {
+  it("pre-approves only read-only Supaterm tools in a read-only sandbox without an allowlist", () => {
     const threadId = ThreadId.make("thread-claude-mcp-read-only-no-allowlist");
     const mcpSession = mcpSessionFor(threadId);
     const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
@@ -625,7 +626,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     });
 
     assert.deepEqual(overrides.allowedTools, [
-      ...ClaudeAdapterV2.CLAUDE_READ_ONLY_SUPACODE_MCP_ALLOWED_TOOLS,
+      ...ClaudeAdapterV2.CLAUDE_READ_ONLY_SUPATERM_MCP_ALLOWED_TOOLS,
     ]);
   });
 
@@ -696,12 +697,12 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       ...Object.values(HtmlToolkit.tools),
     ]
       .flatMap((tool) =>
-        Context.get(tool.annotations, Tool.Readonly) ? [`mcp__supacode__${tool.name}`] : [],
+        Context.get(tool.annotations, Tool.Readonly) ? [`mcp__supaterm__${tool.name}`] : [],
       )
       .sort();
 
     assert.deepEqual(
-      [...ClaudeAdapterV2.CLAUDE_READ_ONLY_SUPACODE_MCP_ALLOWED_TOOLS].sort(),
+      [...ClaudeAdapterV2.CLAUDE_READ_ONLY_SUPATERM_MCP_ALLOWED_TOOLS].sort(),
       readOnlyToolNames,
     );
   });
@@ -726,15 +727,15 @@ describe("ClaudeAdapterV2 native protocol logging", () => {
       allowedTools: ["Read"],
     });
     assert.deepEqual(overrides, {
-      allowedTools: ["Read", "mcp__supacode__*"],
+      allowedTools: ["Read", "mcp__supaterm__*"],
       mcpServers: {
-        supacode: {
+        supaterm: {
           type: "http",
           url: "http://127.0.0.1:43123/mcp",
           headers: {
             Authorization: "Bearer secret-claude-token",
           },
-          timeout: ClaudeAdapterV2.CLAUDE_SUPACODE_MCP_TOOL_TIMEOUT_MS,
+          timeout: ClaudeAdapterV2.CLAUDE_SUPATERM_MCP_TOOL_TIMEOUT_MS,
         },
       },
     });
@@ -980,7 +981,7 @@ describe("ClaudeAdapterV2 session permissions", () => {
 
   it("adds a whole-tool session rule when Claude offers no suggestion", () => {
     const result = ClaudeAdapterV2.permissionResultFromDecision({
-      toolName: "mcp__supacode__custom_tool",
+      toolName: "mcp__supaterm__custom_tool",
       decision: "acceptForSession",
       toolInput: {},
       toolUseID: "tool-2",
@@ -993,7 +994,7 @@ describe("ClaudeAdapterV2 session permissions", () => {
     assert.deepEqual(result.updatedPermissions, [
       {
         type: "addRules",
-        rules: [{ toolName: "mcp__supacode__custom_tool" }],
+        rules: [{ toolName: "mcp__supaterm__custom_tool" }],
         behavior: "allow",
         destination: "session",
       },
@@ -1008,7 +1009,7 @@ describe("ClaudeAdapterV2 Auto-accept edits", () => {
         const fileSystem = yield* FileSystem.FileSystem;
         const idAllocator = yield* IdAllocator.IdAllocatorV2;
         const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "supacode-claude-accept-edits-",
+          prefix: "supaterm-claude-accept-edits-",
         });
         let openedOptions: ClaudeAdapterV2.ClaudeAgentSdkQueryOptions | undefined;
         const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
@@ -1176,7 +1177,7 @@ const captureSdkExecutablePaths = Effect.fn("captureSdkExecutablePaths")(functio
   ).pipe(
     Effect.provide(
       ServerConfig.layerTest(process.cwd(), {
-        prefix: "supacode-claude-binary-path-",
+        prefix: "supaterm-claude-binary-path-",
       }),
     ),
     Effect.provideService(ClaudeAdapterV2.ClaudeAgentSdkQueryRunner, {
@@ -1288,7 +1289,7 @@ describe("ClaudeAdapterV2 resume compaction", () => {
         const fileSystem = yield* FileSystem.FileSystem;
         const idAllocator = yield* IdAllocator.IdAllocatorV2;
         const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "supacode-claude-resume-",
+          prefix: "supaterm-claude-resume-",
         });
         let openedOptions: ClaudeAdapterV2.ClaudeAgentSdkQueryOptions | undefined;
         const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
@@ -1513,7 +1514,7 @@ describe("ClaudeAdapterV2 attachments", () => {
         const idAllocator = yield* IdAllocator.IdAllocatorV2;
         const path = yield* Path.Path;
         const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "supacode-claude-v2-attachments-",
+          prefix: "supaterm-claude-v2-attachments-",
         });
         const offeredMessages: Array<SDKUserMessage> = [];
         const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
@@ -1659,7 +1660,7 @@ describe("ClaudeAdapterV2 attachments", () => {
         const fileSystem = yield* FileSystem.FileSystem;
         const idAllocator = yield* IdAllocator.IdAllocatorV2;
         const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "supacode-claude-v2-unsupported-attachment-",
+          prefix: "supaterm-claude-v2-unsupported-attachment-",
         });
         let openCount = 0;
         const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
@@ -1748,7 +1749,7 @@ describe("ClaudeAdapterV2 native fork", () => {
         const fileSystem = yield* FileSystem.FileSystem;
         const idAllocator = yield* IdAllocator.IdAllocatorV2;
         const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "supacode-claude-v2-fork-attachments-",
+          prefix: "supaterm-claude-v2-fork-attachments-",
         });
         const openedQueries: Array<ClaudeAdapterV2.ClaudeAgentSdkQueryOpenInput> = [];
         const forkCalls: Array<{
@@ -1977,7 +1978,7 @@ function makeFakeClaudeCli(answerSetServers = true) {
 }
 
 describe("ClaudeAdapterV2 MCP credential channel", () => {
-  const supacodeMcpServer = {
+  const supatermMcpServer = {
     type: "http" as const,
     url: "http://127.0.0.1:43123/mcp",
     headers: { Authorization: "Bearer dummy-mcp-credential" },
@@ -1995,7 +1996,7 @@ describe("ClaudeAdapterV2 MCP credential channel", () => {
             resume: false,
             cwd: null,
             environment: { PATH: "/usr/bin" },
-            mcpServers: { supacode: supacodeMcpServer },
+            mcpServers: { supaterm: supatermMcpServer },
           }),
           pathToClaudeCodeExecutable: "/opt/claude/cli.js",
           spawnClaudeCodeProcess: cli.spawn,
@@ -2018,7 +2019,7 @@ describe("ClaudeAdapterV2 MCP credential channel", () => {
 
       assert.deepInclude(cli.controlRequests, {
         subtype: "mcp_set_servers",
-        servers: { supacode: supacodeMcpServer },
+        servers: { supaterm: supatermMcpServer },
       });
       const spawned = JSON.stringify(cli.spawns);
       assert.notInclude(spawned, "--mcp-config");
@@ -2046,7 +2047,7 @@ describe("ClaudeAdapterV2 native session identity", () => {
         const fileSystem = yield* FileSystem.FileSystem;
         const idAllocator = yield* IdAllocator.IdAllocatorV2;
         const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "supacode-claude-v2-session-identity-",
+          prefix: "supaterm-claude-v2-session-identity-",
         });
         const openedQueries: Array<ClaudeAdapterV2.ClaudeAgentSdkQueryOpenInput> = [];
         const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
@@ -2320,7 +2321,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
   const makeWakeHarnessWithOptions = (options?: {
     readonly close?: (sdkMessages: Queue.Queue<SDKMessage>) => Effect.Effect<void>;
     readonly interrupt?: Effect.Effect<void>;
-    readonly stopTask?: (taskId: string) => Effect.Effect<void>;
+    readonly stopTask?: (
+      taskId: string,
+    ) => Effect.Effect<void, ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerError>;
     readonly environment?: NodeJS.ProcessEnv;
     readonly subagentLaunchToolUseId?: string;
     readonly nativeSessionId?: string;
@@ -2332,7 +2335,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "supacode-claude-v2-wake-",
+        prefix: "supaterm-claude-v2-wake-",
       });
       const sdkMessages = yield* Queue.unbounded<SDKMessage>();
       const processQueues: Array<Queue.Queue<SDKMessage>> = [];
@@ -2875,14 +2878,10 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       ),
   );
 
-  it.effect.each([
-    { model: "claude-opus-5-5", expected: "assistant_message" },
-    { model: "claude-fable-5-1", expected: "assistant_message" },
-    { model: "claude-opus-5", expected: "reasoning" },
-    { model: "claude-sonnet-4-6", expected: "reasoning" },
-  ] as const)(
-    "shows $model thinking right before a tool call as $expected",
-    ({ model, expected }) =>
+  // Summarized thinking can't tell a progress update from reasoning, so both stay Thoughts.
+  it.effect.each(["claude-opus-5-5", "claude-fable-5-1", "claude-opus-5", "claude-sonnet-4-6"])(
+    "keeps %s thinking right before a tool call as reasoning",
+    (model) =>
       Effect.gen(function* () {
         const harness = yield* makeWakeHarness;
         yield* harness.runtime.startTurn(
@@ -2933,7 +2932,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           [...latest.values()].map((item) => [item.type, item.text]),
           [
             ["reasoning", "Planning the check"],
-            [expected, "Found it: the memory file is the cause."],
+            ["reasoning", "Found it: the memory file is the cause."],
           ],
         );
       }).pipe(
@@ -4903,7 +4902,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         const fileSystem = yield* FileSystem.FileSystem;
         const idAllocator = yield* IdAllocator.IdAllocatorV2;
         const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "supacode-claude-v2-settled-stop-replaced-",
+          prefix: "supaterm-claude-v2-settled-stop-replaced-",
         });
         const processQueues: Array<Queue.Queue<SDKMessage>> = [];
         const firstCloseRequested = yield* Deferred.make<void>();
@@ -5154,7 +5153,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           const fileSystem = yield* FileSystem.FileSystem;
           const idAllocator = yield* IdAllocator.IdAllocatorV2;
           const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
-            prefix: "supacode-claude-v2-sibling-replace-",
+            prefix: "supaterm-claude-v2-sibling-replace-",
           });
           const nativeIds = ["native-thread-roster-a", "native-thread-roster-b"] as const;
           let allocateIndex = 0;
@@ -7409,7 +7408,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         );
         yield* awaitUntil(() => harness.terminalEvents().length === 1, "first turn terminal");
 
-        // A native wake turn launches a new subagent while Supacode has no turn.
+        // A native wake turn launches a new subagent while Supaterm has no turn.
         const idleFrames = [
           makeSubagentTaskStartedFrame({
             taskId: TASK_ID,
@@ -8831,17 +8830,373 @@ describe("ClaudeAdapterV2 background wake turns", () => {
   );
 
   it.effect.each([false, true])(
-    "stops one native subagent while its sibling keeps running, owner settled %s",
-    (ownerSettled) =>
+    "drops an idle start superseded by live completion, later resume %s",
+    (resume) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const harness = yield* makeWakeHarness;
+          const startTurn = (ordinal: number, continuation = false) =>
+            harness.runtime.startTurn(
+              makeClaudeTestTurnInput({
+                threadId: harness.threadId,
+                providerThread: harness.providerThread,
+                now: DateTime.makeUnsafe(0),
+                attemptId: RunAttemptId.make(`attempt-stale-start-${ordinal}`),
+                providerTurnOrdinal: ordinal,
+                text: "Continue work.",
+                attachments: [],
+                ...(continuation
+                  ? {
+                      messageCreatedBy: "agent" as const,
+                      messageCreationSource: "provider" as const,
+                    }
+                  : {}),
+              }),
+            );
+          const started = (taskId: string, suffix: string) =>
+            makeSubagentTaskStartedFrame({
+              taskId,
+              toolUseId: `toolu-${taskId}`,
+              uuid: `00000000-0000-4000-8000-${suffix}`,
+            });
+          const finished = (taskId: string, suffix: string) =>
+            makeSubagentNotificationFrame({
+              taskId,
+              toolUseId: `toolu-${taskId}`,
+              summary: "Finished audit.",
+              uuid: `00000000-0000-4000-8000-${suffix}`,
+            });
+          yield* startTurn(1);
+          yield* harness.offerAndWait(started("stale-agent", "000000004001"));
+          yield* harness.offerAndWait(started("wake-agent", "000000004002"));
+          yield* harness.offerAndWait(
+            makeResultFrame({
+              uuid: "00000000-0000-4000-8000-000000004003",
+              result: "Agents launched.",
+            }),
+          );
+          yield* Queue.take(harness.terminalReceipts);
+          // The background task resumes in the idle gap, before a user turn.
+          yield* harness.offerAndWait(started("stale-agent", "000000004004"));
+          yield* startTurn(2);
+          yield* harness.offerAndWait(finished("stale-agent", "000000004005"));
+          yield* harness.offerAndWait(
+            makeResultFrame({
+              uuid: "00000000-0000-4000-8000-000000004006",
+              result: "User turn finished.",
+            }),
+          );
+          yield* Queue.take(harness.terminalReceipts);
+          if (resume) yield* harness.offerAndWait(started("stale-agent", "000000004007"));
+          yield* harness.offerAndWait(finished("wake-agent", "000000004008"));
+          yield* Queue.take(harness.continuationReceipts);
+          yield* startTurn(3, true);
+          yield* harness.offerAndWait(
+            makeResultFrame({
+              uuid: "00000000-0000-4000-8000-000000004009",
+              result: "Wake finished.",
+            }),
+          );
+          yield* Queue.take(harness.terminalReceipts);
+          const latest = harness.events.findLast(
+            (event) =>
+              event.type === "subagent.updated" &&
+              event.subagent.nativeTaskRef?.nativeId === "stale-agent",
+          );
+          assert.equal(latest?.type, "subagent.updated");
+          if (latest?.type !== "subagent.updated") return;
+          assert.equal(latest.subagent.status, resume ? "running" : "completed");
+          assert.equal(latest.subagent.result, resume ? null : "Finished audit.");
+          assert.equal(latest.subagent.completedAt === null, resume);
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          ),
+        ),
+      ),
+  );
+
+  const makeStopFixture = (options?: Parameters<typeof makeWakeHarnessWithOptions>[0]) =>
+    Effect.gen(function* () {
+      const requests = yield* Queue.unbounded<void>();
+      const harness = yield* makeWakeHarnessWithOptions({
+        ...options,
+        stopTask: (id) =>
+          Queue.offer(requests, undefined).pipe(
+            Effect.andThen(options?.stopTask?.(id) ?? Effect.void),
+          ),
+      });
+      let sequence = 4500;
+      const uuid = () => `00000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`;
+      const startTurn = (continuation = false) =>
+        harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: DateTime.makeUnsafe(0),
+            attemptId: RunAttemptId.make(`attempt-stop-${continuation ? 2 : 1}`),
+            providerTurnOrdinal: continuation ? 2 : 1,
+            text: "Run an audit.",
+            attachments: [],
+            ...(continuation
+              ? { messageCreatedBy: "agent" as const, messageCreationSource: "provider" as const }
+              : {}),
+          }),
+        );
+      const start = (toolUseId = "toolu-stop-agent") =>
+        harness.offerAndWait(
+          makeSubagentTaskStartedFrame({
+            taskId: "stop-agent",
+            toolUseId,
+            uuid: uuid(),
+          }),
+        );
+      const notify = (
+        status: "completed" | "failed" | "stopped",
+        summary = "Native outcome.",
+        toolUseId = "toolu-stop-agent",
+      ) =>
+        harness.offerAndWait(
+          claudeSdkFrame({
+            ...makeSubagentNotificationFrame({
+              taskId: "stop-agent",
+              toolUseId,
+              summary,
+              uuid: uuid(),
+            }),
+            status,
+          }),
+        );
+      const stop = (requestedAt?: DateTime.Utc) =>
+        harness.runtime.stopSubagent!({
+          providerThread: harness.providerThread,
+          nativeTaskId: "stop-agent",
+          ...(requestedAt === undefined ? {} : { requestedAt }),
+        });
+      const finishParent = () =>
+        harness
+          .offerAndWait(makeResultFrame({ uuid: uuid(), result: "Launched." }))
+          .pipe(Effect.andThen(Queue.take(harness.terminalReceipts)));
+      yield* startTurn();
+      yield* start();
+      yield* Queue.take(harness.subagentReceipts);
+      return {
+        ...harness,
+        start,
+        notify,
+        stop,
+        finishParent,
+        replay: () => startTurn(true),
+        uuid,
+        requests,
+      };
+    });
+
+  it.effect.each([
+    [false, "no notification"],
+    [true, "no notification"],
+    [false, "stop fails"],
+    [false, "stop hangs"],
+  ] as const)("never infers an outcome from Stop, owner settled %s and %s", ([idle, failure]) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const requested = yield* Deferred.make<void>();
+        const fixture = yield* makeStopFixture({
+          stopTask: () =>
+            Deferred.succeed(requested, undefined).pipe(
+              Effect.andThen(
+                failure === "stop fails"
+                  ? new ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerError({
+                      method: "stopTask",
+                      cause: "Task is no longer live",
+                    })
+                  : failure === "stop hangs"
+                    ? Effect.never
+                    : Effect.void,
+              ),
+            ),
+        });
+        if (idle) yield* fixture.finishParent();
+        const stopping = yield* fixture.stop().pipe(Effect.exit, Effect.forkScoped);
+        yield* Deferred.await(requested);
+        yield* TestClock.adjust("2 seconds");
+        const result = yield* Fiber.join(stopping);
+        assert.isTrue(Exit.isFailure(result));
+        assert.equal(
+          fixture.events.findLast((event) => event.type === "subagent.updated")?.subagent.status,
+          "running",
+        );
+        assert.isTrue(yield* fixture.hasPendingBackgroundWork);
+        yield* fixture.notify("completed");
+        assert.equal((yield* Queue.take(fixture.subagentReceipts)).subagent.status, "completed");
+        assert.isFalse(yield* fixture.hasPendingBackgroundWork);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect.each([1, 2, 3, 4, 5, 6, 7, 8])(
+    "accepts completion during Stop at scheduler step %s",
+    (pauseAt) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fixture = yield* makeStopFixture();
+          const resumptions = yield* Queue.unbounded<() => void>();
+          const scheduler = yield* Scheduler.Scheduler;
+          const dispatcher = scheduler.makeDispatcher();
+          let checks = 0;
+          // Pause Stop before its SDK request and deliver the outcome while it is suspended.
+          const stopping = yield* fixture.stop().pipe(
+            Effect.provideService(Scheduler.Scheduler, {
+              executionMode: scheduler.executionMode,
+              shouldYield: () => ++checks === pauseAt,
+              makeDispatcher: () => ({
+                scheduleTask: (task, priority) => {
+                  if (checks === pauseAt) Queue.offerUnsafe(resumptions, task);
+                  else dispatcher.scheduleTask(task, priority);
+                },
+                flush: () => dispatcher.flush(),
+              }),
+            }),
+            Effect.exit,
+            Effect.forkScoped,
+          );
+          const resume = yield* Queue.take(resumptions);
+          yield* fixture.notify("completed");
+          const completed = yield* Queue.take(fixture.subagentReceipts);
+          yield* Effect.sync(resume);
+          yield* TestClock.adjust("2 seconds");
+          assert.deepEqual(
+            yield* Fiber.join(stopping),
+            Exit.succeed({
+              status: "completed" as const,
+              completedAt: completed.subagent.completedAt!,
+              result: "Native outcome.",
+            }),
+          );
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          ),
+        ),
+      ),
+  );
+
+  it.effect("retains native confirmation after the synchronous Agent tool result", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeStopFixture({
+          stopTask: () => Effect.die("Task already completed"),
+        });
+        yield* fixture.notify("completed");
+        const completed = yield* Queue.take(fixture.subagentReceipts);
+        yield* fixture.offerAndWait(
+          claudeSdkFrame({
+            type: "user",
+            message: {
+              role: "user",
+              content: [
+                { type: "tool_result", tool_use_id: "toolu-stop-agent", content: "Tool result." },
+              ],
+            },
+            parent_tool_use_id: null,
+            uuid: fixture.uuid(),
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+        );
+        assert.equal((yield* Queue.take(fixture.subagentReceipts)).subagent.result, "Tool result.");
+        assert.deepEqual(yield* fixture.stop(), {
+          status: "completed",
+          completedAt: completed.subagent.completedAt!,
+          result: "Native outcome.",
+        });
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect.each(["completed", "failed", "stopped"] as const)(
+    "applies idle %s once, preserves a genuine resume, and only confirms native outcomes",
+    (status) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          let stops = 0;
+          const fixture = yield* makeStopFixture({
+            stopTask: () => Effect.sync(() => void stops++),
+          });
+          yield* fixture.finishParent();
+          yield* TestClock.adjust("1 second");
+          yield* fixture.notify(status);
+          const completed = yield* Queue.take(fixture.subagentReceipts);
+          const expected = status === "stopped" ? "cancelled" : status;
+          assert.equal(completed.subagent.status, expected);
+          assert.lengthOf(fixture.offeredMessages, 1);
+          assert.isFalse(yield* fixture.hasPendingBackgroundWork);
+          assert.deepEqual(yield* fixture.stop(), {
+            status: expected,
+            completedAt: completed.subagent.completedAt!,
+            result: "Native outcome.",
+          });
+          assert.equal(stops, 0);
+          yield* TestClock.adjust("1 second");
+          yield* fixture.start("toolu-resume");
+          assert.isUndefined(yield* fixture.stop(completed.subagent.completedAt!));
+          assert.equal(stops, 0);
+          const stopping = yield* fixture.stop().pipe(Effect.exit, Effect.forkScoped);
+          yield* Queue.take(fixture.requests);
+          const beforeReplay = fixture.events.length;
+          yield* fixture.replay();
+          const reopened = yield* Queue.take(fixture.subagentReceipts);
+          assert.equal(reopened.subagent.status, "running");
+          assert.isNull(reopened.subagent.completedAt);
+          assert.isFalse(
+            fixture.events
+              .slice(beforeReplay)
+              .some(
+                (event) => event.type === "subagent.updated" && event.subagent.status !== "running",
+              ),
+          );
+          yield* TestClock.adjust("2 seconds");
+          assert.isTrue(Exit.isFailure(yield* Fiber.join(stopping)));
+          assert.equal(stops, 1);
+          yield* fixture.notify("completed", "Resumed outcome.", "toolu-resume");
+          const resumed = yield* Queue.take(fixture.subagentReceipts);
+          assert.equal(resumed.subagent.result, "Resumed outcome.");
+          assert.isAbove(
+            DateTime.toEpochMillis(resumed.subagent.completedAt!),
+            DateTime.toEpochMillis(completed.subagent.completedAt!),
+          );
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          ),
+        ),
+      ),
+  );
+
+  it.effect.each([
+    [false, "stopped"],
+    [true, "stopped"],
+    [false, "completed"],
+  ] as const)(
+    "stops one native subagent while its sibling keeps running, owner settled %s, outcome %s",
+    ([ownerSettled, outcome]) =>
       Effect.scoped(
         Effect.gen(function* () {
           const stopped: string[] = [];
+          const stopRequested = yield* Deferred.make<void>();
           let closes = 0;
           const harness = yield* makeWakeHarnessWithOptions({
             stopTask: (taskId) =>
               Effect.sync(() => {
                 stopped.push(taskId);
-              }),
+              }).pipe(Effect.andThen(Deferred.succeed(stopRequested, undefined))),
             interrupt: Effect.die("A child stop must not interrupt its owner"),
             close: () =>
               Effect.sync(() => {
@@ -8878,7 +9233,11 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           }
           const stop = harness.runtime.stopSubagent;
           assert.isDefined(stop);
-          yield* stop!({ providerThread: harness.providerThread, nativeTaskId: "agent-stop" });
+          const stopping = yield* stop!({
+            providerThread: harness.providerThread,
+            nativeTaskId: "agent-stop",
+          }).pipe(Effect.forkScoped);
+          yield* Deferred.await(stopRequested);
           assert.deepEqual(stopped, ["agent-stop"]);
           yield* harness.offerAndWait(
             claudeSdkFrame({
@@ -8888,7 +9247,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                 summary: "Stopped by user",
                 uuid: "00000000-0000-4000-8000-000000000804",
               }),
-              status: "stopped",
+              status: outcome,
             }),
           );
           if (ownerSettled) {
@@ -8906,13 +9265,17 @@ describe("ClaudeAdapterV2 background wake turns", () => {
               }),
             );
           }
+          yield* Fiber.join(stopping);
           const stoppedEvent = yield* Queue.take(harness.subagentReceipts);
-          assert.equal(stoppedEvent.subagent.status, "cancelled");
+          assert.equal(
+            stoppedEvent.subagent.status,
+            outcome === "stopped" ? "cancelled" : "completed",
+          );
           const tasks = harness.events.filter((event) => event.type === "subagent.updated");
           assert.equal(
             tasks.findLast((event) => event.subagent.nativeTaskRef?.nativeId === "agent-stop")
               ?.subagent.status,
-            "cancelled",
+            outcome === "stopped" ? "cancelled" : "completed",
           );
           assert.equal(
             tasks.findLast((event) => event.subagent.nativeTaskRef?.nativeId === "agent-keep")
@@ -9863,7 +10226,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         const fileSystem = yield* FileSystem.FileSystem;
         const idAllocator = yield* IdAllocator.IdAllocatorV2;
         const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "supacode-claude-v2-process-reset-",
+          prefix: "supaterm-claude-v2-process-reset-",
         });
         const processQueues: Array<Queue.Queue<SDKMessage>> = [];
         const events: Array<ProviderAdapter.ProviderAdapterV2Event> = [];
@@ -10053,7 +10416,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           const fileSystem = yield* FileSystem.FileSystem;
           const idAllocator = yield* IdAllocator.IdAllocatorV2;
           const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
-            prefix: "supacode-claude-v2-buffer-replace-",
+            prefix: "supaterm-claude-v2-buffer-replace-",
           });
           const processQueues: Array<Queue.Queue<SDKMessage>> = [];
           const events: Array<ProviderAdapter.ProviderAdapterV2Event> = [];
@@ -10295,7 +10658,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           const fileSystem = yield* FileSystem.FileSystem;
           const idAllocator = yield* IdAllocator.IdAllocatorV2;
           const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
-            prefix: "supacode-claude-v2-subagent-buffer-replace-",
+            prefix: "supaterm-claude-v2-subagent-buffer-replace-",
           });
           const processQueues: Array<Queue.Queue<SDKMessage>> = [];
           const events: Array<ProviderAdapter.ProviderAdapterV2Event> = [];
@@ -10442,7 +10805,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             () => events.filter((event) => event.type === "turn.terminal").length === 2,
             "user turn terminal after replace",
           );
-          assert.isTrue(yield* hasPendingBackgroundWork);
+          // The actual completion was applied while idle, before wake replay.
+          assert.isFalse(yield* hasPendingBackgroundWork);
+          assert.equal(subagentEvents().at(-1)?.subagent.status, "completed");
           assert.lengthOf(continuationRequests, 1);
 
           yield* Queue.offer(
@@ -10501,7 +10866,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         const fileSystem = yield* FileSystem.FileSystem;
         const idAllocator = yield* IdAllocator.IdAllocatorV2;
         const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "supacode-claude-v2-model-change-running-subagent-",
+          prefix: "supaterm-claude-v2-model-change-running-subagent-",
         });
         const processQueues: Array<Queue.Queue<SDKMessage>> = [];
         const events: Array<ProviderAdapter.ProviderAdapterV2Event> = [];
@@ -10672,7 +11037,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           const fileSystem = yield* FileSystem.FileSystem;
           const idAllocator = yield* IdAllocator.IdAllocatorV2;
           const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
-            prefix: "supacode-claude-v2-replace-open-fail-",
+            prefix: "supaterm-claude-v2-replace-open-fail-",
           });
           let openCount = 0;
           const processQueues: Array<Queue.Queue<SDKMessage>> = [];
@@ -10806,7 +11171,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           const fileSystem = yield* FileSystem.FileSystem;
           const idAllocator = yield* IdAllocator.IdAllocatorV2;
           const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
-            prefix: "supacode-claude-v2-replace-open-fail-wake-",
+            prefix: "supaterm-claude-v2-replace-open-fail-wake-",
           });
           let openCount = 0;
           const processQueues: Array<Queue.Queue<SDKMessage>> = [];
@@ -11010,7 +11375,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         const fileSystem = yield* FileSystem.FileSystem;
         const idAllocator = yield* IdAllocator.IdAllocatorV2;
         const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "supacode-claude-v2-first-open-fail-",
+          prefix: "supaterm-claude-v2-first-open-fail-",
         });
         const events: Array<ProviderAdapter.ProviderAdapterV2Event> = [];
         const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
@@ -11091,7 +11456,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const configDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "supacode-claude-wf-",
+        prefix: "supaterm-claude-wf-",
       });
       const transcriptDir = NodePath.join(configDir, "projects", "workflow");
       yield* fileSystem.makeDirectory(transcriptDir, { recursive: true });
@@ -11475,15 +11840,13 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         while (!member.subagent.nativeTaskRef?.nativeId?.endsWith(":agent:2")) {
           member = yield* Queue.take(harness.subagentReceipts);
         }
-        const stopTask = (input: {
-          providerThread: OrchestrationV2ProviderThread;
-          taskId: string;
-        }) =>
-          harness.runtime.stopSubagent!({
-            providerThread: input.providerThread,
-            nativeTaskId: input.taskId,
-          });
-        yield* stopTask({ providerThread: harness.providerThread, taskId: "missing-task" });
+        const stopTask = harness.runtime.stopTask!;
+        for (const taskId of ["missing-task", `${WORKFLOW_TASK_ID}:agent:1`]) {
+          const exit = yield* stopTask({ providerThread: harness.providerThread, taskId }).pipe(
+            Effect.exit,
+          );
+          assert.isTrue(Exit.isFailure(exit));
+        }
         const wrongThread = {
           ...harness.providerThread,
           nativeThreadRef: {
@@ -11526,7 +11889,14 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             "cancelled",
           );
         }
-        yield* stopTask({ providerThread: harness.providerThread, taskId: WORKFLOW_TASK_ID });
+        assert.isTrue(
+          Exit.isFailure(
+            yield* stopTask({
+              providerThread: harness.providerThread,
+              taskId: WORKFLOW_TASK_ID,
+            }).pipe(Effect.exit),
+          ),
+        );
         assert.deepEqual(stoppedTasks, [WORKFLOW_TASK_ID]);
       }).pipe(
         Effect.provide(
@@ -12735,17 +13105,24 @@ describe("ClaudeAdapterV2 background wake turns", () => {
   );
 
   it.effect.each([
-    ["api_error", false],
-    ["aborted_streaming", false],
-    ["api_error", true],
+    ["api_error", false, false],
+    ["aborted_streaming", false, false],
+    ["api_error", true, false],
+    ["api_error", false, true],
+    ["aborted_streaming", false, true],
   ] as const)(
-    "stops the run's live workflow after root result %s, continuation=%s",
-    ([terminalReason, continuation]) =>
+    "stops the run's live workflow after root result %s, continuation=%s, pending Stop=%s",
+    ([terminalReason, continuation, pendingStop]) =>
       Effect.scoped(
         Effect.gen(function* () {
           const stoppedTasks: Array<string> = [];
+          const stopRequested = yield* Deferred.make<void>();
           const harness = yield* makeWorkflowHarnessWithOptions({
-            stopTask: (taskId) => Effect.sync(() => void stoppedTasks.push(taskId)),
+            stopTask: (taskId) =>
+              Effect.sync(() => void stoppedTasks.push(taskId)).pipe(
+                Effect.andThen(Deferred.succeed(stopRequested, undefined)),
+                Effect.asVoid,
+              ),
           });
           const now = yield* DateTime.now;
           const turnInput = {
@@ -12758,6 +13135,13 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           };
           yield* harness.runtime.startTurn(makeClaudeTestTurnInput(turnInput));
           yield* launchWorkflow({ harness, snapshotUuid: "00000000-0000-4000-8000-000000001050" });
+          const stopping = pendingStop
+            ? yield* harness.runtime.stopSubagent!({
+                providerThread: harness.providerThread,
+                nativeTaskId: WORKFLOW_TASK_ID,
+              }).pipe(Effect.exit, Effect.forkScoped)
+            : undefined;
+          if (pendingStop) yield* Deferred.await(stopRequested);
           if (continuation) {
             yield* harness.offerAndWait(
               makeResultFrame({
@@ -12799,7 +13183,22 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           // workflow was re-attributed to) stops following it, so it is stopped
           // instead of left running out of sight.
           const settled = terminalReason === "api_error" ? "failed" : "cancelled";
-          assert.deepEqual(stoppedTasks, [WORKFLOW_TASK_ID]);
+          assert.deepEqual(
+            stoppedTasks,
+            pendingStop ? [WORKFLOW_TASK_ID, WORKFLOW_TASK_ID] : [WORKFLOW_TASK_ID],
+          );
+          if (stopping !== undefined) {
+            // Parent failure assigns a local outcome without a task_notification.
+            yield* TestClock.adjust("2 seconds");
+            assert.isTrue(Exit.isFailure(yield* Fiber.join(stopping)));
+            // Local parent cleanup still cannot provide a confirmed outcome on retry.
+            const retry = yield* harness.runtime.stopSubagent!({
+              providerThread: harness.providerThread,
+              nativeTaskId: WORKFLOW_TASK_ID,
+            }).pipe(Effect.exit, Effect.forkScoped);
+            yield* TestClock.adjust("2 seconds");
+            assert.isTrue(Exit.isFailure(yield* Fiber.join(retry)));
+          }
           assert.isFalse(yield* harness.hasPendingBackgroundWork);
           assert.equal(workflowCoordinatorEvents(harness.events).at(-1)?.subagent.status, settled);
           for (const index of [1, 2]) {

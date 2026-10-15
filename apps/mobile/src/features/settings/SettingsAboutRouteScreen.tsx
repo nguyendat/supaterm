@@ -1,5 +1,5 @@
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
-import { availableScratchWorkspaceRoot } from "@supacode/client-runtime/operations/projects";
+import { availableScratchWorkspaceRoot } from "@supaterm/client-runtime/operations/projects";
 import Constants from "expo-constants";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Pressable, View } from "react-native";
@@ -17,15 +17,17 @@ import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { SettingsActionRow } from "./components/SettingsActionRow";
-import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
+import type { SettingsTarget } from "./settings-environment-filter";
 import { useSendFeedback } from "./use-send-feedback";
 import { ControlPillMenu } from "../../components/ControlPillMenu";
+import { useProjects } from "../../state/entities";
+import { useEnvironments } from "../../state/environments";
 
 export function SettingsAboutRouteScreen() {
   const insets = useSafeAreaInsets();
 
   return (
-    <SettingsScreen title="About Supacode">
+    <SettingsScreen title="About Supaterm">
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
@@ -151,11 +153,18 @@ function AppSettingsSection() {
 }
 
 function FeedbackSettingsAction() {
-  const { availableTargets } = useSettingsEnvironmentFilter();
+  const projects = useProjects();
+  const { environments } = useEnvironments();
   const { sendFeedback, isPending } = useSendFeedback();
-  const eligibleTargets = availableTargets.filter(
-    (target) =>
-      availableScratchWorkspaceRoot(target.connection.phase, target.serverConfig) !== null,
+  const eligibleTargets = environments.filter(
+    (target): target is SettingsTarget =>
+      target.serverConfig !== null &&
+      availableScratchWorkspaceRoot({
+        environmentId: target.environmentId,
+        connectionPhase: target.connection.phase,
+        serverConfig: target.serverConfig,
+        projects,
+      }) !== null,
   );
   const sendTo = (target: (typeof eligibleTargets)[number]) => void sendFeedback(target);
   const row = (

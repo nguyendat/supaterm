@@ -2,8 +2,8 @@ import {
   canonicalRepositoryKey,
   isSshRemoteUrl,
   sourceControlRepositorySelector,
-} from "@supacode/shared/sourceControl";
-import { normalizeGitRemoteUrl } from "@supacode/shared/git";
+} from "@supaterm/shared/sourceControl";
+import { normalizeGitRemoteUrl } from "@supaterm/shared/git";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -53,6 +53,8 @@ import {
   type PullRequestProviderSummary,
   type PullRequestReactionInput,
   type PullRequestRef,
+  type PullRequestWorkflowRun,
+  type PullRequestWorkflowRunRef,
   type PullRequestRoutingResult,
   type PullRequestRoutingIdentityInput,
   type PullRequestRoutingIdentityResult,
@@ -74,23 +76,23 @@ import {
   type SourceControlProviderInfo,
   SourceControlProviderKind,
   type ThreadPullRequestKey,
-} from "@supacode/contracts";
-import { resolveProjectSettings } from "@supacode/shared/projectSettings";
-import { detectSourceControlProviderFromRemoteUrl } from "@supacode/shared/sourceControl";
+} from "@supaterm/contracts";
+import { resolveProjectSettings } from "@supaterm/shared/projectSettings";
+import { detectSourceControlProviderFromRemoteUrl } from "@supaterm/shared/sourceControl";
 
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as PullRequestFilesViewed from "../persistence/PullRequestFilesViewed.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
-import * as SourceControlRateLimit from "@supacode/source-control-core/server/SourceControlRateLimit";
+import * as SourceControlRateLimit from "@supaterm/source-control-core/server/SourceControlRateLimit";
 import {
   type ProviderChangeRequest,
   type ProviderListCursor,
   type ProviderChangeRequestWatchFingerprint,
   type PullRequestProviderApi,
   PullRequestProviderError,
-} from "@supacode/source-control-core/server/PullRequestProvider";
+} from "@supaterm/source-control-core/server/PullRequestProvider";
 import * as PullRequestReadCache from "./PullRequestReadCache.ts";
 import * as PullRequestProviderRegistry from "./PullRequestProviderRegistry.ts";
 import * as ViewedFiles from "./pullRequestViewedFiles.ts";
@@ -161,6 +163,8 @@ const detailTimeToLive = (state: PullRequestState | undefined) =>
  * page and a watched pull request's change reaches its watch.
  */
 const CHECKS_CACHE_TTL = Duration.seconds(15);
+/** A run's watch reads it every minute and a client showing it twice, so they share a read. */
+const WORKFLOW_RUN_CACHE_TTL = Duration.seconds(30);
 /** How long a repeated reported state is skipped, so a wrong one cannot hide a real change for long. */
 const REPORTED_STATE_DEDUPE_MS = 5 * 60 * 1_000;
 const DIFF_CACHE_TTL = Duration.seconds(60);
@@ -196,10 +200,20 @@ const VIEWER_CACHE_CAPACITY = 32;
 
 export type PullRequestError = PullRequestUnavailableError | PullRequestOperationError;
 
+/** A rate limit is the host asking to wait, not a sign the read cannot succeed. */
+export const isRateLimited = (cause: Cause.Cause<PullRequestError>): boolean =>
+  Option.match(Cause.findErrorOption(cause), {
+    onNone: () => false,
+    onSome: (error) =>
+      error._tag === "PullRequestOperationError" &&
+      isPullRequestProviderError(error.cause) &&
+      error.cause.reason === "rate-limited",
+  });
+
 const routingCredential = Context.Reference<{
   readonly credentialFingerprint: string;
   readonly viewer: string;
-} | null>("supacode/PullRequestService/routingCredential", { defaultValue: () => null });
+} | null>("supaterm/PullRequestService/routingCredential", { defaultValue: () => null });
 // Internal only: the client cannot choose its cache's credential namespace.
 const credentialNamespace = Symbol("pullRequestCredentialNamespace");
 type CredentialRef = PullRequestRef & { readonly [credentialNamespace]?: string };
@@ -266,6 +280,14 @@ export class PullRequestService extends Context.Service<
       input: PullRequestRef,
     ) => Effect.Effect<PullRequestChecks | null, PullRequestError>;
     /**
+     * A CI run and its jobs as checks, or null where the project's host has no runs to read.
+     * Shared between the watch and every client showing it; `fresh` skips the cached answer.
+     */
+    readonly workflowRun: (
+      input: PullRequestWorkflowRunRef,
+      options?: { readonly fresh?: boolean },
+    ) => Effect.Effect<PullRequestWorkflowRun | null, PullRequestError>;
+    /**
      * What a pull request watch compares between passes, so it reads detail and activity only
      * when something moved. Null when the host has no fingerprint or gave none for this one.
      */
@@ -325,7 +347,7 @@ export class PullRequestService extends Context.Service<
       options?: { readonly notifyReaders?: boolean },
     ) => Effect.Effect<void>;
   }
->()("supacode/pullRequest/PullRequestService") {}
+>()("supaterm/pullRequest/PullRequestService") {}
 
 /** What a verdict is called when refusing it, so the sentence reads as an action. */
 const VERDICT_LABELS: Record<PullRequestReviewVerdict, string> = {
@@ -637,6 +659,9 @@ function withRateLimitBackoff(
     ...(api.getChangeRequestChecks === undefined
       ? {}
       : { getChangeRequestChecks: wrap("getChangeRequestChecks", api.getChangeRequestChecks) }),
+    ...(api.getWorkflowRun === undefined
+      ? {}
+      : { getWorkflowRun: wrap("getWorkflowRun", api.getWorkflowRun) }),
     ...(api.getChangeRequestSummary === undefined
       ? {}
       : {
@@ -908,7 +933,9 @@ export const make = Effect.gen(function* () {
    * targeting can also use the selected project's directory for supported public hosts.
    * Azure derives its organization from the checkout, so it requires a matching repository.
    */
-  const requireProject = (ref: PullRequestRef): Effect.Effect<SupportedProject, PullRequestError> =>
+  const requireProject = (
+    ref: Pick<PullRequestRef, "projectId" | "host" | "repository">,
+  ): Effect.Effect<SupportedProject, PullRequestError> =>
     listWorkspaceProjects({ projectId: ref.projectId }).pipe(
       Effect.flatMap(({ supported }): Effect.Effect<SupportedProject, PullRequestError> => {
         const own = supported[0];
@@ -3067,6 +3094,48 @@ export const make = Effect.gen(function* () {
     },
   );
 
+  /**
+   * A run named without a repository is read from the project's checkout, which picks the
+   * repository the way `gh` does there rather than by the project's identity: a fork's identity
+   * is its `upstream`, while `gh run watch` follows `gh repo set-default`. One named without a
+   * host is on the project's host.
+   */
+  const workflowRunCache = yield* Cache.makeWith(
+    (key: string) => {
+      const input = JSON.parse(key) as PullRequestWorkflowRunRef;
+      return listWorkspaceProjects({ projectId: input.projectId }).pipe(
+        Effect.flatMap(({ supported: [own] }) => {
+          if (input.repository === undefined) return Effect.succeed(own ?? null);
+          const host = input.host ?? own?.host;
+          return requireProject({
+            projectId: input.projectId,
+            repository: input.repository,
+            ...(host === undefined ? {} : { host }),
+          });
+        }),
+        Effect.flatMap((project) =>
+          project?.api.getWorkflowRun === undefined
+            ? Effect.succeed(null)
+            : project.api
+                .getWorkflowRun({
+                  cwd: project.project.workspaceRoot,
+                  host: project.host,
+                  runId: input.runId,
+                  ...(input.repository === undefined ? {} : { repository: project.repository }),
+                })
+                .pipe(
+                  Effect.map((run) => ({ ...run, host: project.host })),
+                  Effect.mapError(toPullRequestError("workflowRun")),
+                ),
+        ),
+      );
+    },
+    {
+      capacity: DETAIL_CACHE_CAPACITY,
+      timeToLive: (exit) => (Exit.isSuccess(exit) ? WORKFLOW_RUN_CACHE_TTL : Duration.zero),
+    },
+  );
+
   const watchFingerprintCache = yield* Cache.makeWith(
     (key: string) => {
       const input = refOfCacheKey(key);
@@ -3563,6 +3632,19 @@ export const make = Effect.gen(function* () {
     refreshAfterTurn,
     detail: credentialCached(detail),
     checks: credentialCached((input) => Cache.get(checksCache, refCacheKey(input))),
+    workflowRun: (input, options) => {
+      const key = JSON.stringify({
+        projectId: input.projectId,
+        host: input.host?.toLowerCase(),
+        repository: input.repository?.toLowerCase(),
+        runId: input.runId,
+      });
+      return options?.fresh
+        ? Cache.invalidate(workflowRunCache, key).pipe(
+            Effect.andThen(Cache.get(workflowRunCache, key)),
+          )
+        : Cache.get(workflowRunCache, key);
+    },
     watchFingerprint: credentialCached((input) =>
       Cache.get(watchFingerprintCache, refCacheKey(input)),
     ),

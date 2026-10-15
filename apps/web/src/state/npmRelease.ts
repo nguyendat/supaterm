@@ -4,15 +4,15 @@ import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http";
 import { AsyncResult, Atom } from "effect/reactivity";
 
 /**
- * Whether `supacode@<version>` is published on npm. A 404 is false; network and
+ * Whether `supaterm@<version>` is published on npm. A 404 is false; network and
  * registry errors stay unknown. Both re-check every few minutes, so a release
  * that lands later shows up without a reload.
  */
-const npmReleasePublishedAtom = Atom.family((version: string) =>
+export const npmReleasePublishedAtom = Atom.family((version: string) =>
   Atom.make(
     Effect.gen(function* () {
       const response = yield* HttpClient.get(
-        `https://registry.npmjs.org/supacode/${encodeURIComponent(version)}`,
+        `https://registry.npmjs.org/supaterm/${encodeURIComponent(version)}`,
       );
       if (response.status === 404) return false;
       const body = yield* HttpClientResponse.filterStatusOk(response).pipe(
@@ -21,7 +21,11 @@ const npmReleasePublishedAtom = Atom.family((version: string) =>
       return typeof body === "object" && body !== null && "version" in body
         ? body.version === version
         : false;
-    }).pipe(Effect.provide(FetchHttpClient.layer)),
+    }).pipe(
+      // Tracing headers would make the browser send a CORS preflight, which npm rejects.
+      Effect.provideService(HttpClient.TracerPropagationEnabled, false),
+      Effect.provide(FetchHttpClient.layer),
+    ),
   ).pipe(
     Atom.withRefresh("5 minutes"),
     Atom.keepAlive,

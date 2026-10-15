@@ -1,11 +1,12 @@
-import { scopedThreadKey } from "@supacode/client-runtime/environment";
-import type { ScopedThreadRef } from "@supacode/contracts";
+import { scopedThreadKey } from "@supaterm/client-runtime/environment";
+import type { ScopedThreadRef } from "@supaterm/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import ChatView from "./ChatView";
 import { resolveDraftPromotionNavigationTarget, threadHasStarted } from "./ChatView.logic";
 import { waitForDraftHeroTransition } from "./chat/draftHeroTransition";
+import { ThreadTimelineLoading } from "./chat/ThreadTimelineLoading";
 import { SidebarInset } from "./ui/sidebar";
 import {
   finalizePromotedDraftThreadByRef,
@@ -18,7 +19,7 @@ import { useEnvironmentThreadRefs, useThreadRefs, useThreadShell } from "../stat
 import { useEnvironmentQuery } from "../state/query";
 import { environmentShell } from "../state/shell";
 import { usePendingThreadCreation, useThreadOutboxLoaded } from "../state/threadOutbox";
-import { scopeThreadRef } from "@supacode/client-runtime/environment";
+import { scopeThreadRef } from "@supaterm/client-runtime/environment";
 import {
   buildThreadRouteParams,
   isThreadRouteSnapshotAuthoritative,
@@ -204,6 +205,8 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
         routeKind="server"
       />
     );
+  } else if (renderState === "loading") {
+    view = <ThreadTimelineLoading />;
   }
 
   return (

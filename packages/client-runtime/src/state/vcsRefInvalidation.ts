@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@supacode/contracts";
+import type { EnvironmentId } from "@supaterm/contracts";
 import * as Effect from "effect/Effect";
 import * as PartitionedSemaphore from "effect/PartitionedSemaphore";
 import { Atom, type AtomRegistry } from "effect/reactivity";
@@ -25,10 +25,17 @@ const stateByEnvironment = Atom.family((environmentId: EnvironmentId) =>
     persistedCacheReadable: true,
   }).pipe(Atom.keepAlive, Atom.withLabel(`environment-data:vcs:list-refs-state:${environmentId}`)),
 );
+const liveRevisionByTarget = Atom.family((key: string) =>
+  Atom.make(-1).pipe(Atom.withLabel(`environment-data:vcs:list-refs-live-revision:${key}`)),
+);
 const persistenceLock = PartitionedSemaphore.makeUnsafe<EnvironmentId>({ permits: 1 });
 
 export function vcsRefsCacheStateAtom(target: VcsRefsInvalidationTarget) {
   return stateByEnvironment(target.environmentId);
+}
+
+export function vcsRefsLiveRevisionAtom(target: CachedVcsRefsInvalidationTarget) {
+  return liveRevisionByTarget(JSON.stringify([target.environmentId, target.cwd]));
 }
 
 export function invalidateVcsRefs(
@@ -48,6 +55,33 @@ export function withVcsRefsPersistenceLock<A, E, R>(
 ): Effect.Effect<A, E, R> {
   return persistenceLock.withPermit(environmentId)(effect);
 }
+
+export const markVcsRefsRefreshPending = Effect.fn("VcsRefsState.markRefreshPending")(function* (
+  registry: AtomRegistry.AtomRegistry,
+  target: CachedVcsRefsInvalidationTarget,
+  expectedRevision: number,
+) {
+  yield* withVcsRefsPersistenceLock(
+    target.environmentId,
+    Effect.sync(() => {
+      if (registry.get(vcsRefsCacheStateAtom(target)).revision === expectedRevision) {
+        registry.set(vcsRefsLiveRevisionAtom(target), expectedRevision - 1);
+      }
+    }),
+  );
+});
+
+export const invalidateVcsRefsWithLock = Effect.fn("VcsRefsState.invalidateWithLock")(function* (
+  registry: AtomRegistry.AtomRegistry,
+  target: VcsRefsInvalidationTarget,
+) {
+  yield* withVcsRefsPersistenceLock(
+    target.environmentId,
+    Effect.sync(() => {
+      invalidateVcsRefs(registry, target);
+    }),
+  );
+});
 
 /**
  * Clears persisted snapshots and then restarts live ref streams while holding

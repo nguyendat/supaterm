@@ -2,13 +2,17 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   type CheckpointDiffTarget,
   type ComposerPathSearchTarget,
-} from "@supacode/client-runtime/state/threads";
+} from "@supaterm/client-runtime/state/threads";
+import {
+  type VcsRefTarget,
+  vcsRefsCacheStateAtom,
+  vcsRefsLiveRevisionAtom,
+} from "@supaterm/client-runtime/state/vcs";
 import {
   createThreadSearchResultsAtomFamily,
   makeThreadSearchKey,
   type EnvironmentThreadSearchMatch,
-} from "@supacode/client-runtime/state/thread-search";
-import { type VcsRefTarget } from "@supacode/client-runtime/state/vcs";
+} from "@supaterm/client-runtime/state/thread-search";
 import type {
   EnvironmentId,
   ProjectContentMatch,
@@ -18,7 +22,7 @@ import type {
   TurnItemId,
   VcsListRefsResult,
   VcsRef,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -39,6 +43,8 @@ const PROJECT_CONTENT_SEARCH_LIMIT = 500;
 const THREAD_SEARCH_DEBOUNCE_MS = 200;
 const VCS_REF_LIST_LIMIT = 100;
 const EMPTY_REFS: ReadonlyArray<VcsRef> = [];
+const EMPTY_VCS_REFS_STATE_ATOM = Atom.make({ revision: 0, persistedCacheReadable: true });
+const EMPTY_VCS_REFS_LIVE_REVISION_ATOM = Atom.make(-1);
 const EMPTY_PROJECT_ENTRIES: ReadonlyArray<ProjectEntry> = [];
 const EMPTY_CONTENT_MATCHES: ReadonlyArray<ProjectContentMatch> = [];
 const INITIAL_BRANCH_CURSORS = [undefined] as const;
@@ -139,6 +145,16 @@ export function usePaginatedBranches(target: VcsRefTarget) {
     [pageAtoms, targetKey],
   );
   const results = useAtomValue(pagesAtom);
+  const refsCacheState = useAtomValue(
+    target.environmentId === null
+      ? EMPTY_VCS_REFS_STATE_ATOM
+      : vcsRefsCacheStateAtom({ environmentId: target.environmentId }),
+  );
+  const liveRevision = useAtomValue(
+    target.environmentId === null || target.cwd === null
+      ? EMPTY_VCS_REFS_LIVE_REVISION_ATOM
+      : vcsRefsLiveRevisionAtom({ environmentId: target.environmentId, cwd: target.cwd }),
+  );
   const values = results.flatMap((result) => {
     const value = Option.getOrNull(AsyncResult.value(result));
     return value === null ? [] : [value];
@@ -198,6 +214,7 @@ export function usePaginatedBranches(target: VcsRefTarget) {
     refs: data?.refs ?? EMPTY_REFS,
     error,
     isPending: results.some((result) => result.waiting),
+    isRefreshing: refsCacheState.revision !== liveRevision,
     isFetchingNextPage,
     refresh,
     loadNext,

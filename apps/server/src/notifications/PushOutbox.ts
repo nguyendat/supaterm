@@ -1,4 +1,4 @@
-import { ThreadId, type OrchestrationV2StoredEvent } from "@supacode/contracts";
+import { ThreadId, type OrchestrationV2StoredEvent } from "@supaterm/contracts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import {
   PushNotificationError,
@@ -6,11 +6,11 @@ import {
   type PushNotificationKind,
   PushDeliveryPayload,
   PushPreviewContent,
-} from "@supacode/contracts/push";
+} from "@supaterm/contracts/push";
 import {
   eventChangesNotificationAttention,
   threadNotificationAttention,
-} from "@supacode/shared/threadNotificationAttention";
+} from "@supaterm/shared/threadNotificationAttention";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -68,7 +68,7 @@ export class PushOutbox extends Context.Service<
       payload: PushDeliveryPayload,
     ) => Effect.Effect<string | null, PushNotificationError>;
   }
->()("supacode/notifications/PushOutbox") {}
+>()("supaterm/notifications/PushOutbox") {}
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

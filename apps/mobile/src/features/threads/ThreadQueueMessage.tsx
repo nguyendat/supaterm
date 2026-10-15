@@ -1,10 +1,11 @@
-import type { ChatAttachment, EnvironmentId } from "@supacode/contracts";
+import type { ChatAttachment, EnvironmentId } from "@supaterm/contracts";
 import { Image } from "expo-image";
 import { useRef } from "react";
 import { type AccessibilityActionEvent, Platform, Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { ControlPillMenu } from "../../components/ControlPill";
+import { assetImageSource } from "../../lib/assetImageSource";
 import { useAssetUrl } from "../../state/assets";
 import type { ThreadQueueRowControls } from "./threadQueueControlPresentation";
 
@@ -140,19 +141,21 @@ function QueueAttachmentThumbnail(props: {
   readonly environmentId: EnvironmentId;
   readonly attachment: ChatAttachment;
 }) {
-  const url = useAssetUrl(props.environmentId, {
+  const resource = {
     _tag: "attachment",
     attachmentId: props.attachment.id,
     fileName: props.attachment.name,
     mimeType: props.attachment.mimeType,
     disposition: "inline",
-  });
+  } as const;
+  const url = useAssetUrl(props.environmentId, resource);
   if (url === null) {
     return <View className="h-6 w-6 rounded bg-subtle" />;
   }
   return (
     <Image
-      source={{ uri: url }}
+      source={assetImageSource(props.environmentId, resource, url)}
+      cachePolicy="memory-disk"
       contentFit="cover"
       style={{ width: 24, height: 24, borderRadius: 4 }}
       accessibilityIgnoresInvertColors

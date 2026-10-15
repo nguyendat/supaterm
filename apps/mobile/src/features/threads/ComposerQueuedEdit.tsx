@@ -1,4 +1,4 @@
-import type { ChatAttachment, EnvironmentId } from "@supacode/contracts";
+import type { ChatAttachment, EnvironmentId } from "@supaterm/contracts";
 import { Image } from "expo-image";
 import { Pressable, ScrollView, View } from "react-native";
 import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
@@ -6,6 +6,7 @@ import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanim
 import { AppText as Text } from "../../components/AppText";
 import { SymbolView } from "../../components/AppSymbol";
 import { useAssetUrl } from "../../state/assets";
+import { assetImageSource } from "../../lib/assetImageSource";
 
 /**
  * The composer is shared, so editing a queued message needs a visible way back
@@ -29,7 +30,7 @@ export function ComposerQueuedEditBanner(props: {
         hitSlop={8}
         className="min-h-8 justify-center px-1 active:opacity-70 disabled:opacity-40"
       >
-        <Text className="font-supacode-medium text-xs text-primary">Cancel</Text>
+        <Text className="font-supaterm-medium text-xs text-primary">Cancel</Text>
       </Pressable>
     </View>
   );
@@ -82,24 +83,21 @@ function QueuedEditAttachmentChip(props: {
 }) {
   const { attachment } = props;
   const isImage = attachment.mimeType.startsWith("image/");
-  const url = useAssetUrl(
-    props.environmentId,
-    isImage
-      ? {
-          _tag: "attachment",
-          attachmentId: attachment.id,
-          fileName: attachment.name,
-          mimeType: attachment.mimeType,
-          disposition: "inline",
-        }
-      : null,
-  );
+  const resource = {
+    _tag: "attachment",
+    attachmentId: attachment.id,
+    fileName: attachment.name,
+    mimeType: attachment.mimeType,
+    disposition: "inline",
+  } as const;
+  const url = useAssetUrl(props.environmentId, isImage ? resource : null);
 
   return (
     <View className="max-w-[180px] flex-row items-center gap-2 rounded-xl border border-border bg-card py-1 pl-1 pr-2">
       {isImage && url !== null ? (
         <Image
-          source={{ uri: url }}
+          source={assetImageSource(props.environmentId, resource, url)}
+          cachePolicy="memory-disk"
           contentFit="cover"
           style={{ width: 24, height: 24, borderRadius: 6 }}
           accessibilityIgnoresInvertColors

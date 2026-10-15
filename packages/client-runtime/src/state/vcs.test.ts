@@ -5,8 +5,9 @@ import {
   WS_METHODS,
   type VcsListRefsInput,
   type VcsListRefsResult,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import { describe, expect, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -38,7 +39,9 @@ import {
 import {
   invalidateCachedVcsRefs,
   invalidateVcsRefs,
+  invalidateVcsRefsWithLock,
   vcsRefsCacheStateAtom,
+  vcsRefsLiveRevisionAtom,
 } from "./vcsRefInvalidation.ts";
 
 const TARGET = new PrimaryConnectionTarget({
@@ -342,8 +345,155 @@ describe("cached VCS refs", () => {
         );
 
         expect(AsyncResult.isSuccess(refreshResult)).toBe(true);
-        expect(yield* Ref.get(clears)).toBe(2);
+        expect(yield* Ref.get(clears)).toBe(1);
         expect(registry.get(vcsRefsCacheStateAtom(TARGET)).revision).toBe(2);
+      }),
+    ),
+  );
+
+  it.effect("serializes status invalidation after an in-flight ref cache write", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (registry) =>
+          Effect.sync(() => registry.dispose()),
+        );
+        const saveStarted = yield* Deferred.make<void>();
+        const allowSave = yield* Deferred.make<void>();
+        const saved = yield* Ref.make<ReadonlyArray<VcsListRefsResult>>([]);
+        const cache = cacheWithRefs(Option.none(), {
+          saveVcsRefs: (_environmentId, _cwd, refs) =>
+            Effect.gen(function* () {
+              yield* Deferred.succeed(saveStarted, undefined);
+              yield* Deferred.await(allowSave);
+              yield* Ref.update(saved, (current) => [...current, refs]);
+            }),
+        });
+        const commit = yield* Effect.forkChild(
+          commitVcsRefsRefresh(registry, cache, {
+            environmentId: TARGET.environmentId,
+            cwd: "/repo",
+            refs: LIVE_REFS,
+            expectedRevision: 0,
+            persist: true,
+          }),
+        );
+        yield* Deferred.await(saveStarted);
+        const invalidate = yield* Effect.forkChild(invalidateVcsRefsWithLock(registry, TARGET));
+        yield* Effect.yieldNow;
+        expect(registry.get(vcsRefsCacheStateAtom(TARGET)).revision).toBe(0);
+        yield* Deferred.succeed(allowSave, undefined);
+        expect(yield* Fiber.join(commit)).toBe(true);
+        yield* Fiber.join(invalidate);
+        expect(registry.get(vcsRefsCacheStateAtom(TARGET)).revision).toBe(1);
+        expect(yield* Ref.get(saved)).toEqual([LIVE_REFS]);
+      }),
+    ),
+  );
+
+  it.effect("tracks live revisions per cacheable repository ref list", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (registry) =>
+          Effect.sync(() => registry.dispose()),
+        );
+        const cache = cacheWithRefs(Option.none());
+        yield* invalidateVcsRefsWithLock(registry, TARGET);
+
+        expect(
+          yield* commitVcsRefsRefresh(registry, cache, {
+            environmentId: TARGET.environmentId,
+            cwd: "/repo",
+            refs: LIVE_REFS,
+            expectedRevision: 1,
+            persist: false,
+          }),
+        ).toBe(true);
+        expect(
+          registry.get(
+            vcsRefsLiveRevisionAtom({ environmentId: TARGET.environmentId, cwd: "/repo" }),
+          ),
+        ).toBe(-1);
+
+        expect(
+          yield* commitVcsRefsRefresh(registry, cache, {
+            environmentId: TARGET.environmentId,
+            cwd: "/repo",
+            refs: LIVE_REFS,
+            expectedRevision: 1,
+            persist: true,
+          }),
+        ).toBe(true);
+        expect(
+          registry.get(
+            vcsRefsLiveRevisionAtom({ environmentId: TARGET.environmentId, cwd: "/repo" }),
+          ),
+        ).toBe(1);
+        expect(
+          registry.get(
+            vcsRefsLiveRevisionAtom({ environmentId: TARGET.environmentId, cwd: "/other" }),
+          ),
+        ).toBe(-1);
+      }),
+    ),
+  );
+
+  it.effect("keeps persisted refs when a status refresh settles", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const client = {
+          [WS_METHODS.vcsRefreshStatus]: () => Effect.void,
+        } as unknown as WsRpcProtocolClient;
+        const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+          target: TARGET,
+          state: yield* SubscriptionRef.make(CONNECTED_CONNECTION_STATE),
+          session: yield* SubscriptionRef.make(Option.some(session(client))),
+          prepared: yield* SubscriptionRef.make(Option.none<PreparedConnection>()),
+          connect: Effect.void,
+          disconnect: Effect.void,
+          retryNow: Effect.void,
+        } satisfies EnvironmentSupervisor.EnvironmentSupervisor["Service"]);
+        const run: EnvironmentRegistry.EnvironmentRegistry["Service"]["run"] = (
+          _environmentId,
+          effect,
+        ) => Effect.provideService(effect, EnvironmentSupervisor.EnvironmentSupervisor, supervisor);
+        const environmentRegistry = EnvironmentRegistry.EnvironmentRegistry.of({
+          run,
+        } as unknown as EnvironmentRegistry.EnvironmentRegistry["Service"]);
+        const persisted = yield* Ref.make<Option.Option<VcsListRefsResult>>(
+          Option.some(CACHED_REFS),
+        );
+        const clears = yield* Ref.make(0);
+        const runtime = Atom.runtime(
+          Layer.merge(
+            Layer.succeed(EnvironmentRegistry.EnvironmentRegistry, environmentRegistry),
+            Layer.succeed(
+              Persistence.EnvironmentCacheStore,
+              cacheWithRefs(Option.none(), {
+                loadVcsRefs: () => Ref.get(persisted),
+                clearVcsRefs: () =>
+                  Ref.update(clears, (count) => count + 1).pipe(
+                    Effect.andThen(Ref.set(persisted, Option.none())),
+                  ),
+              }),
+            ),
+          ),
+        );
+        const atoms = createVcsEnvironmentAtoms(runtime);
+        const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (registry) =>
+          Effect.sync(() => registry.dispose()),
+        );
+
+        const result = yield* Effect.promise(() =>
+          atoms.refreshStatus.run(registry, {
+            environmentId: TARGET.environmentId,
+            input: { cwd: "/repo" },
+          }),
+        );
+
+        expect(AsyncResult.isSuccess(result)).toBe(true);
+        expect(yield* Ref.get(clears)).toBe(0);
+        expect(yield* Ref.get(persisted)).toEqual(Option.some(CACHED_REFS));
+        expect(registry.get(vcsRefsCacheStateAtom(TARGET)).revision).toBe(1);
       }),
     ),
   );

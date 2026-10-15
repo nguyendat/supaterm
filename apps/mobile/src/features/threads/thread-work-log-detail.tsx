@@ -1,16 +1,17 @@
 import type { ReactNode } from "react";
 import { ScrollView, View } from "react-native";
-import type { EnvironmentId } from "@supacode/contracts";
-import { withOccurrenceKeys } from "@supacode/shared/occurrenceKeys";
+import type { EnvironmentId } from "@supaterm/contracts";
+import { withOccurrenceKeys } from "@supaterm/shared/occurrenceKeys";
+import { isJavaScriptReplTool } from "@supaterm/shared/toolActivity";
 import {
   toolCallLines,
   turnItemOutputImages,
   turnItemOutputText,
-} from "@supacode/client-runtime/work-log/item-detail";
+} from "@supaterm/client-runtime/work-log/item-detail";
 import {
   toolGroupAction,
   workEntryViewedImagePath,
-} from "@supacode/client-runtime/work-log/presentation";
+} from "@supaterm/client-runtime/work-log/presentation";
 
 import { AppText as Text } from "../../components/AppText";
 import type { FilePreviewSource } from "../../components/FilePreviewModal";
@@ -18,8 +19,41 @@ import type { MarkdownImageRenderer } from "../../native/SelectableMarkdownText"
 import { cn } from "../../lib/cn";
 import { formatItemFullDetail, type ThreadFeedActivity } from "../../lib/threadActivity";
 import { useTurnItemDetail } from "../../state/queries";
+import { useMarkdownCodeHighlight } from "./markdownCodeHighlightState";
 import { QuestionAnswerHistory } from "./QuestionAnswerHistory";
 import { ThreadMarkdownImage } from "./ThreadMarkdownImage";
+
+function ReplCodeText({
+  code,
+  theme,
+}: {
+  readonly code: string;
+  readonly theme: "light" | "dark";
+}) {
+  const lines = useMarkdownCodeHighlight({ code, language: "typescript", theme, enabled: true });
+  let offset = 0;
+  const highlighted = lines?.flatMap((line, lineIndex) => {
+    const separator = lineIndex > 0 ? "\n" : "";
+    offset += separator.length;
+    return [
+      separator,
+      ...line.map((token) => {
+        const start = offset;
+        offset += token.content.length;
+        return (
+          <Text key={start} style={token.color ? { color: token.color } : undefined}>
+            {token.content}
+          </Text>
+        );
+      }),
+    ];
+  });
+  return (
+    <Text selectable className="font-mono text-2xs leading-normal text-foreground">
+      {highlighted ?? code}
+    </Text>
+  );
+}
 
 /** Mounted by MotionPresence, so fetched output survives a closing or reversed fade. */
 export function ThreadWorkLogDetail(props: {
@@ -28,6 +62,7 @@ export function ThreadWorkLogDetail(props: {
   readonly renderImage: MarkdownImageRenderer;
   readonly renderReasoning: (text: string) => ReactNode;
   readonly onPressPreview: (source: FilePreviewSource) => void;
+  readonly themeAppearance: "light" | "dark";
 }) {
   const { row } = props;
   const fetchedDetail = useTurnItemDetail(
@@ -49,6 +84,8 @@ export function ThreadWorkLogDetail(props: {
           : shownItem.type === "web_search"
             ? toolCallLines({ args: { query: shownItem.patterns?.join(", ") } })
             : null;
+  const highlightsCode =
+    shownItem.type === "dynamic_tool" && isJavaScriptReplTool(shownItem.toolName);
   const failedExitCode =
     call && shownItem.type === "command_execution" && shownItem.exitCode
       ? shownItem.exitCode
@@ -110,19 +147,30 @@ export function ThreadWorkLogDetail(props: {
           withOccurrenceKeys(
             [
               call.command,
-              ...(call.args ?? []).map(([key, value]) => `${key} ${value}`),
+              ...(call.args ?? []).map(([key, value]) =>
+                key === "code" && highlightsCode ? { code: value } : `${key} ${value}`,
+              ),
               call.argsText,
             ].flatMap((line) => (line ? [line] : [])),
-            (line) => line,
-          ).map(({ item: line, key }) => (
-            <Text
-              key={key}
-              selectable
-              className="font-mono text-2xs leading-normal text-foreground"
-            >
-              {line}
-            </Text>
-          ))
+            (line) => (typeof line === "string" ? line : `code ${line.code}`),
+          ).map(({ item: line, key }) =>
+            typeof line === "string" ? (
+              <Text
+                key={key}
+                selectable
+                className="font-mono text-2xs leading-normal text-foreground"
+              >
+                {line}
+              </Text>
+            ) : (
+              <View key={key}>
+                <Text className="font-mono text-2xs leading-normal text-foreground-muted">
+                  code
+                </Text>
+                <ReplCodeText code={line.code} theme={props.themeAppearance} />
+              </View>
+            ),
+          )
         ) : fullDetail ? (
           <Text selectable className="font-mono text-2xs leading-normal text-foreground-muted">
             {fullDetail}

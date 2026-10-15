@@ -3,7 +3,7 @@ import {
   voiceInputBlocksSubmission,
   type VoiceDraftSnapshot,
   type VoiceInputControllerDependencies,
-} from "@supacode/client-runtime/voice-input";
+} from "@supaterm/client-runtime/voice-input";
 
 export type VoiceInputTarget = {
   readonly ownerKey: string;
@@ -47,19 +47,24 @@ export class VoiceInputSession {
   readonly controller: VoiceInputController;
   private target: VoiceInputTarget | null = null;
   private unsubscribe: (() => void) | null = null;
+  private onCommit: ((text: string) => void) | undefined;
 
   constructor(dependencies: Omit<VoiceInputControllerDependencies, "readDraft" | "commitDraft">) {
     this.controller = new VoiceInputController({
       ...dependencies,
       onStateChange: (state) => {
         if (!voiceInputBlocksSubmission(state)) {
+          this.onCommit = undefined;
           this.unsubscribe?.();
           this.unsubscribe = null;
         }
         dependencies.onStateChange(state);
       },
       readDraft: () => this.target?.readDraft() ?? null,
-      commitDraft: (text, selection) => this.target?.commitDraft(text, selection),
+      commitDraft: (text, selection) => {
+        this.target?.commitDraft(text, selection);
+        this.onCommit?.(text);
+      },
     });
   }
 
@@ -77,6 +82,12 @@ export class VoiceInputSession {
 
   retry(): Promise<void> {
     return this.target ? this.start(this.target) : Promise.resolve();
+  }
+
+  stop(onCommit?: (text: string) => void): Promise<void> {
+    if (this.controller.currentState.phase !== "recording") return Promise.resolve();
+    this.onCommit = onCommit;
+    return this.controller.stop();
   }
 
   start(target: VoiceInputTarget): Promise<void> {

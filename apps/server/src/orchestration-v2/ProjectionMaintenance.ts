@@ -1,4 +1,4 @@
-import { ThreadId } from "@supacode/contracts";
+import { ThreadId } from "@supaterm/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -44,7 +44,7 @@ export interface ProjectionMaintenanceV2Shape {
 export class ProjectionMaintenanceV2 extends Context.Service<
   ProjectionMaintenanceV2,
   ProjectionMaintenanceV2Shape
->()("supacode/orchestration-v2/ProjectionMaintenance/ProjectionMaintenanceV2") {}
+>()("supaterm/orchestration-v2/ProjectionMaintenance/ProjectionMaintenanceV2") {}
 
 type ProjectionMetadataRow = {
   readonly schema_version: number;
@@ -221,6 +221,7 @@ export const layer: Layer.Layer<
       "thread.active-reordered",
       "thread.metadata-updated",
       "thread.pull-request-synced",
+      "thread.workflow-run-watch-synced",
       "thread.runtime-mode-updated",
       "thread.interaction-mode-updated",
       "thread.model-selection-updated",

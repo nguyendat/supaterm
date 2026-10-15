@@ -1,8 +1,8 @@
-import { threadNotificationAttention } from "@supacode/shared/threadNotificationAttention";
-import { presentThreadShell } from "@supacode/client-runtime/state/models";
+import { threadNotificationAttention } from "@supaterm/shared/threadNotificationAttention";
+import { presentThreadShell } from "@supaterm/client-runtime/state/models";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@supacode/contracts";
+import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@supaterm/contracts";
 import * as Option from "effect/Option";
 import {
   CircleAlertIcon,

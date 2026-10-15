@@ -1,9 +1,10 @@
 import { WorkspaceDock } from "../workspace/WorkspaceDock";
+import { WorkspaceHeaderActions } from "../workspace/WorkspaceHeaderActions";
 import { useStartNewTask } from "../threads/use-start-new-task";
 import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
 import { useNavigation } from "@react-navigation/native";
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ProjectId } from "@supacode/contracts";
+import { ProjectId } from "@supaterm/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import {
   ActivityIndicator,
@@ -145,6 +146,7 @@ export function PullRequestsScreen(
   );
   const sidebar = props.sidebar === true || primaryColumn !== null;
   const selectedKey = props.selectedPullRequestKey ?? primaryColumn?.selectedPullRequestKey;
+  const connectedKey = connectedTargets.map((target) => target.environmentId).join("\n");
   const entries = useMemo(
     () =>
       filterPullRequestList(
@@ -153,8 +155,9 @@ export function PullRequestsScreen(
         result.data?.viewers ?? {},
         query,
         result.data.localSearchHosts,
+        new Set(connectedKey.split("\n")),
       ),
-    [result.entries, controls, query, result.data],
+    [result.entries, controls, query, result.data, connectedKey],
   );
   const facets = useMemo(() => pullRequestListFacets(result.entries), [result.entries]);
   const [knownFacets, setKnownFacets] = useState({ environmentId, source: facets, ...facets });
@@ -222,6 +225,16 @@ export function PullRequestsScreen(
     labels: knownFacets.environmentId === environmentId ? knownFacets.labels : facets.labels,
     projects,
   });
+  const headerFilterMenu = {
+    ...filterMenu,
+    onPressAction: (event: Parameters<typeof filterMenu.onPressAction>[0]) => {
+      filterMenu.onPressAction(event);
+      void listRef.current?.scrollToOffset({
+        offset: Platform.OS === "ios" ? -insets.top : 0,
+        animated: false,
+      });
+    },
+  };
   return (
     <View className={sidebar ? "flex-1 bg-drawer" : "flex-1 bg-screen"}>
       <LegendList
@@ -315,7 +328,7 @@ export function PullRequestsScreen(
               className="items-center gap-2 px-8 py-4"
             >
               <Text className="text-xs text-foreground-muted">{result.loadMoreError}</Text>
-              <Text className="text-sm font-supacode-medium text-link">Try again</Text>
+              <Text className="text-sm font-supaterm-medium text-link">Try again</Text>
             </Pressable>
           ) : undefined
         }
@@ -356,21 +369,16 @@ export function PullRequestsScreen(
           )
         }
       />
-      <WorkspaceDock
-        floating
-        showTabs={!props.sidebar}
-        onNewTask={startNewTask}
-        filterMenu={{
-          ...filterMenu,
-          onPressAction: (event) => {
-            filterMenu.onPressAction(event);
-            void listRef.current?.scrollToOffset({
-              offset: Platform.OS === "ios" ? -insets.top : 0,
-              animated: false,
-            });
-          },
-        }}
-      />
+      {Platform.OS === "ios" ? (
+        <WorkspaceHeaderActions filterMenu={headerFilterMenu} />
+      ) : (
+        <WorkspaceDock
+          floating
+          showTabs={!props.sidebar}
+          onNewTask={startNewTask}
+          filterMenu={headerFilterMenu}
+        />
+      )}
     </View>
   );
 }

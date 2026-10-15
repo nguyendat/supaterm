@@ -1,5 +1,5 @@
-import type { OrchestrationV2DomainEvent, OrchestrationV2ThreadShell } from "@supacode/contracts";
-import type { PushNotificationKind } from "@supacode/contracts/push";
+import type { OrchestrationV2DomainEvent, OrchestrationV2ThreadShell } from "@supaterm/contracts";
+import type { PushNotificationKind } from "@supaterm/contracts/push";
 
 import {
   backgroundWorkHoldsCompletion,
@@ -17,6 +17,7 @@ export function eventChangesNotificationAttention(event: OrchestrationV2DomainEv
     case "thread.unarchived":
     case "thread.deleted":
     case "thread.pull-request-synced":
+    case "thread.workflow-run-watch-synced":
       return true;
     case "turn-item.updated":
       return turnItemUpdateCanEndBackgroundWork(event.payload);

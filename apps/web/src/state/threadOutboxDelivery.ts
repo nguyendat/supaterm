@@ -1,14 +1,14 @@
 import type { AtomRegistry } from "effect/reactivity";
 import * as Schema from "effect/Schema";
-import type { EnvironmentId, ThreadId } from "@supacode/contracts";
-import { MessageId } from "@supacode/contracts";
+import type { EnvironmentId, ThreadId } from "@supaterm/contracts";
+import { MessageId } from "@supaterm/contracts";
 
 import {
   createThreadOutboxManager,
   ThreadOutboxManagerError,
   shouldRetryThreadOutboxDelivery,
   threadOutboxRetryDelayMs,
-} from "@supacode/client-runtime/thread-outbox";
+} from "@supaterm/client-runtime/thread-outbox";
 
 const isManagerError = Schema.is(ThreadOutboxManagerError);
 
@@ -248,26 +248,28 @@ export function createBrowserThreadOutbox<Payload>(options: {
         sending.add(current.id);
         notify();
         try {
-          await options.deliver(current, async (payload) => {
-            current = { ...current, payload };
-            if (!(await save(current))) throw new Error("The pending message was removed.");
-          });
-        } catch (error) {
-          const retry = (options.shouldRetry ?? shouldRetryThreadOutboxDelivery)(error);
-          current = {
-            ...current,
-            status: retry ? "pending" : "failed",
-            retryAt: retry ? options.now() + threadOutboxRetryDelayMs(current.attempts) : 0,
-            error: error instanceof Error ? error.message : String(error),
-          };
-          await save(current);
-          return { next: retry ? current.retryAt : null };
+          try {
+            await options.deliver(current, async (payload) => {
+              current = { ...current, payload };
+              if (!(await save(current))) throw new Error("The pending message was removed.");
+            });
+          } catch (error) {
+            const retry = (options.shouldRetry ?? shouldRetryThreadOutboxDelivery)(error);
+            current = {
+              ...current,
+              status: retry ? "pending" : "failed",
+              retryAt: retry ? options.now() + threadOutboxRetryDelayMs(current.attempts) : 0,
+              error: error instanceof Error ? error.message : String(error),
+            };
+            await save(current);
+            return { next: retry ? current.retryAt : null };
+          }
+          // Record acknowledgement before cleanup, so failed deletion can never resend the turn.
+          await save({ ...current, status: "delivered", error: null });
         } finally {
           sending.delete(current.id);
           notify();
         }
-        // Record acknowledgement before cleanup, so failed deletion can never resend the turn.
-        await save({ ...current, status: "delivered", error: null });
         if (options.canRemoveDelivered?.(current) === false) return { next: null };
         await remove(current.id);
         return { next: options.now() };

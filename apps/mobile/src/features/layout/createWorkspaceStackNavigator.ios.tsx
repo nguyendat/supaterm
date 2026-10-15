@@ -19,13 +19,14 @@ import {
   type NativeStackNavigatorProps,
   type NativeStackTypeBag,
 } from "@react-navigation/native-stack";
-import { use, useCallback, useEffect, useMemo, useRef, type ComponentProps } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { Platform, View } from "react-native";
 import { Split, type SplitHostCommands } from "react-native-screens";
-import { EnvironmentId, ThreadId } from "@supacode/contracts";
+import { EnvironmentId, ThreadId } from "@supaterm/contracts";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { WorkspaceTabsProvider } from "../workspace/WorkspaceTabsContext";
 import { WorkspaceNativeTabs } from "../workspace/WorkspaceNativeTabs.ios";
+import { useNativeLayoutMetrics } from "../../native/native-layout-metrics";
 
 import { useAdaptiveWorkspaceLayout } from "./AdaptiveWorkspaceLayout";
 import { WorkspaceEmptyDetail } from "./WorkspaceEmptyDetail";
@@ -279,6 +280,9 @@ function WorkspaceColumns(
 }
 
 function WorkspaceStackView(props: ViewProps & { readonly nativeColumns: boolean }) {
+  const { layout } = useAdaptiveWorkspaceLayout();
+  const [primaryVisible, setPrimaryVisible] = useState(false);
+  const metrics = useNativeLayoutMetrics();
   const projection = projectWorkspaceStack(props.state, (route) => {
     const presentation = props.descriptors[route.key]?.options.presentation;
     return presentation !== undefined && presentation !== "card";
@@ -299,6 +303,13 @@ function WorkspaceStackView(props: ViewProps & { readonly nativeColumns: boolean
     options: { headerShown: false },
     render: () => (
       <WorkspaceNativeTabs
+        onNewTask={() => startNewTask(props.navigation)}
+        hidden={
+          projection.detail.length > 0 &&
+          !primaryVisible &&
+          !layout.usesSplitView &&
+          (metrics?.verticalBarEdge ?? "none") === "none"
+        }
         onSelect={() => {
           if (props.state.index > 0)
             props.navigation.dispatch({ type: "POP_TO_TOP", target: props.state.key });
@@ -314,6 +325,7 @@ function WorkspaceStackView(props: ViewProps & { readonly nativeColumns: boolean
         ) : (
           <V5CardStackView
             {...props}
+            onRootVisibilityChange={setPrimaryVisible}
             descriptors={descriptors}
             state={{
               ...props.state,

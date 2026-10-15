@@ -5,7 +5,7 @@ import * as ServerConfig from "../../../config.ts";
 import { expect, it } from "@effect/vitest";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProviderInstanceId, ThreadId } from "@supacode/contracts";
+import { ProviderInstanceId, ThreadId } from "@supaterm/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -17,6 +17,7 @@ import * as ProviderAdapterRegistry from "../../../orchestration-v2/ProviderAdap
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as PullRequestReviewGuideService from "../../../pullRequest/PullRequestReviewGuideService.ts";
+import * as PullRequestService from "../../../pullRequest/PullRequestService.ts";
 import * as ProjectSetupScriptRunner from "../../../project/ProjectSetupScriptRunner.ts";
 import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../../../scheduledTasks/ScheduledTaskService.ts";
@@ -44,6 +45,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
   Layer.mock(ProjectService.ProjectService)({}),
   Layer.mock(PullRequestReviewGuideService.PullRequestReviewGuideService)({}),
+  Layer.mock(PullRequestService.PullRequestService)({}),
   ServerSettings.layerTest({}),
   Layer.mock(GitWorkflowService.GitWorkflowService)({}),
   Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({}),
@@ -135,8 +137,8 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       const payload = yield* decodeToolsListPayload(bodyText.match(/\{.*\}/s)![0]);
       const tools = payload.result.tools;
       const toolNames = tools.map((tool) => tool.name);
-      expect(toolNames).toContain("supacode_worktree_handoff");
-      expect(toolNames).toContain("supacode_worktree_status");
+      expect(toolNames).toContain("supaterm_worktree_handoff");
+      expect(toolNames).toContain("supaterm_worktree_status");
       // The worktree registration merges alongside the other toolkits rather
       // than replacing them.
       expect(toolNames).toContain("preview_status");
@@ -145,11 +147,11 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       // The handoff tool mutates thread state, reaches the network (origin
       // fetch), and runs project setup scripts, so its MCP hints must not
       // promise a read-only, closed-world, non-destructive tool.
-      const handoff = tools.find((tool) => tool.name === "supacode_worktree_handoff");
+      const handoff = tools.find((tool) => tool.name === "supaterm_worktree_handoff");
       expect(handoff?.annotations?.readOnlyHint).toBe(false);
       expect(handoff?.annotations?.destructiveHint).toBe(true);
       expect(handoff?.annotations?.openWorldHint).toBe(true);
-      const status = tools.find((tool) => tool.name === "supacode_worktree_status");
+      const status = tools.find((tool) => tool.name === "supaterm_worktree_status");
       expect(status?.annotations?.readOnlyHint).toBe(true);
       expect(status?.annotations?.destructiveHint).toBe(false);
 
@@ -164,7 +166,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
     Effect.provide(
       Layer.mergeAll(
         NodeHttpServer.layerTest,
-        ServerConfig.layerTest(process.cwd(), { prefix: "supacode-worktree-mcp-" }).pipe(
+        ServerConfig.layerTest(process.cwd(), { prefix: "supaterm-worktree-mcp-" }).pipe(
           Layer.provide(NodeServices.layer),
         ),
         NodeServices.layer,

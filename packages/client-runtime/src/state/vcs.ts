@@ -4,8 +4,8 @@ import {
   type VcsListRefsResult,
   type VcsStatusResult,
   WS_METHODS,
-} from "@supacode/contracts";
-import { applyGitStatusStreamEvent } from "@supacode/shared/git";
+} from "@supaterm/contracts";
+import { applyGitStatusStreamEvent } from "@supaterm/shared/git";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -29,9 +29,14 @@ import { followStreamInEnvironment } from "./runtime.ts";
 import { vcsCommandConcurrency, vcsCommandScheduler } from "./vcsCommandScheduler.ts";
 import {
   invalidateCachedVcsRefs,
+  invalidateVcsRefsWithLock,
+  markVcsRefsRefreshPending,
   vcsRefsCacheStateAtom,
+  vcsRefsLiveRevisionAtom,
   withVcsRefsPersistenceLock,
 } from "./vcsRefInvalidation.ts";
+
+export { vcsRefsCacheStateAtom, vcsRefsLiveRevisionAtom } from "./vcsRefInvalidation.ts";
 
 const OFFLINE_BRANCH_LIST_LIMIT = 100;
 const VCS_REFS_IDLE_TTL_MS = 30_000;
@@ -101,13 +106,18 @@ export const commitVcsRefsRefresh = Effect.fn("CachedVcsRefsState.commitRefresh"
             ),
           ),
         );
-        if (persistedCacheReadable !== state.persistedCacheReadable) {
-          registry.update(stateAtom, (current) =>
-            current.revision === input.expectedRevision
-              ? { ...current, persistedCacheReadable }
-              : current,
-          );
-        }
+      }
+      registry.update(stateAtom, (current) =>
+        current.revision === input.expectedRevision &&
+        current.persistedCacheReadable !== persistedCacheReadable
+          ? { ...current, persistedCacheReadable }
+          : current,
+      );
+      if (input.persist) {
+        registry.update(
+          vcsRefsLiveRevisionAtom({ environmentId: input.environmentId, cwd: input.cwd }),
+          (current) => (current === input.expectedRevision ? current : input.expectedRevision),
+        );
       }
       return true;
     }),
@@ -130,6 +140,9 @@ export const makeCachedVcsRefsChanges = Effect.fn("CachedVcsRefsState.makeChange
   const cache = yield* Persistence.EnvironmentCacheStore;
   const environmentId = supervisor.target.environmentId;
   const useCache = canUseVcsRefsCache(input);
+  if (useCache && expectedRevision !== undefined && registry !== undefined) {
+    yield* markVcsRefsRefreshPending(registry, { environmentId, cwd: input.cwd }, expectedRevision);
+  }
   const cached =
     useCache && persistedCacheReadable
       ? yield* cache.loadVcsRefs(environmentId, input.cwd).pipe(
@@ -277,6 +290,10 @@ export function createVcsEnvironmentAtoms<R, E>(
       environmentId: target.environmentId,
       cwd: target.input.cwd,
     });
+  const refreshRefs = (
+    target: { readonly environmentId: EnvironmentId; readonly input: { readonly cwd: string } },
+    registry: AtomRegistry.AtomRegistry,
+  ) => invalidateVcsRefsWithLock(registry, target);
 
   return {
     listRefs,
@@ -306,7 +323,7 @@ export function createVcsEnvironmentAtoms<R, E>(
       tag: WS_METHODS.vcsRefreshStatus,
       scheduler: vcsCommandScheduler,
       concurrency: vcsCommandConcurrency,
-      onSettled: invalidateRefs,
+      onSettled: refreshRefs,
     }),
     createWorktree: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:vcs:create-worktree",

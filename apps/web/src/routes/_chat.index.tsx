@@ -1,8 +1,8 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
-import { scopeProjectRef } from "@supacode/client-runtime/environment";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { scopeProjectRef } from "@supaterm/client-runtime/environment";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { isElectron } from "../env";
@@ -43,6 +43,10 @@ function IndexDraftLanding() {
   const threads = useThreadShells();
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
   const handleNewThread = useNewThreadHandler();
+  const router = useRouter();
+  // Read at effect time: this page stays mounted while a navigation away from
+  // "/" is still loading, but the router already points at the new location.
+  const isStillOnIndex = useEffectEvent(() => router.state.location.pathname === "/");
   const startingRef = useRef(false);
   const [startFailed, setStartFailed] = useState(false);
 
@@ -68,7 +72,8 @@ function IndexDraftLanding() {
   };
 
   useEffect(() => {
-    if (mostRecentProject === null) {
+    // Starting a draft after the user has left would replace the page they picked.
+    if (mostRecentProject === null || !isStillOnIndex()) {
       return;
     }
     startDraft(mostRecentProject);
@@ -141,10 +146,10 @@ function HostedStaticOnboardingState() {
               <div className="mx-auto mb-5 flex size-11 items-center justify-center rounded-xl border border-border/70 bg-background/70 text-muted-foreground">
                 <LinkIcon className="size-5" />
               </div>
-              <EmptyTitle>Connect to a computer running Supacode</EmptyTitle>
+              <EmptyTitle>Connect to a computer running Supaterm</EmptyTitle>
               <EmptyDescription>
-                This app connects to Supacode running on your computer or a server. Start the
-                Supacode desktop app or command-line server on that machine and keep it running.
+                This app connects to Supaterm running on your computer or a server. Start the
+                Supaterm desktop app or command-line server on that machine and keep it running.
               </EmptyDescription>
               <EmptyDescription>{description}</EmptyDescription>
               <div className="mt-6 flex justify-center">

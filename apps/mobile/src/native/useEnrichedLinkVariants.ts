@@ -79,7 +79,7 @@ export function useEnrichedLinkVariants(
               },
               fontFamily: textStyle.fontFamily,
               color,
-              underline: false,
+              underline: resolveMarkdownLinkPresentation(url).kind === "external",
               backgroundColor: "transparent",
             },
           ];

@@ -1,5 +1,4 @@
 import { useAtomValue } from "@effect/atom-react";
-import * as Schema from "effect/Schema";
 import {
   useEffect,
   useState,
@@ -10,7 +9,6 @@ import {
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 
 import { isElectron } from "../env";
-import { getLocalStorageItem, removeLocalStorageItem } from "../hooks/useLocalStorage";
 import {
   isRichTextBoldShortcut,
   resolveShortcutCommand,
@@ -39,17 +37,15 @@ import { MainAppLocationTracker } from "./sidebar/mainAppLocation";
 import { useSidebarStageBackdropVariant } from "./SidebarStageBackdrop";
 import { useProjects } from "../state/entities";
 import {
-  clampThreadSidebarWidth,
-  resolveInitialThreadSidebarWidth,
-  resolveThreadSidebarMaximumWidth,
+  resolveDefaultThreadSidebarWidth,
   resolveThreadSidebarMinimumWidth,
   THREAD_MAIN_CONTENT_MIN_WIDTH,
   THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
 } from "./threadSidebarWidth";
 import {
   Sidebar,
+  SidebarInsetPanel,
   SidebarProvider,
-  SidebarRail,
   SidebarTrigger,
   useSidebar,
   useSidebarVisibility,
@@ -57,15 +53,6 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "var(--desktop-window-controls-inset, 90px)";
-
-function subscribeToViewportWidth(onChange: () => void): () => void {
-  window.addEventListener("resize", onChange);
-  return () => window.removeEventListener("resize", onChange);
-}
-
-function readViewportWidth(): number {
-  return window.innerWidth;
-}
 
 let windowFullscreenSnapshot: boolean | null = null;
 
@@ -101,18 +88,6 @@ function readWindowFullscreen(): boolean {
         : false;
   }
   return windowFullscreenSnapshot;
-}
-
-function readInitialThreadSidebarWidth(): number {
-  try {
-    return resolveInitialThreadSidebarWidth(
-      getLocalStorageItem(THREAD_SIDEBAR_WIDTH_STORAGE_KEY, Schema.Finite),
-      window.innerWidth,
-    );
-  } catch (error) {
-    console.error("Could not read persisted thread sidebar width.", error);
-    return resolveInitialThreadSidebarWidth(null, window.innerWidth);
-  }
 }
 
 function SidebarControl() {
@@ -275,22 +250,8 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const routePanelAnimationsActive = panelAnimationsActive && !panelAnimationsSuppressed;
   const isOnSettings = pathname === "/settings" || pathname.startsWith("/settings/");
   const isMacosDesktop = isMacosDesktopWindow();
-  const [sidebarWidth, setSidebarWidth] = useState(readInitialThreadSidebarWidth);
-  // Subscribed rather than read once: the clamp must track live window size,
-  // and a clamped drag ends with an unchanged width, which skips the re-render
-  // that would otherwise refresh a render-time snapshot.
-  const viewportWidth = useSyncExternalStore(subscribeToViewportWidth, readViewportWidth);
   const [brandWidth, setBrandWidth] = useState(0);
   const sidebarMinimumWidth = resolveThreadSidebarMinimumWidth(brandWidth);
-  const sidebarMaximumWidth = resolveThreadSidebarMaximumWidth(viewportWidth, sidebarMinimumWidth);
-  const resetSidebarWidth = () => {
-    try {
-      removeLocalStorageItem(THREAD_SIDEBAR_WIDTH_STORAGE_KEY);
-    } catch (error) {
-      console.error("Could not clear persisted thread sidebar width.", error);
-    }
-    setSidebarWidth(resolveInitialThreadSidebarWidth(null, viewportWidth));
-  };
   const isWindowFullscreen = useSyncExternalStore(
     subscribeToWindowFullscreen,
     readWindowFullscreen,
@@ -301,7 +262,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       : {}
   ) as CSSProperties;
   const sidebarProviderStyle = {
-    "--sidebar-width": `${clampThreadSidebarWidth(sidebarWidth, sidebarMinimumWidth, sidebarMaximumWidth)}px`,
     "--panel-animation-duration": `${panelAnimationDurationMs}ms`,
     ...windowControlsInsetStyle,
   } as CSSProperties;
@@ -334,22 +294,15 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         defaultOpen
         style={sidebarProviderStyle}
       >
-        <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
-        <ProjectProjectionRetention />
         <Sidebar
           side="left"
-          collapsible="offcanvas"
           data-app-sidebar=""
           role="navigation"
           aria-label={isOnSettings ? "Settings" : "Threads"}
           resizable={{
-            maxWidth: sidebarMaximumWidth,
+            defaultWidth: resolveDefaultThreadSidebarWidth(window.innerWidth),
             minWidth: sidebarMinimumWidth,
-            shouldAcceptWidth: ({ currentWidth, nextWidth, wrapper }) =>
-              nextWidth <= currentWidth ||
-              wrapper.clientWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
             storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
-            onResize: setSidebarWidth,
           }}
           // The narrow-window sidebar is a sheet, portaled outside the provider's styles.
           style={windowControlsInsetStyle}
@@ -362,12 +315,15 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           ) : (
             <ThreadSidebar />
           )}
-          <SidebarRail onDoubleClick={resetSidebarWidth} />
         </Sidebar>
-        {children}
-        <SidebarControl />
-        <NavigationHistoryShortcuts />
-        <MainAppLocationTracker />
+        <SidebarInsetPanel minWidth={THREAD_MAIN_CONTENT_MIN_WIDTH}>
+          <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
+          <ProjectProjectionRetention />
+          {children}
+          <SidebarControl />
+          <NavigationHistoryShortcuts />
+          <MainAppLocationTracker />
+        </SidebarInsetPanel>
       </SidebarProvider>
     </PanelAnimationSuppressionProvider>
   );

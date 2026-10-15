@@ -3,10 +3,10 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
-} from "@supacode/contracts";
-import { DEFAULT_UNIFIED_SETTINGS, type UnifiedSettings } from "@supacode/contracts/settings";
+} from "@supaterm/contracts";
+import { DEFAULT_UNIFIED_SETTINGS, type UnifiedSettings } from "@supaterm/contracts/settings";
 import { describe, expect, it } from "vite-plus/test";
-import { createModelSelection } from "@supacode/shared/model";
+import { createModelSelection } from "@supaterm/shared/model";
 import { deriveEffectiveComposerModelState } from "./composerDraftStore";
 import { getComposerProviderState } from "./components/chat/composerProviderState";
 import { deriveProviderInstanceEntries, NO_PROVIDER_MODEL_SELECTION } from "./providerInstances";
@@ -539,6 +539,47 @@ describe("instance-scoped model selection", () => {
 
     expect(state.selectedModel).toBe("gpt-5.6-sol");
     expect(dispatch.modelOptionsForDispatch).toBeUndefined();
+  });
+
+  it.each(["draft", "thread", "project"] as const)(
+    "preserves the exact %s model and options without a provider snapshot",
+    (source) => {
+      const instanceId = ProviderInstanceId.make("claude_work");
+      const saved = createModelSelection(instanceId, "claude-opus-5-5", [
+        { id: "effort", value: "high" },
+      ]);
+      const state = deriveEffectiveComposerModelState({
+        draft:
+          source === "draft"
+            ? { activeProvider: instanceId, modelSelectionByProvider: { [instanceId]: saved } }
+            : null,
+        providers: [],
+        selectedProvider: ProviderDriverKind.make("codex"),
+        selectedInstanceId: instanceId,
+        threadModelSelection: source === "thread" ? saved : null,
+        projectModelSelection: source === "project" ? saved : null,
+        settings: settingsWithProviderInstances(),
+      });
+
+      expect(state.selectedModel).toBe(saved.model);
+      expect(state.modelOptions?.[instanceId]).toEqual(saved.options);
+    },
+  );
+
+  it("does not borrow another instance's model when the selected snapshot is missing", () => {
+    const otherInstanceId = ProviderInstanceId.make("codex");
+    const state = deriveEffectiveComposerModelState({
+      draft: null,
+      providers: [provider({ instanceId: otherInstanceId, models: ["gpt-5.6-sol"] })],
+      selectedProvider: ProviderDriverKind.make("codex"),
+      selectedInstanceId: ProviderInstanceId.make("claude_work"),
+      threadModelSelection: createModelSelection(otherInstanceId, "gpt-5.6-sol"),
+      projectModelSelection: null,
+      settings: settingsWithProviderInstances(),
+    });
+
+    expect(state.selectedModel).toBe("");
+    expect(state.modelOptions).toBeNull();
   });
 
   it("preserves an explicit draft OpenCode selection while the catalog is empty", () => {

@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import { relayHttpBaseUrl, relayPublicKey } from "@supacode/shared/relay/protocol";
+import { relayHttpBaseUrl, relayPublicKey } from "@supaterm/shared/relay/protocol";
 import { layer, RelayGateway } from "./gateway.ts";
 
 const address = relayHttpBaseUrl(relayPublicKey(new Uint8Array(32).fill(19)));
@@ -204,6 +204,39 @@ it.effect("preserves a tunnel shared with another lease or an existing connectio
       yield* Effect.promise(() => abandoned.close());
       expect(closes).toBe(0);
       yield* Effect.promise(() => gateway.resolve(address));
+      expect(opens).toBe(1);
+    }).pipe(
+      Effect.provide(
+        layer({
+          fetch,
+          open: async () => {
+            opens++;
+            return {
+              prepare: async () => "http://127.0.0.1:3000",
+              close: async () => {
+                closes++;
+              },
+            };
+          },
+        }),
+      ),
+      Effect.scoped,
+    );
+    expect(closes).toBe(1);
+  }),
+);
+
+it.effect("keeps a leased tunnel that a connection resolved before the lease closed", () =>
+  Effect.gen(function* () {
+    let opens = 0;
+    let closes = 0;
+    yield* Effect.gen(function* () {
+      const gateway = yield* RelayGateway;
+      const check = gateway.lease(address);
+      yield* Effect.promise(() => check.prepare());
+      yield* Effect.promise(() => gateway.resolve(address));
+      yield* Effect.promise(() => check.close());
+      expect(closes).toBe(0);
       expect(opens).toBe(1);
     }).pipe(
       Effect.provide(

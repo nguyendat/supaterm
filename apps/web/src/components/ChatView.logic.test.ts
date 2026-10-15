@@ -8,8 +8,9 @@ import {
   ANTIGRAVITY_DEFAULT_MODEL,
   ProviderDriverKind,
   type ServerProvider,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import { deriveProviderInstanceEntries, NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
+import { headlineUsageWindows } from "@supaterm/shared/usageLimits";
 import type { RightPanelSurface } from "../rightPanelStore";
 import {
   CommandId,
@@ -22,8 +23,8 @@ import {
   TurnItemId,
   type OrchestrationV2ProjectedTurnItem,
   type WorktreeSetupSnapshot,
-} from "@supacode/contracts";
-import type { CodexArtifactTemplate } from "@supacode/shared/codexArtifactTemplates";
+} from "@supaterm/contracts";
+import type { CodexArtifactTemplate } from "@supaterm/shared/codexArtifactTemplates";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -74,6 +75,7 @@ import {
   resolveDraftPromotionNavigationTarget,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
+  shouldRequireWorktreeBaseBranch,
   startNewThreadForProject,
   shouldShowBranchMismatchBanner,
   shouldWriteThreadErrorToCurrentServerThread,
@@ -259,7 +261,7 @@ describe("resolveThreadMetadataUpdateForNextTurn", () => {
 describe("deriveComposerSendState", () => {
   it("treats expired terminal pills as non-sendable content", () => {
     const state = deriveComposerSendState({
-      prompt: "[Terminal 1](supacode-context://v1/terminal/ctx-expired)",
+      prompt: "[Terminal 1](supaterm-context://v1/terminal/ctx-expired)",
       imageCount: 0,
       terminalContexts: [
         {
@@ -283,7 +285,7 @@ describe("deriveComposerSendState", () => {
 
   it("keeps text sendable while excluding expired terminal pills", () => {
     const state = deriveComposerSendState({
-      prompt: `yoo [Terminal 1](supacode-context://v1/terminal/ctx-expired) waddup`,
+      prompt: `yoo [Terminal 1](supaterm-context://v1/terminal/ctx-expired) waddup`,
       imageCount: 0,
       terminalContexts: [
         {
@@ -413,6 +415,28 @@ describe("resolveSendEnvMode", () => {
   it("keeps worktree mode only for git repositories", () => {
     expect(resolveSendEnvMode({ requestedEnvMode: "worktree", isGitRepo: true })).toBe("worktree");
     expect(resolveSendEnvMode({ requestedEnvMode: "worktree", isGitRepo: false })).toBe("local");
+  });
+});
+
+describe("shouldRequireWorktreeBaseBranch", () => {
+  const base = {
+    shouldCreateWorktree: true,
+    activeThreadBranch: null,
+    refsSettled: true,
+    environmentUnavailable: false,
+  };
+
+  it("lets the outbox resolve a base while refs are still loading", () => {
+    expect(shouldRequireWorktreeBaseBranch({ ...base, refsSettled: false })).toBe(false);
+  });
+
+  it("blocks a connected send after refs settle without a usable base", () => {
+    expect(shouldRequireWorktreeBaseBranch(base)).toBe(true);
+  });
+
+  it("does not block an explicit branch or an unavailable environment", () => {
+    expect(shouldRequireWorktreeBaseBranch({ ...base, activeThreadBranch: "main" })).toBe(false);
+    expect(shouldRequireWorktreeBaseBranch({ ...base, environmentUnavailable: true })).toBe(false);
   });
 });
 
@@ -1301,6 +1325,55 @@ describe("resolveComposerProviderSelection", () => {
     });
   }
 
+  it.each([true, false])(
+    "follows model selections for usage limits only when the started thread supports handoff (%s)",
+    (supportsProviderSwitchingViaHandoff) => {
+      const original = entry("codex", "codex_work", {
+        usageLimits: {
+          checkedAt: now,
+          windows: [{ id: "session", kind: "session", label: "Session", usedPercent: 20 }],
+        },
+      });
+      const other = entry("claudeAgent", "claude_work", {
+        usageLimits: {
+          checkedAt: now,
+          windows: [{ id: "session", kind: "session", label: "Session", usedPercent: 70 }],
+        },
+      });
+      const entries = [original, other];
+      const thread = makeThread({
+        modelSelection: { instanceId: original.instanceId, model: "default" },
+        runtime: {
+          ...readySession,
+          providerName: original.driverKind,
+          providerInstanceId: original.instanceId,
+        },
+      });
+
+      for (const selected of [other, original]) {
+        const lockedProvider = deriveLockedProvider({
+          thread,
+          selectedProvider: selected.instanceId,
+          threadProvider: original.instanceId,
+          providers: entries.map((entry) => entry.snapshot),
+          supportsProviderSwitchingViaHandoff,
+        });
+        const { selectedProviderEntry } = resolveComposerProviderSelection({
+          entries,
+          candidateInstanceIds: [selected.instanceId, thread.runtime?.providerInstanceId],
+          lockedProvider,
+          lockedInstanceId: thread.runtime?.providerInstanceId,
+        });
+        const expected = supportsProviderSwitchingViaHandoff ? selected : original;
+
+        expect(selectedProviderEntry?.instanceId).toBe(expected.instanceId);
+        expect(headlineUsageWindows(selectedProviderEntry?.snapshot ?? null)).toEqual(
+          headlineUsageWindows(expected.snapshot),
+        );
+      }
+    },
+  );
+
   it.each([
     ["claudeAgent", "claude_work"],
     ["codex", "codex_work"],
@@ -1389,6 +1462,47 @@ describe("resolveComposerProviderSelection", () => {
         providers: [original.snapshot, selected.snapshot],
       }),
     ).toBeNull();
+  });
+
+  it("keeps the selected instance when it becomes temporarily unavailable", () => {
+    const selected = entry("codex", "work", { availability: "unavailable" });
+    const fallback = entry("codex");
+    const selection = resolveComposerProviderSelection({
+      entries: [fallback, selected],
+      candidateInstanceIds: [selected.instanceId, fallback.instanceId],
+      lockedProvider: null,
+      lockedInstanceId: null,
+    });
+    expect(selection.selectedProviderEntry).toBe(selected);
+    expect(selection.selectedProviderEntry?.isAvailable).toBe(false);
+  });
+
+  it.each(["missing", "disabled"] as const)(
+    "keeps an explicit %s selection instead of sending with a default provider",
+    (state) => {
+      const selected = entry("codex", "work", { enabled: false });
+      const fallback = entry("codex");
+      const selection = resolveComposerProviderSelection({
+        entries: state === "missing" ? [fallback] : [fallback, selected],
+        candidateInstanceIds: [selected.instanceId, fallback.instanceId],
+        lockedProvider: null,
+        lockedInstanceId: null,
+      });
+      expect(selection.selectedProviderEntry).toBeUndefined();
+      expect(selection.unavailableProviderInstanceId).toBe(selected.instanceId);
+    },
+  );
+
+  it("still chooses a ready default for an untouched draft", () => {
+    const fallback = entry("codex");
+    expect(
+      resolveComposerProviderSelection({
+        entries: [fallback],
+        candidateInstanceIds: [NO_PROVIDER_MODEL_SELECTION.instanceId],
+        lockedProvider: null,
+        lockedInstanceId: null,
+      }).selectedProviderEntry,
+    ).toBe(fallback);
   });
 
   it("keeps a signed-out selection instead of silently switching providers", () => {

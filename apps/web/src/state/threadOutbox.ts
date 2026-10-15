@@ -1,12 +1,12 @@
-import { resolveThreadOutboxDispatchStep } from "@supacode/client-runtime/thread-outbox";
+import { resolveThreadOutboxDispatchStep } from "@supaterm/client-runtime/thread-outbox";
 import { createBrowserThreadOutbox, type ThreadOutboxEntry } from "./threadOutboxDelivery";
-import { scopedThreadKey, scopeThreadRef } from "@supacode/client-runtime/environment";
-import type { StartThreadTurnInput } from "@supacode/client-runtime/operations";
-import { runAtomCommand, squashAtomCommandFailure } from "@supacode/client-runtime/state/runtime";
+import { scopedThreadKey, scopeThreadRef } from "@supaterm/client-runtime/environment";
+import type { StartThreadTurnInput } from "@supaterm/client-runtime/operations";
+import { runAtomCommand, squashAtomCommandFailure } from "@supaterm/client-runtime/state/runtime";
 import {
   runAttachmentUploadCycle,
   verifyPersistedAttachmentUpload,
-} from "@supacode/client-runtime/state/attachments";
+} from "@supaterm/client-runtime/state/attachments";
 import {
   CommandId,
   MessageId,
@@ -14,12 +14,13 @@ import {
   AttachmentCreateUploadUrlInput,
   type EnvironmentId,
   type ScopedThreadRef,
-} from "@supacode/contracts";
-import { remapComposerContextAttachments } from "@supacode/shared/composerContextReferences";
-import { serializeLegacyContextMessage } from "@supacode/shared/composerContextLegacySend";
-import { resolveDefaultWorktreeBaseBranch } from "@supacode/shared/git";
-import { resolveAssetUrl } from "@supacode/client-runtime/state/assets";
+} from "@supaterm/contracts";
+import { remapComposerContextAttachments } from "@supaterm/shared/composerContextReferences";
+import { serializeLegacyContextMessage } from "@supaterm/shared/composerContextLegacySend";
+import { resolveDefaultWorktreeBaseBranch } from "@supaterm/shared/git";
+import { resolveAssetUrl } from "@supaterm/client-runtime/state/assets";
 import * as Schema from "effect/Schema";
+import { Atom } from "effect/reactivity";
 import { useCallback, useSyncExternalStore } from "react";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -50,7 +51,7 @@ const decodeTurn = Schema.decodeSync(OutboxTurn);
 export type PendingThreadTurn = ThreadOutboxEntry<OutboxTurn>;
 
 async function command<A, E, Input>(
-  operation: import("@supacode/client-runtime/state/runtime").AtomCommand<Input, A, E>,
+  operation: import("@supaterm/client-runtime/state/runtime").AtomCommand<Input, A, E>,
   input: Input,
 ) {
   const result = await runAtomCommand(appAtomRegistry, operation, input, { reportFailure: false });
@@ -117,6 +118,22 @@ async function uploadAttachment(
   });
 }
 
+function isThreadOutboxDeliverable(
+  environmentId: EnvironmentId,
+  read: <A>(atom: Atom.Atom<A>) => A,
+) {
+  return (
+    read(environmentPresentations.presentationAtom(environmentId))?.connection.phase ===
+      "connected" &&
+    read(environmentShell.stateValueAtom(environmentId)).status === "live" &&
+    read(environmentServerConfigsAtom).has(environmentId)
+  );
+}
+
+export const threadOutboxDeliverableAtom = Atom.family((environmentId: EnvironmentId) =>
+  Atom.make((get) => isThreadOutboxDeliverable(environmentId, get)),
+);
+
 export const webThreadOutbox = createBrowserThreadOutbox<OutboxTurn>({
   storage: browserThreadOutboxStorage,
   registry: appAtomRegistry,
@@ -136,17 +153,8 @@ export const webThreadOutbox = createBrowserThreadOutbox<OutboxTurn>({
       snapshot.archivedThreads.some((thread) => thread.id === entry.payload.input.threadId)
     );
   },
-  canDeliver: (entry) => {
-    const environmentId = entry.payload.environmentId;
-    const presentation = appAtomRegistry.get(
-      environmentPresentations.presentationAtom(environmentId),
-    );
-    return (
-      presentation?.connection.phase === "connected" &&
-      appAtomRegistry.get(environmentShell.stateValueAtom(environmentId)).status === "live" &&
-      appAtomRegistry.get(environmentServerConfigsAtom).has(environmentId)
-    );
-  },
+  canDeliver: (entry) =>
+    isThreadOutboxDeliverable(entry.payload.environmentId, (atom) => appAtomRegistry.get(atom)),
   deliver: async (entry, savePayload) => {
     let payload = { ...entry.payload, localAttachments: [...entry.payload.localAttachments] };
     const { environmentId } = payload;

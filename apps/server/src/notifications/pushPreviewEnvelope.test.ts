@@ -4,13 +4,13 @@ import {
   PushDeliveryMetadata,
   PushPreviewContent,
   PushPreviewEnvelope,
-} from "@supacode/contracts/push";
-import { encodeBase64, decodeBase64 } from "@supacode/shared/relay/protocol";
+} from "@supaterm/contracts/push";
+import { encodeBase64, decodeBase64 } from "@supaterm/shared/relay/protocol";
 import {
   PUSH_PREVIEW_INFO,
   pushPreviewAssociatedData,
   pushPreviewSignatureData,
-} from "@supacode/shared/pushPreviewEnvelope";
+} from "@supaterm/shared/pushPreviewEnvelope";
 import * as Schema from "effect/Schema";
 import testVectors from "../../../mobile/modules/supacode-push-preview/Tests/PushPreviewCoreTests/vectors.json" with { type: "json" };
 

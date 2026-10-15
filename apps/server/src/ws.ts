@@ -2,7 +2,7 @@ import { isRelayedRequest } from "./relay/RelayIngress.ts";
 import * as PushNotifications from "./notifications/PushNotifications.ts";
 import * as RelayAccess from "./relay/RelayAccess.ts";
 import * as OrchestrationSkills from "./provider/OrchestrationSkills.ts";
-import { OrchestrationDispatchCommandError } from "@supacode/contracts";
+import { OrchestrationDispatchCommandError } from "@supaterm/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 
@@ -103,8 +103,8 @@ import {
   type PullRequestRef,
   WS_METHODS,
   WsRpcGroup,
-} from "@supacode/contracts";
-import { resolveServerBackgroundActivitySettings } from "@supacode/shared/backgroundActivitySettings";
+} from "@supaterm/contracts";
+import { resolveServerBackgroundActivitySettings } from "@supaterm/shared/backgroundActivitySettings";
 import {
   HttpRouter,
   HttpServerRequest,
@@ -123,7 +123,7 @@ import * as McpAppRequests from "./mcpApps/McpAppRequests.ts";
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
 import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts";
-import * as IdAllocator from "@supacode/provider-core/server/IdAllocator";
+import * as IdAllocator from "@supaterm/provider-core/server/IdAllocator";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import {
   archivedShellStreamItemFromThreadShell,
@@ -166,10 +166,10 @@ import * as OrchestrationEventStore from "./persistence/OrchestrationEventStore.
 import { userFacingDispatchErrorMessage } from "./orchestration-v2/UserFacingErrors.ts";
 import * as ProviderRegistry from "./provider/ProviderRegistry.ts";
 import * as ProviderInstanceRegistry from "./provider/ProviderInstanceRegistry.ts";
-import * as AcpRegistrySupport from "@supacode/provider-acp-registry/server/AcpRegistrySupport";
-import * as AcpRegistryRuntimeCoordinator from "@supacode/provider-acp-registry/server/AcpRegistryRuntimeCoordinator";
+import * as AcpRegistrySupport from "@supaterm/provider-acp-registry/server/AcpRegistrySupport";
+import * as AcpRegistryRuntimeCoordinator from "@supaterm/provider-acp-registry/server/AcpRegistryRuntimeCoordinator";
 import * as ModelManifest from "./provider/ModelManifest.ts";
-import * as ProviderLatestVersions from "@supacode/provider-core/server/ProviderLatestVersions";
+import * as ProviderLatestVersions from "@supaterm/provider-core/server/ProviderLatestVersions";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ProviderAuthService from "./provider/ProviderAuthService.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
@@ -186,7 +186,11 @@ import * as DeviceService from "./device/DeviceService.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
-import { attachmentRelativePath, createDeterministicAttachmentId } from "./attachmentStore.ts";
+import {
+  attachmentRelativePath,
+  chatAttachmentStableKey,
+  createDeterministicAttachmentId,
+} from "./attachmentStore.ts";
 import { parseBase64DataUrl } from "./imageMime.ts";
 import { deletePendingAttachment, issueAttachmentUploadUrl } from "./assets/AttachmentUpload.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
@@ -238,7 +242,7 @@ import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http
 import {
   sameUsageLimitCommandCoverage,
   withUsageLimitsCommands,
-} from "@supacode/shared/usageLimits";
+} from "@supaterm/shared/usageLimits";
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import * as AgentSessionImporter from "./project/AgentSessionImporter.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
@@ -420,7 +424,10 @@ const persistChatAttachments = Effect.fn("ws.assets.persistChatAttachments")(fun
           message: `Attachment ${attachment.name} size does not match its payload.`,
         });
       }
-      const rawId = createDeterministicAttachmentId(input.threadId, `${input.messageId}:${index}`);
+      const rawId = createDeterministicAttachmentId(
+        input.threadId,
+        chatAttachmentStableKey(input.messageId, index, bytes),
+      );
       if (rawId === null) {
         return yield* new PersistChatAttachmentsError({
           message: "Could not allocate an attachment identifier.",
@@ -824,6 +831,10 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
           afterSequence,
           throughSequence,
           limit: THREAD_RESUME_MAX_REPLAY_EVENTS + 1,
+          // A row a newer build wrote (e.g. after a downgrade) must not fail
+          // every resubscribe. The live tail resumes from `highWater`, so a
+          // dropped row never hides later events.
+          skipUnknownEventTypes: true,
         })
         .pipe(
           Stream.map((stored) => ({
@@ -1178,6 +1189,10 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
         applicationEvents.readApplicationEvents({
           afterSequence: input.afterSequence,
           throughSequence: highWater,
+          // A row a newer build wrote (e.g. after a downgrade) must not fail
+          // every shell resubscribe. The live tail below resumes from
+          // highWater, so a dropped row never hides later events.
+          skipUnknownEventTypes: true,
         }),
       );
       return composeShellStreamWithEnrichment({
@@ -1539,7 +1554,7 @@ const layerWsRpc = (
               if (racedImport !== null) return { threadId, imported: false } as const;
               return yield* new AcpRegistryOperationError({
                 reason: "session_import_failed",
-                message: "Could not create a Supacode thread for the ACP session.",
+                message: "Could not create a Supaterm thread for the ACP session.",
                 cause: launched.failure,
               });
             }
@@ -1581,7 +1596,7 @@ const layerWsRpc = (
               return yield* new AcpRegistryOperationError({
                 reason: "session_delete_failed",
                 message:
-                  "Delete the imported Supacode thread before deleting its native ACP session.",
+                  "Delete the imported Supaterm thread before deleting its native ACP session.",
               });
             }
             yield* manager.deleteSession({
@@ -2187,7 +2202,7 @@ const layerWsRpc = (
           ),
         [WS_METHODS.serverRefreshProviders]: (input) =>
           Effect.gen(function* () {
-            // Only explicit catalog refreshes bypass Supacode's caches. Workspace
+            // Only explicit catalog refreshes bypass Supaterm's caches. Workspace
             // discovery and background status checks retain their timers.
             if (input.refreshModels) {
               yield* modelManifest.forceRefresh;
@@ -2475,6 +2490,7 @@ const layerWsRpc = (
           pullRequests.withRoutingCredential(input, pullRequests.preview(input)),
         [WS_METHODS.pullRequestsChecks]: (input) =>
           pullRequests.withRoutingCredential(input, pullRequests.checks(input)),
+        [WS_METHODS.pullRequestsWorkflowRun]: (input) => pullRequests.workflowRun(input),
         [WS_METHODS.pullRequestsActivity]: (input) =>
           pullRequests.withRoutingCredential(input, pullRequests.activity(input)),
         [WS_METHODS.pullRequestsReviewGuide]: (input) =>

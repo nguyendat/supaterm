@@ -17,10 +17,10 @@ import type {
   PullRequestReviewThread,
   PullRequestReviewerCandidate,
   PullRequestState,
-} from "@supacode/contracts";
-import { TrimmedNonEmptyString } from "@supacode/contracts";
-import { quoteGitPatchPath } from "@supacode/shared/gitPatchPath";
-import { decodeJsonResult } from "@supacode/shared/schemaJson";
+} from "@supaterm/contracts";
+import { TrimmedNonEmptyString } from "@supaterm/contracts";
+import { quoteGitPatchPath } from "@supaterm/shared/gitPatchPath";
+import { decodeJsonResult } from "@supaterm/shared/schemaJson";
 
 /**
  * GitLab's REST enums are decoded as plain strings and normalized here: a GitLab release that
@@ -51,6 +51,8 @@ const RawMergeRequestSchema = Schema.Struct({
   author: Schema.optional(Schema.NullOr(RawUserSchema)),
   source_branch: Schema.String,
   target_branch: Schema.String,
+  /** The source branch's head commit. */
+  sha: Schema.optional(Schema.NullOr(Schema.String)),
   state: Schema.optional(Schema.NullOr(Schema.String)),
   draft: Schema.optional(Schema.Boolean),
   work_in_progress: Schema.optional(Schema.Boolean),
@@ -240,6 +242,8 @@ export interface GitLabMergeRequestDetail extends GitLabMergeRequestListItem {
    * it: an install too old to answer must not be read as saying the branch is current.
    */
   readonly divergedCommits?: number;
+  /** Absent where GitLab did not report the head commit. */
+  readonly headSha?: string;
 }
 
 function trimmed(value: string | null | undefined): string | null {
@@ -365,6 +369,7 @@ function toListItem(
 
 function toDetail(raw: Schema.Schema.Type<typeof RawMergeRequestSchema>): GitLabMergeRequestDetail {
   const listItem = toListItem(raw);
+  const headSha = trimmed(raw.sha);
   const autoMerge =
     raw.merge_when_pipeline_succeeds == null && raw.auto_merge_enabled == null
       ? undefined
@@ -390,6 +395,7 @@ function toDetail(raw: Schema.Schema.Type<typeof RawMergeRequestSchema>): GitLab
       ? { autoMergeMethod: "squash" as const }
       : {}),
     ...(raw.diverged_commits_count == null ? {} : { divergedCommits: raw.diverged_commits_count }),
+    ...(headSha === null ? {} : { headSha }),
   };
 }
 

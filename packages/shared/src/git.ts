@@ -8,13 +8,13 @@ import {
   type VcsStatusRemoteResult,
   type VcsStatusResult,
   type VcsStatusStreamEvent,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import { fileBasename } from "./path.ts";
 import { detectSourceControlProviderFromRemoteUrl } from "./sourceControl.ts";
 
-export const WORKTREE_BRANCH_PREFIX = "supacode";
+export const WORKTREE_BRANCH_PREFIX = "supaterm";
 
 export function resolveDefaultWorktreeBaseBranch(
   refs: ReadonlyArray<Pick<VcsRef, "name" | "isDefault" | "current" | "isRemote">>,
@@ -26,11 +26,11 @@ export function resolveDefaultWorktreeBaseBranch(
   );
 }
 
-// Canonical form is `supacode/<8 hex>`. Older mobile builds generated `supacode/<uuid>`
+// Canonical form is `supaterm/<8 hex>`. Older mobile builds generated `supaterm/<uuid>`
 // via Crypto.randomUUID() (always RFC 4122 v4), so the matcher also accepts exactly
 // that shape — version nibble `4`, variant nibble `[89ab]` — to keep those threads
 // eligible for branch regeneration without loosening beyond what was ever generated.
-// `supacode-<8 hex>` is the fallback when a plain `supacode` branch blocks the namespace.
+// `supaterm-<8 hex>` is the fallback when a plain `supaterm` branch blocks the namespace.
 const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(
   `^${WORKTREE_BRANCH_PREFIX}(?:-[0-9a-f]{8}$|\\/(?:[0-9a-f]{8}|[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$)`,
 );
@@ -166,8 +166,8 @@ export function buildTemporaryWorktreeBranchName(
 }
 
 /**
- * Git stores refs as paths, so a plain `supacode` branch makes every `supacode/<hex>`
- * ref impossible. This moves a temporary name to the flat `supacode-<hex>` sibling.
+ * Git stores refs as paths, so a plain `supaterm` branch makes every `supaterm/<hex>`
+ * ref impossible. This moves a temporary name to the flat `supaterm-<hex>` sibling.
  */
 export function flattenTemporaryWorktreeBranchName(refName: string): string {
   // Keep only the canonical 8-hex token so legacy UUID names stay recognizable.
@@ -236,6 +236,59 @@ export function normalizeGitRemoteUrl(value: string): string {
   }
 
   return normalized;
+}
+
+export type GitRemoteDirection = "fetch" | "push";
+
+export interface GitRemoteVerboseEntry {
+  readonly name: string;
+  readonly url: string;
+  readonly direction: GitRemoteDirection;
+}
+
+export interface GitRemoteVerboseUrls {
+  readonly fetchUrl?: string;
+  readonly pushUrl?: string;
+}
+
+export function parseGitRemoteVerboseOutput(output: string): ReadonlyArray<GitRemoteVerboseEntry> {
+  const remotes: GitRemoteVerboseEntry[] = [];
+  for (const line of output.split("\n")) {
+    const match = /^(\S+)\s+(.+?)\s+\((fetch|push)\)(?:\s+.*)?$/u.exec(line.trim());
+    if (!match) continue;
+    const [, name, url, direction] = match;
+    if (!name || !url || !direction) continue;
+    remotes.push({
+      name,
+      url,
+      direction: direction === "fetch" ? "fetch" : "push",
+    });
+  }
+  return remotes;
+}
+
+export function parseGitRemoteVerboseUrls(
+  output: string,
+): ReadonlyMap<string, GitRemoteVerboseUrls> {
+  const remotes = new Map<string, GitRemoteVerboseUrls>();
+  for (const remote of parseGitRemoteVerboseOutput(output)) {
+    const current = remotes.get(remote.name) ?? {};
+    remotes.set(
+      remote.name,
+      remote.direction === "fetch"
+        ? { ...current, fetchUrl: remote.url }
+        : { ...current, pushUrl: remote.url },
+    );
+  }
+  return remotes;
+}
+
+export function parseGitRemoteFetchUrls(output: string): ReadonlyMap<string, string> {
+  const fetchUrls = new Map<string, string>();
+  for (const [name, remote] of parseGitRemoteVerboseUrls(output)) {
+    if (remote.fetchUrl) fetchUrls.set(name, remote.fetchUrl);
+  }
+  return fetchUrls;
 }
 
 /**

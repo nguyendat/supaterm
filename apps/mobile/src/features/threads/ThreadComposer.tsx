@@ -1,9 +1,9 @@
-import type { ComposerTextPaste } from "../../native/SupacodeComposerEditor.types";
+import type { ComposerTextPaste } from "../../native/SupatermComposerEditor.types";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
-import type { EnvironmentThreadShell } from "@supacode/client-runtime/state/shell";
+import type { EnvironmentThreadShell } from "@supaterm/client-runtime/state/shell";
 import { useAtomValue } from "@effect/atom-react";
-import { clampFileAttachmentUploadBytes } from "@supacode/client-runtime/state/attachments";
-import { pastedTextDisposition, replaceTextSelection } from "@supacode/client-runtime/text-paste";
+import { clampFileAttachmentUploadBytes } from "@supaterm/client-runtime/state/attachments";
+import { pastedTextDisposition, replaceTextSelection } from "@supaterm/client-runtime/text-paste";
 import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
@@ -12,14 +12,14 @@ import {
   type MessageId,
   type ModelSelection,
   type RuntimeMode,
-  type ServerConfig as SupacodeServerConfig,
+  type ServerConfig as SupatermServerConfig,
   type UsageLimitsReport,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import {
   collectProviderUsageLimits,
   hasProviderUsageLimits,
   isUsageLimitsCommand,
-} from "@supacode/shared/usageLimits";
+} from "@supaterm/shared/usageLimits";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { ReactNode } from "react";
 import {
@@ -45,12 +45,15 @@ import {
 import Animated, {
   FadeIn,
   FadeOut,
-  type LayoutAnimationFunction,
   ReduceMotion,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
+import {
+  COMPOSER_LAYOUT_TRANSITION,
+  COMPOSER_TRANSITION_DURATION_MS,
+} from "../../components/composerLayoutTransition";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { themeColorWithAlpha } from "../../lib/mobileTheme";
 import { scopedThreadKey } from "../../lib/scopedEntities";
@@ -64,7 +67,7 @@ import {
 import { appAtomRegistry } from "../../state/atom-registry";
 import type { ComposerDocumentAttachment } from "../../lib/composerContext";
 import { useProject, useThreadShells } from "../../state/entities";
-import { scopeProjectRef } from "@supacode/client-runtime/environment";
+import { scopeProjectRef } from "@supaterm/client-runtime/environment";
 
 import { AppText as Text } from "../../components/AppText";
 import { ComposerAttachmentButton } from "../../components/ComposerAttachmentButton";
@@ -93,7 +96,7 @@ import { resolveProviderOptionDescriptors } from "../../lib/providerOptions";
 import { ComposerSpeedToggle } from "../../components/ComposerSpeedToggle";
 import { ComposerModelControl } from "./ComposerModelControl";
 import { ControlPillMenu } from "../../components/ControlPill";
-import type { ActiveTurnComposerAction } from "@supacode/client-runtime/state/composer-dispatch";
+import type { ActiveTurnComposerAction } from "@supaterm/client-runtime/state/composer-dispatch";
 import type { FollowUpBehavior } from "../../lib/followUpBehavior";
 import {
   resolveComposerSendPresentation,
@@ -104,12 +107,13 @@ import { ComposerPopoverAnchor } from "./ComposerPopoverAnchor";
 import { ComposerQueuedEditAttachments } from "./ComposerQueuedEdit";
 import { useComposerCommandMenu } from "./use-composer-command-menu";
 import {
-  ComposerDictationCancelAction,
+  ComposerDictationLeadingAction,
   ComposerDictationDraftContent,
   ComposerDictationPrimaryAction,
   ComposerDictationStartAction,
   ComposerDictationStatus,
   ComposerDictationToolbar,
+  composerDictationToolbarHeight,
 } from "../voice-input/ComposerDictationControl";
 import { useVoiceInputController } from "../voice-input/useVoiceInputController";
 import { resolveVoiceComposerPresentation } from "../voice-input/voiceInputPresentation";
@@ -138,6 +142,8 @@ export const COMPOSER_COLLAPSED_CHROME = 60;
  */
 export const COMPOSER_EXPANDED_CHROME = 156;
 
+const COMPACT_SURFACE_INSET = 2;
+
 export interface ThreadComposerProps {
   readonly canOperateThread: boolean;
   readonly draftMessage: string;
@@ -156,7 +162,7 @@ export interface ThreadComposerProps {
   readonly selectedThread: EnvironmentThreadShell;
   readonly reportedModelSelection?: ModelSelection | null;
   readonly hasCompactableConversation: boolean;
-  readonly serverConfig: SupacodeServerConfig | null;
+  readonly serverConfig: SupatermServerConfig | null;
   readonly queueCount: number;
   readonly activeThreadBusy: boolean;
   readonly canStopThread: boolean;
@@ -204,45 +210,6 @@ export interface ThreadComposerProps {
   /** Fires when the command popover opens or closes; hosts clear chrome it would overlap. */
   readonly onCommandMenuOpenChange?: (open: boolean) => void;
 }
-
-/**
- * The pill / card container — renders with Expo's native GlassView on supported
- * iOS 26+ devices, with a frosted blur fallback where supported.
- * Exported so NewTaskDraftScreen can render the same composer chrome.
- */
-// The bottom-anchored dock position and clipped surface height use the same
-// transition so the card grows upward without exposing its final-size content.
-// Android gets NO layout transition: the composer rides the keyboard via
-// KeyboardStickyView (frame-synced to the IME), and a time-based morph
-// running alongside that translate reads as jitter. Snapping the layout and
-// letting the keyboard-synced slide be the only motion looks native there.
-export const COMPOSER_TRANSITION_DURATION_MS = 220;
-// Side panes already animate the dock's width. Nested horizontal layout
-// transitions would leave the surface trailing its toolbar's new position.
-// Keep the vertical pill/card morph while horizontal layout follows the dock.
-const composerHeightTransition: LayoutAnimationFunction = (values) => {
-  "worklet";
-  const timing = {
-    duration: COMPOSER_TRANSITION_DURATION_MS,
-    reduceMotion: ReduceMotion.System,
-  };
-  return {
-    initialValues: {
-      originX: values.targetOriginX,
-      originY: values.currentOriginY,
-      width: values.targetWidth,
-      height: values.currentHeight,
-    },
-    animations: {
-      originX: values.targetOriginX,
-      originY: withTiming(values.targetOriginY, timing),
-      width: values.targetWidth,
-      height: withTiming(values.targetHeight, timing),
-    },
-  };
-};
-export const COMPOSER_LAYOUT_TRANSITION =
-  Platform.OS === "android" ? undefined : composerHeightTransition;
 
 const COMPOSER_ATTACHMENT_ENTERING =
   Platform.OS === "android"
@@ -319,11 +286,17 @@ function SendActionButton(props: {
   );
 }
 
+/**
+ * The pill / card container — renders with Expo's native GlassView on supported
+ * iOS 26+ devices, with a frosted blur fallback where supported.
+ * Exported so NewTaskDraftScreen can render the same composer chrome.
+ */
 export function ComposerSurface(props: {
   readonly children: ReactNode;
   readonly style: ViewStyle;
   /** Morphs between the compact and expanded composer layouts. */
   readonly animateLayout?: boolean;
+  readonly transparent?: boolean;
 }) {
   const colors = useUniwindTheme();
   const targetBorderRadius =
@@ -350,7 +323,9 @@ export function ComposerSurface(props: {
   return (
     <Animated.View
       className={
-        Platform.OS === "android" ? undefined : "shadow-[0_6px_28px] shadow-adaptive-black-a15-a35"
+        Platform.OS === "android" || props.transparent
+          ? undefined
+          : "shadow-[0_6px_28px] shadow-adaptive-black-a15-a35"
       }
       layout={layoutTransition}
       style={[
@@ -360,20 +335,22 @@ export function ComposerSurface(props: {
         },
       ]}
     >
-      <AnimatedGlassSurface
-        chrome="none"
-        fallbackColor={colors["--color-composer-surface"]}
-        fallbackClassName="border border-composer-border"
-        glassEffectStyle="regular"
-        // The composer is a passive material containing interactive controls.
-        // Keep native glass out of the interactive content's layout path.
-        pointerEvents="none"
-        tintColor="transparent"
-        layout={layoutTransition}
-        style={[{ position: "absolute", inset: 0 }, animatedShapeStyle]}
-      >
-        {null}
-      </AnimatedGlassSurface>
+      {!props.transparent ? (
+        <AnimatedGlassSurface
+          chrome="none"
+          fallbackColor={colors["--color-composer-surface"]}
+          fallbackClassName="border border-composer-border"
+          glassEffectStyle="regular"
+          // The composer is a passive material containing interactive controls.
+          // Keep native glass out of the interactive content's layout path.
+          pointerEvents="none"
+          tintColor="transparent"
+          layout={layoutTransition}
+          style={[{ position: "absolute", inset: 0 }, animatedShapeStyle]}
+        >
+          {null}
+        </AnimatedGlassSurface>
+      ) : null}
       <Animated.View
         collapsable={false}
         layout={layoutTransition}
@@ -480,7 +457,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     });
   };
   const { onSendMessage, onChangeDraftMessage, onShowUsageLimits } = props;
-  // Supacode owns /usage-limits only where Limits has data for the selected provider;
+  // Supaterm owns /usage-limits only where Limits has data for the selected provider;
   // elsewhere the name stays the provider's own and is sent through untouched.
   const usageLimitsOffered =
     selectedProviderStatus !== null &&
@@ -532,14 +509,17 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     selection: composerMenu.selection,
     onChangeDraftMessage: (text) => setComposerDraftText(composerDraftKey, text),
     onChangeSelection: composerMenu.onSelectionChange,
+    onSubmit: () => {
+      if (canSend) void handleSend();
+    },
   });
   const voicePresentation = resolveVoiceComposerPresentation(
     voiceInput.state,
     voiceInput.elapsedSeconds,
   );
   const isVoiceInputPresented = voicePresentation.statusLabel !== null;
-  // An open draft stays visible; only a collapsed composer becomes a voice strip.
-  const isExpanded = isFocused || settingsSheetPresentation.keepsComposerExpanded;
+  const isExpanded =
+    !voiceInput.isBusy && (isFocused || settingsSheetPresentation.keepsComposerExpanded);
   const showsCompactDictation = isVoiceInputPresented && !isExpanded;
   const isToolbarVisible = isExpanded || isVoiceInputPresented;
   const attachmentBlockReason = composerAttachmentUploadBlockReason({
@@ -555,13 +535,12 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     props.sendBlockedReason ??
     (pendingPastedTextAttachmentCount > 0 ? "Attaching pasted text" : null) ??
     attachmentBlockReason;
-  const canSend =
+  const canSubmitDraft =
     (props.canOperateThread || props.connectionState !== "connected") &&
-    hasContent &&
     !contextImports[composerDraftKey] &&
-    !voiceInput.blocksSubmission &&
     sendBlockedReason === null &&
     !modelUnavailable;
+  const canSend = canSubmitDraft && hasContent && !voiceInput.blocksSubmission;
 
   // Keep the feed inset aligned with the card or compact dictation strip.
   useEffect(() => {
@@ -786,6 +765,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     [navigation, settingsSheetPresentation.onStackTransitionsFinished],
   );
 
+  const startDictation = () => {
+    inputRef.current?.blur();
+    voiceInput.start();
+  };
   const draftAction = showStopAction ? (
     <ComposerActionButton
       accessibilityLabel="Stop agent"
@@ -808,7 +791,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     <ComposerDictationStartAction
       state={voiceInput.state}
       isAvailable={voiceInput.isAvailable}
-      onStart={voiceInput.start}
+      onStart={startDictation}
       onCancel={voiceInput.cancel}
     />
   );
@@ -878,6 +861,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         ) : null}
 
         <ComposerSurface
+          transparent={voiceInput.isBusy}
           style={
             isExpanded
               ? {
@@ -891,8 +875,11 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                   // Keep the numeric radius close to the expanded card so the
                   // shape morph stays bounded while rendering as a capsule.
                   borderRadius: 27,
+                  minHeight:
+                    composerDictationToolbarHeight(voicePresentation.statusKind) +
+                    COMPACT_SURFACE_INSET * 2,
                   overflow: "hidden" as const,
-                  paddingVertical: 2,
+                  paddingVertical: COMPACT_SURFACE_INSET,
                 }
           }
         >
@@ -1104,7 +1091,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                 ))}
                 {stripAttachments.length > 3 ? (
                   <View className="size-[30px] items-center justify-center rounded-lg bg-subtle-strong">
-                    <Text className="text-foreground-muted text-2xs font-supacode-bold">
+                    <Text className="text-foreground-muted text-2xs font-supaterm-bold">
                       +{stripAttachments.length - 3}
                     </Text>
                   </View>
@@ -1125,24 +1112,25 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                 ? undefined
                 : {
                     position: "absolute",
-                    bottom: 2,
+                    bottom: COMPACT_SURFACE_INSET,
                     left: 0,
                     right: 0,
                   }
             }
           >
             <ComposerDictationToolbar
-              showsDictation={isVoiceInputPresented}
+              statusKind={voicePresentation.statusKind}
               visible={isToolbarVisible}
             >
               <ComposerToolbarRow
                 paddingBottom={0}
                 paddingHorizontal={0}
                 paddingTop={0}
-                style={{ gap: 0, justifyContent: "space-between" }}
+                style={{ gap: voiceInput.isBusy ? 8 : 0, justifyContent: "space-between" }}
               >
-                <ComposerDictationCancelAction
+                <ComposerDictationLeadingAction
                   presentation={voicePresentation}
+                  onStop={voiceInput.stop}
                   onCancel={voiceInput.cancel}
                 />
                 {isVoiceInputPresented ? (
@@ -1188,8 +1176,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                     state={voiceInput.state}
                     presentation={voicePresentation}
                     isAvailable={voiceInput.isAvailable}
-                    onStart={voiceInput.start}
-                    onConfirm={voiceInput.stop}
+                    disabled={!canSubmitDraft}
+                    onStart={startDictation}
+                    onConfirm={voiceInput.stopAndSubmit}
+                    submitsMessage
                     onCancel={voiceInput.cancel}
                   />
                 )}

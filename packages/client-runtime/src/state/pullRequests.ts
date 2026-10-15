@@ -19,7 +19,7 @@ import {
   PullRequestOperationError,
   type PullRequestSummary,
   type VcsStatusResult,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -278,6 +278,13 @@ export function createPullRequestEnvironmentAtoms<R, E>(
       execute: (input) => routedRequest(WS_METHODS.pullRequestsChecks, input),
       staleTimeMs: 45_000,
       refreshTrigger: ({ environmentId }) => refreshes({ environmentId, input: {} }),
+    }),
+    /** The jobs of a CI run that background work follows, read again while it is shown. */
+    workflowRun: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:pull-requests:workflow-run",
+      tag: WS_METHODS.pullRequestsWorkflowRun,
+      staleTimeMs: 30_000,
+      refreshIntervalMs: 30_000,
     }),
     activity,
     threadComments: createEnvironmentRpcCommand(runtime, {

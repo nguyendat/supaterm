@@ -1,4 +1,4 @@
-import { ThreadId, type AuthSessionId } from "@supacode/contracts";
+import { ThreadId, type AuthSessionId } from "@supaterm/contracts";
 import {
   PushNotificationError,
   PushRegistration,
@@ -11,7 +11,7 @@ import {
   type PushResolveInput,
   type PushRevokeInput,
   type PushResolvedNotification,
-} from "@supacode/contracts/push";
+} from "@supaterm/contracts/push";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -68,7 +68,7 @@ export class PushNotifications extends Context.Service<
       input: typeof PushResolveInput.Type,
     ) => Effect.Effect<typeof PushResolvedNotification.Type, PushNotificationError>;
   }
->()("supacode/notifications/PushNotifications") {}
+>()("supaterm/notifications/PushNotifications") {}
 
 const decodePreferences = Schema.decodeUnknownSync(Schema.fromJsonString(PushPreferences));
 const encodePreferences = Schema.encodeEffect(Schema.fromJsonString(PushPreferences));

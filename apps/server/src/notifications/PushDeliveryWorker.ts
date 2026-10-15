@@ -4,7 +4,7 @@ import {
   PushPreferences,
   PushPreviewKey,
   PushPreviewContent,
-} from "@supacode/contracts/push";
+} from "@supaterm/contracts/push";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -26,7 +26,7 @@ const decodePayload = Schema.decodeEffect(Schema.fromJsonString(PushDeliveryPayl
 export class PushDeliveryWorker extends Context.Service<
   PushDeliveryWorker,
   { readonly drain: Effect.Effect<void, PushNotificationError> }
->()("supacode/notifications/PushDeliveryWorker") {}
+>()("supaterm/notifications/PushDeliveryWorker") {}
 
 const make = Effect.gen(function* () {
   const outbox = yield* PushOutbox.PushOutbox;

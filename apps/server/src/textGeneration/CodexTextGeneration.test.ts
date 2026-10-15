@@ -8,15 +8,15 @@ import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
-import { createModelSelection } from "@supacode/shared/model";
+import { createModelSelection } from "@supaterm/shared/model";
 import { expect } from "vite-plus/test";
 
-import { CodexSettings, ProviderInstanceId, TextGenerationError } from "@supacode/contracts";
+import { CodexSettings, ProviderInstanceId, TextGenerationError } from "@supaterm/contracts";
 
 import * as ServerConfig from "../config.ts";
 import * as TextGeneration from "./TextGeneration.ts";
 import { makeCodexTextGeneration } from "./CodexTextGeneration.ts";
-import { writeFakeCli } from "@supacode/provider-testing/fakeCli";
+import { writeFakeCli } from "@supaterm/provider-testing/fakeCli";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 const DEFAULT_TEST_MODEL_SELECTION = createModelSelection(
@@ -25,7 +25,7 @@ const DEFAULT_TEST_MODEL_SELECTION = createModelSelection(
 );
 
 const layerCodexTextGenerationTest = ServerConfig.ServerConfig.layerTest(process.cwd(), {
-  prefix: "supacode-codex-text-generation-test-",
+  prefix: "supaterm-codex-text-generation-test-",
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
 interface FakeCodexInput {
@@ -40,6 +40,10 @@ interface FakeCodexInput {
   forbidArg?: string;
   stdinMustContain?: string;
   stdinMustNotContain?: string;
+  /** What `codex mcp list --json` answers; a number exits with that code instead. */
+  mcpServers?: ReadonlyArray<{ name: string; enabled: boolean }> | number;
+  /** `codex mcp list` exits 7 without this argument. */
+  mcpListRequireArg?: string;
 }
 
 // The stub walks argv the way the shell script it replaced did: `--image`,
@@ -56,6 +60,8 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
     forbidArg: input.forbidArg ?? null,
     stdinMustContain: input.stdinMustContain ?? null,
     stdinMustNotContain: input.stdinMustNotContain ?? null,
+    mcpServers: input.mcpServers ?? [],
+    mcpListRequireArg: input.mcpListRequireArg ?? null,
     stderr: input.stderr ?? null,
     output: input.output,
     exitCode: input.exitCode ?? 0,
@@ -69,6 +75,17 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
         'import * as NodeFS from "node:fs";',
         `const check = ${check};`,
         "const args = process.argv.slice(2);",
+        'if (args.includes("mcp") && args.includes("list")) {',
+        "  if (",
+        "    check.mcpListRequireArg !== null &&",
+        '    !` ${args.join(" ")} `.includes(` ${check.mcpListRequireArg} `)',
+        "  ) {",
+        "    process.exit(7);",
+        "  }",
+        '  if (typeof check.mcpServers === "number") process.exit(check.mcpServers);',
+        "  process.stdout.write(JSON.stringify(check.mcpServers));",
+        "  process.exit(0);",
+        "}",
         'const originalArgs = ` ${args.join(" ")} `;',
         "let outputPath = null;",
         "let seenImage = false;",
@@ -143,7 +160,7 @@ function withFakeCodexEnv<A, E, R>(
 ) {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "supacode-codex-text-" });
+    const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "supaterm-codex-text-" });
     const codexPath = yield* makeFakeCodexBinary(tempDir, input);
     const config = decodeCodexSettings({ binaryPath: codexPath, launchArgs: input.launchArgs });
     const textGeneration = yield* makeCodexTextGeneration(
@@ -269,7 +286,7 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
   it.effect("investigates a review guide checkout as an untrusted project", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const checkout = yield* fs.makeTempDirectoryScoped({ prefix: "supacode-codex-checkout-" });
+      const checkout = yield* fs.makeTempDirectoryScoped({ prefix: "supaterm-codex-checkout-" });
       const canonicalCheckout = yield* fs.realPath(checkout);
       return yield* withFakeCodexEnv(
         {
@@ -294,6 +311,100 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("lists an investigation's MCP servers with its checkout untrusted", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const checkout = yield* fs.makeTempDirectoryScoped({ prefix: "supaterm-codex-checkout-" });
+      const canonicalCheckout = yield* fs.realPath(checkout);
+      return yield* withFakeCodexEnv(
+        {
+          output: JSON.stringify({ stops: [] }),
+          mcpServers: [{ name: "user-server", enabled: true }],
+          mcpListRequireArg: `--config projects={${JSON.stringify(canonicalCheckout)}={trust_level="untrusted"}}`,
+          requireArg: '--config mcp_servers={"user-server"={enabled=false}}',
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const generated = yield* textGeneration.generateReviewGuide({
+              cwd: checkout,
+              number: 7,
+              title: "Add a project setting",
+              description: "",
+              baseBranch: "main",
+              baseCommit: "0000000000000000000000000000000000000000",
+              settledReview: "",
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            });
+            expect(generated.stops).toEqual([]);
+          }),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("generates titles with the user's MCP servers and plugins off", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({ title: "Remove default shapes" }),
+        mcpServers: [
+          { name: "augmenter", enabled: true },
+          { name: "my.server", enabled: true },
+          { name: "already-off", enabled: false },
+        ],
+        requireArg:
+          '--config features.plugins=false --config features.apps=false --config mcp_servers={"augmenter"={enabled=false},"my.server"={enabled=false}}',
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const result = yield* textGeneration.generateThreadTitle({
+            cwd: process.cwd(),
+            message: "Augmenter task 1. Use the Augmenter MCP: link_thread when you start.",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          });
+          expect(result.title).toBe("Remove default shapes");
+        }),
+    ),
+  );
+
+  it.effect("still generates when Codex cannot list its MCP servers", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({ branch: "remove-default-shapes" }),
+        mcpServers: 2,
+        requireArg: "--config features.plugins=false --config features.apps=false --ephemeral",
+        forbidArg: "mcp_servers=",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const result = yield* textGeneration.generateBranchName({
+            cwd: process.cwd(),
+            message: "Remove default shapes from characters",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          });
+          expect(result.branch).toBe("remove-default-shapes");
+        }),
+    ),
+  );
+
+  it.effect("keeps plugins and apps off over launch args that turn them on", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({ title: "Remove default shapes" }),
+        launchArgs: "--config features.plugins=true --config features.apps=true",
+        requireArg:
+          "--config features.plugins=true --config features.apps=true --config features.plugins=false --config features.apps=false --ephemeral",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const result = yield* textGeneration.generateThreadTitle({
+            cwd: process.cwd(),
+            message: "Remove default shapes from characters",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          });
+          expect(result.title).toBe("Remove default shapes");
+        }),
+    ),
+  );
+
   it.effect("passes exec-safe launch args into codex exec", () =>
     withFakeCodexEnv(
       {
@@ -316,7 +427,7 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
     ),
   );
 
-  it.effect("uses SUPACODE_CODEX_LAUNCH_ARGS for codex exec over settings", () =>
+  it.effect("uses SUPATERM_CODEX_LAUNCH_ARGS for codex exec over settings", () =>
     withFakeCodexEnv(
       {
         output: JSON.stringify({
@@ -326,7 +437,7 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
         launchArgs: "--enable settings-feature",
         environment: {
           ...process.env,
-          SUPACODE_CODEX_LAUNCH_ARGS: " --strict-config --listen off ",
+          SUPATERM_CODEX_LAUNCH_ARGS: " --strict-config --listen off ",
         },
         requireArg: "--strict-config",
         forbidArg: "settings-feature",

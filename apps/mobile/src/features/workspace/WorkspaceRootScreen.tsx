@@ -24,7 +24,7 @@ import {
   useWorkspaceTabs,
 } from "./WorkspaceTabsContext";
 import { WorkspaceToolbar } from "./WorkspaceToolbar";
-import { WORKSPACE_DOCK, workspaceToolbarHeight } from "./workspace-tabs-state";
+import { workspaceToolbarHeight } from "./workspace-tabs-state";
 import { WorkspaceSidebarTabs } from "./WorkspaceSidebarTabs";
 import { useSidebarWorkspaceTabs } from "./useSidebarWorkspaceTabs";
 
@@ -43,7 +43,7 @@ function WorkspaceRootTitle(props: {
     <View style={{ width: props.maxWidth, minHeight: 32, justifyContent: "center" }}>
       <WorkspaceConnectionTitle
         brand={
-          <CompactBrandTitle accessibilityLabel={`Supacode, ${TAB_TITLES[state.selectedTab]}`} />
+          <CompactBrandTitle accessibilityLabel={`Supaterm, ${TAB_TITLES[state.selectedTab]}`} />
         }
         maxWidth={props.maxWidth}
         onPress={props.onOpenEnvironments}
@@ -88,8 +88,7 @@ function WorkspaceRootContent() {
   const tab = state.tabs[state.selectedTab];
   const bottomClearance =
     Platform.OS === "ios"
-      ? Math.max(insets.bottom, keyboardHeight, 12) +
-        (keyboardHeight > 0 ? 16 : workspace.dockHeight + WORKSPACE_DOCK.bottomGap + 16)
+      ? Math.max(insets.bottom, keyboardHeight) + 16
       : keyboardHeight > 0 && tab.searchMode !== "resting"
         ? keyboardHeight + 64
         : Math.max(insets.bottom, 12) + workspaceToolbarHeight(tab.searchMode) + 16;
@@ -113,7 +112,7 @@ function WorkspaceRootContent() {
           />
         ) : (
           <AndroidScreenHeader
-            title="Supacode"
+            title="Supaterm"
             titleContent={renderHeaderTitle()}
             actions={[
               {

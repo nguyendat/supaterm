@@ -6,8 +6,9 @@ import {
   ThreadId,
   type AuthSessionState,
   type ScopedProjectRef,
+  type ServerConfig,
   WS_METHODS,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import { vi } from "vite-plus/test";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -41,6 +42,10 @@ const PROJECT = {
 } as EnvironmentProject;
 
 const makeHarness = Effect.fn("TestProjectCommands.makeHarness")(function* () {
+  const scratchRequested = yield* Deferred.make<void>();
+  const ensureScratch = vi.fn(() =>
+    Deferred.succeed(scratchRequested, undefined).pipe(Effect.as({ projectId: PROJECT_ID })),
+  );
   const metadataRequests: string[][] = [];
   const file = { byteLength: 5 };
   const readResponse = { wait: Effect.void as Effect.Effect<void> };
@@ -49,7 +54,7 @@ const makeHarness = Effect.fn("TestProjectCommands.makeHarness")(function* () {
     session: yield* SubscriptionRef.make(
       Option.some({
         client: {
-          [WS_METHODS.projectsEnsureScratch]: () => Effect.succeed({ projectId: PROJECT_ID }),
+          [WS_METHODS.projectsEnsureScratch]: ensureScratch,
           [WS_METHODS.projectsReadFile]: () =>
             Effect.gen(function* () {
               const byteLength = file.byteLength;
@@ -97,7 +102,13 @@ const makeHarness = Effect.fn("TestProjectCommands.makeHarness")(function* () {
     ),
   );
   const storedProject = Atom.make<EnvironmentProject | null>(null);
+  const cachedProjects = Atom.make<ReadonlyArray<EnvironmentProject>>([]);
+  const serverConfig = Atom.make<Pick<ServerConfig, "scratchWorkspaceRoot"> | null>({
+    scratchWorkspaceRoot: "/scratch",
+  });
   const commands = createProjectEnvironmentAtoms(runtime, {
+    projectsAtom: cachedProjects,
+    serverConfigValueAtom: () => serverConfig,
     projectAtom: (ref: ScopedProjectRef) =>
       ref.environmentId === ENVIRONMENT_ID && ref.projectId === PROJECT_ID
         ? storedProject
@@ -122,7 +133,19 @@ const makeHarness = Effect.fn("TestProjectCommands.makeHarness")(function* () {
   const openScratch = Effect.promise(() =>
     commands.openScratch.run(registry, { environmentId: ENVIRONMENT_ID, input: {} }),
   );
-  return { registry, storedProject, openScratch, commands, metadataRequests, readResponse };
+  return {
+    registry,
+    storedProject,
+    cachedProjects,
+    serverConfig,
+    supervisor,
+    ensureScratch,
+    scratchRequested,
+    openScratch,
+    commands,
+    metadataRequests,
+    readResponse,
+  };
 });
 
 describe("writeFile metadata", () => {
@@ -232,14 +255,59 @@ describe("writeFile metadata", () => {
 });
 
 describe("openScratch", () => {
+  it.effect.each(["connected", "offline", "connecting"] as const)(
+    "opens the cached project without an RPC while %s",
+    (phase) =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness();
+        h.registry.set(h.cachedProjects, [PROJECT]);
+        h.registry.set(h.serverConfig, { scratchWorkspaceRoot: "/scratch/" });
+        yield* SubscriptionRef.update(h.supervisor.state, (state) => ({ ...state, phase }));
+        if (phase !== "connected") {
+          yield* SubscriptionRef.set(h.supervisor.session, Option.none());
+        }
+
+        expect(yield* h.openScratch).toMatchObject({ _tag: "Success", value: PROJECT });
+        expect(h.ensureScratch).not.toHaveBeenCalled();
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect("does not reuse a cached project from a different environment", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness();
+      h.registry.set(h.cachedProjects, [
+        { ...PROJECT, environmentId: EnvironmentId.make("other") },
+      ]);
+      h.registry.set(h.storedProject, PROJECT);
+
+      expect(yield* h.openScratch).toMatchObject({ _tag: "Success", value: PROJECT });
+      expect(h.ensureScratch).toHaveBeenCalledOnce();
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("does not reuse a project when the configured scratch root changes", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness();
+      h.registry.set(h.cachedProjects, [PROJECT]);
+      h.registry.set(h.serverConfig, { scratchWorkspaceRoot: "/new-scratch" });
+      const updated = { ...PROJECT, workspaceRoot: "/new-scratch" };
+      h.registry.set(h.storedProject, updated);
+
+      expect(yield* h.openScratch).toMatchObject({ _tag: "Success", value: updated });
+      expect(h.ensureScratch).toHaveBeenCalledOnce();
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("resolves once the created project reaches the client store", () =>
     Effect.gen(function* () {
-      const { registry, storedProject, openScratch } = yield* makeHarness();
+      const { registry, storedProject, openScratch, scratchRequested, ensureScratch } =
+        yield* makeHarness();
       const opening = yield* Effect.forkChild(openScratch);
-      yield* Effect.yieldNow;
+      yield* Deferred.await(scratchRequested);
       registry.set(storedProject, PROJECT);
       const result = yield* Fiber.join(opening);
       expect(result).toMatchObject({ _tag: "Success", value: PROJECT });
+      expect(ensureScratch).toHaveBeenCalledOnce();
     }).pipe(Effect.scoped),
   );
 });

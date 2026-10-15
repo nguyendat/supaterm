@@ -6,13 +6,11 @@ const STATUS_LABEL_BY_STATUS: Partial<
   approval: { label: "Approval", className: "text-warning-foreground" },
   input: { label: "Input", className: "text-adaptive-indigo-600-300" },
   working: { label: "Working", className: "text-adaptive-sky-600-400" },
-  waiting: { label: "Waiting", className: "text-adaptive-sky-600-400" },
   failed: { label: "Failed", className: "text-danger-foreground" },
   limited: { label: "Limited", className: "text-warning-foreground" },
 };
 
-/** Cached work status becomes live again only after its environment connects.
- * Waiting on subagents or monitors keeps the row's working tone. */
+/** Cached work status becomes live again only after its environment connects. */
 export function resolveThreadListV2RowStatusLabel(input: {
   readonly environmentConnected: boolean;
   readonly status: ThreadListV2Status;
@@ -21,6 +19,7 @@ export function resolveThreadListV2RowStatusLabel(input: {
   readonly mutedClassName: string;
 }): { label: string; className: string } | undefined {
   if (!input.environmentConnected) return { label: "Connecting", className: input.mutedClassName };
+  if (input.status === "waiting") return { label: "Waiting", className: input.mutedClassName };
   const label = STATUS_LABEL_BY_STATUS[input.status];
   // A native /goal keeps the agent going across turns until it is met.
   if (label && input.status === "working" && input.goalActive) return { ...label, label: "Goal" };

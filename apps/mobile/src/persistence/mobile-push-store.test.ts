@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeCrypto from "node:crypto";
 import * as Crypto from "effect/Crypto";
-import { EnvironmentId } from "@supacode/contracts";
+import { EnvironmentId } from "@supaterm/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { vi } from "vite-plus/test";

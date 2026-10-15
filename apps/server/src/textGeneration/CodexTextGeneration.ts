@@ -12,23 +12,47 @@ import {
   DEFAULT_TEXT_GENERATION_REASONING_EFFORT,
   type ServerProviderModel,
   TextGenerationError,
-} from "@supacode/contracts";
-import { resolveSpawnCommand } from "@supacode/shared/shell";
+} from "@supaterm/contracts";
+import { resolveSpawnCommand } from "@supaterm/shared/shell";
 
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
-import { expandHomePath } from "@supacode/provider-core/server/pathExpansion";
+import { expandHomePath } from "@supaterm/provider-core/server/pathExpansion";
 import { codexExecLaunchArgs, resolveCodexLaunchArgs } from "../provider/codexLaunchArgs.ts";
-import * as TextGenerationOperations from "@supacode/provider-core/server/textGenerationOperations";
+import * as TextGenerationOperations from "@supaterm/provider-core/server/textGenerationOperations";
 import {
   normalizeCliError,
   toJsonSchemaObject,
-} from "@supacode/provider-core/server/textGenerationUtils";
-import { codexModelFamily, getModelSelectionStringOptionValue } from "@supacode/shared/model";
+} from "@supaterm/provider-core/server/textGenerationUtils";
+import { codexModelFamily, getModelSelectionStringOptionValue } from "@supaterm/shared/model";
 import { getCodexServiceTierOptionValue } from "../codexModelOptions.ts";
-import * as HostProcess from "@supacode/shared/HostProcess";
+import * as HostProcess from "@supaterm/shared/HostProcess";
 
 const CODEX_TIMEOUT_MS = 180_000;
+const CODEX_MCP_LIST_TIMEOUT_MS = 10_000;
+// Plugins and apps bring MCP servers of their own; the user's are listed and
+// turned off by name below. These follow the user's launch args, so they win
+// over a `-c features.plugins=true` there, which `--disable plugins` does not.
+const CODEX_NO_PLUGIN_ARGS = [
+  "--config",
+  "features.plugins=false",
+  "--config",
+  "features.apps=false",
+] as const;
+const CodexMcpServers = Schema.fromJsonString(
+  Schema.Array(Schema.Struct({ name: Schema.String, enabled: Schema.Boolean })),
+);
+const decodeCodexMcpServers = Schema.decodeEffect(CodexMcpServers);
+
+/**
+ * The `--config` value that turns off each MCP server Codex would start.
+ * `mcp_servers={}` merges into the user's servers rather than replacing them,
+ * so each is named; quoting the name keeps one with a dot a single key.
+ */
+const codexMcpServersOff = (names: ReadonlyArray<string>): string | null =>
+  names.length === 0
+    ? null
+    : `mcp_servers={${names.map((name) => `${JSON.stringify(name)}={enabled=false}`).join(",")}}`;
 const encodeJsonString = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 /**
  * Build a Codex text-generation closure bound to a specific `CodexSettings`
@@ -40,7 +64,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
   getModels: Effect.Effect<ReadonlyArray<ServerProviderModel>> = Effect.succeed([]),
   resolveRuntime?: Effect.Effect<
     import("../provider/CodexManagedRuntime.ts").CodexEffectiveRuntime,
-    import("@supacode/contracts").ProviderSetupError,
+    import("@supaterm/contracts").ProviderSetupError,
     Scope.Scope
   >,
 ) {
@@ -81,7 +105,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
   ): Effect.Effect<string, TextGenerationError> =>
     fileSystem
       .makeTempFile({
-        prefix: `supacode-${prefix}-${process.pid}-`,
+        prefix: `supaterm-${prefix}-${process.pid}-`,
       })
       .pipe(
         Effect.tap((filePath) =>
@@ -142,6 +166,67 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     }
     return imagePaths;
   });
+
+  /**
+   * The MCP servers Codex would start for this configuration, by name. Text
+   * generation goes ahead with them listed as none if Codex cannot list them.
+   */
+  const listEnabledMcpServers = Effect.fn("listEnabledMcpServers")(
+    function* (input: {
+      readonly binary: string;
+      readonly cwd: string;
+      readonly env: NodeJS.ProcessEnv;
+      readonly launchArgs: ReadonlyArray<string>;
+    }) {
+      const spawnCommand = yield* resolveSpawnCommand(
+        input.binary,
+        [...input.launchArgs, ...CODEX_NO_PLUGIN_ARGS, "mcp", "list", "--json"],
+        { env: input.env },
+      );
+      const child = yield* commandSpawner.spawn(
+        ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+          env: input.env,
+          cwd: input.cwd,
+          shell: spawnCommand.shell,
+        }),
+      );
+      const [stdout, , exitCode] = yield* Effect.all(
+        [
+          child.stdout.pipe(Stream.decodeText(), Stream.mkString),
+          child.stderr.pipe(Stream.runDrain),
+          child.exitCode,
+        ],
+        { concurrency: "unbounded" },
+      );
+      if (exitCode !== 0) {
+        yield* Effect.logWarning("codex mcp list failed; text generation keeps its MCP servers", {
+          reason: "exit",
+          exitCode,
+        });
+        return [];
+      }
+      const servers = yield* decodeCodexMcpServers(stdout).pipe(
+        Effect.tapError(() =>
+          Effect.logWarning("codex mcp list failed; text generation keeps its MCP servers", {
+            reason: "decode",
+          }),
+        ),
+      );
+      return servers.filter((server) => server.enabled).map((server) => server.name);
+    },
+    Effect.scoped,
+    Effect.timeoutOption(CODEX_MCP_LIST_TIMEOUT_MS),
+    Effect.flatMap(
+      Option.match({
+        onNone: () =>
+          Effect.logWarning("codex mcp list failed; text generation keeps its MCP servers", {
+            reason: "timeout",
+          }).pipe(Effect.as<ReadonlyArray<string>>([])),
+        onSome: (names) => Effect.succeed(names),
+      }),
+    ),
+    Effect.orElseSucceed((): ReadonlyArray<string> => []),
+  );
 
   const runCodexJson = Effect.fn("runCodexJson")(function* <S extends Schema.Top>({
     operation,
@@ -206,11 +291,42 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
             ),
           )
         : undefined;
+      const untrustedCheckoutArgs = untrustedCheckoutKey
+        ? ["--config", `projects={${untrustedCheckoutKey}={trust_level="untrusted"}}`]
+        : [];
+      const binary = effectiveConfig.binaryPath || "codex";
+      const env = {
+        ...effectiveEnvironment,
+        ...(effectiveConfig.homePath
+          ? {
+              CODEX_HOME: expandHomePath(
+                effectiveConfig.homePath,
+                yield* HostProcess.HomeDirectory,
+              ),
+            }
+          : {}),
+      };
+      const execLaunchArgs = codexExecLaunchArgs(launchArgs);
+      const mcpServersOff = yield* listEnabledMcpServers({
+        binary,
+        cwd,
+        env,
+        // `codex mcp` rejects --strict-config; the overrides still apply.
+        launchArgs: [
+          ...execLaunchArgs.filter((arg) => arg !== "--strict-config"),
+          ...untrustedCheckoutArgs,
+        ],
+      }).pipe(Effect.map(codexMcpServersOff));
       const spawnCommand = yield* resolveSpawnCommand(
-        effectiveConfig.binaryPath || "codex",
+        binary,
         [
           "exec",
-          ...codexExecLaunchArgs(launchArgs),
+          ...execLaunchArgs,
+          // Text generation needs only the prompt. A user's MCP server would
+          // otherwise start and could act on it, as Claude's --strict-mcp-config
+          // prevents for Claude.
+          ...CODEX_NO_PLUGIN_ARGS,
+          ...(mcpServersOff ? ["--config", mcpServersOff] : []),
           "--ephemeral",
           "--skip-git-repo-check",
           "-s",
@@ -220,9 +336,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           "--config",
           `model_reasoning_effort="${reasoningEffort}"`,
           ...(serviceTier ? ["--config", `service_tier="${serviceTier}"`] : []),
-          ...(untrustedCheckoutKey
-            ? ["--config", `projects={${untrustedCheckoutKey}={trust_level="untrusted"}}`]
-            : []),
+          ...untrustedCheckoutArgs,
           "--output-schema",
           schemaPath,
           "--output-last-message",
@@ -233,17 +347,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         { env: effectiveEnvironment },
       );
       const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-        env: {
-          ...effectiveEnvironment,
-          ...(effectiveConfig.homePath
-            ? {
-                CODEX_HOME: expandHomePath(
-                  effectiveConfig.homePath,
-                  yield* HostProcess.HomeDirectory,
-                ),
-              }
-            : {}),
-        },
+        env,
         cwd,
         shell: spawnCommand.shell,
         stdin: {

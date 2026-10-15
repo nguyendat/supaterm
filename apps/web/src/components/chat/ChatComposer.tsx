@@ -1,4 +1,5 @@
-import { formatProviderSkillDisplayName } from "@supacode/shared/inlineSkills";
+import { readCanQueueComposerMessage } from "../../state/composerQueue";
+import { formatProviderSkillDisplayName } from "@supaterm/shared/inlineSkills";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { runtimeModeConfig, runtimeModeOptions as runtimeModes } from "./runtimeModeConfig";
@@ -7,7 +8,7 @@ import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { AttachmentFilePreview } from "../files/AttachmentFilePreview";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
-import { filterComposerPullRequestMatches } from "@supacode/shared/composerPullRequestMatches";
+import { filterComposerPullRequestMatches } from "@supaterm/shared/composerPullRequestMatches";
 import { importPastedComposerText, readPastedComposerContext } from "../composerInlineTokenPaste";
 import { elementContextToPreviewAnnotation } from "../../lib/elementContext";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
@@ -37,7 +38,7 @@ import type {
   ServerProvider,
   ThreadId,
   SnapShotSource,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import {
   AuthOrchestrationOperateScope,
   ProviderDriverKind,
@@ -46,23 +47,23 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   PROVIDER_WORKSPACE_SNAPSHOT_TTL_MS,
-} from "@supacode/contracts";
-import type { EnvironmentConnectionPresentation } from "@supacode/client-runtime/connection";
+} from "@supaterm/contracts";
+import type { EnvironmentConnectionPresentation } from "@supaterm/client-runtime/connection";
 import {
   isPasteAsTextShortcut,
   nextPastedTextFileName,
   pastedTextDisposition,
   wouldTextPasteExceedLimit,
-} from "@supacode/client-runtime/text-paste";
+} from "@supaterm/client-runtime/text-paste";
 import {
   detectComposerTrigger,
   replaceTextRange,
   serializeComposerFileLink,
   type ComposerTrigger,
-} from "@supacode/shared/composerTrigger";
+} from "@supaterm/shared/composerTrigger";
 import { folderDropTarget, resolveDroppedFolderPath } from "./folderDrop";
-import { createModelSelection, normalizeModelSlug } from "@supacode/shared/model";
-import { USAGE_LIMITS_COMMAND } from "@supacode/shared/usageLimits";
+import { createModelSelection, normalizeModelSlug } from "@supaterm/shared/model";
+import { USAGE_LIMITS_COMMAND } from "@supaterm/shared/usageLimits";
 import {
   Fragment,
   memo,
@@ -163,7 +164,7 @@ import { compressImageForStash, prepareImageForAttachment } from "../../lib/imag
 import {
   fileAttachmentTooLargeMessage,
   formatAttachmentSize,
-} from "@supacode/client-runtime/state/attachments";
+} from "@supaterm/client-runtime/state/attachments";
 import {
   attachmentsToReleaseOnUploadCapabilityLoss,
   composerOtherFilesForPresentation,
@@ -197,7 +198,7 @@ import {
   type TerminalContextSelection,
 } from "../../lib/terminalContext";
 import { useComposerPathSearch } from "../../lib/composerPathSearchState";
-import { replaceComposerContextReferences } from "@supacode/shared/composerContextReferences";
+import { replaceComposerContextReferences } from "@supaterm/shared/composerContextReferences";
 import {
   getRestingComposerImagePreviewCounts,
   resolveRestingComposerControlsLayout,
@@ -248,12 +249,12 @@ import {
   threadContextRecord,
   threadContextReference,
 } from "~/lib/composerContextRecords";
-import { matchComposerThreadItems } from "@supacode/client-runtime/composerThreadItems";
+import { matchComposerThreadItems } from "@supaterm/client-runtime/composerThreadItems";
 import { THREAD_CONTEXT_DROP_EVENT, threadContextDropTargetProps } from "./threadContextDrag";
 import { readThreadShell, useThreadShells } from "~/state/entities";
 import { requestConfirmDialog } from "~/confirmDialog";
-import { encodeComposerContextFragment } from "@supacode/shared/composerContextClipboard";
-import type { ComposerContextClipboardFragment, ComposerContextRecord } from "@supacode/contracts";
+import { encodeComposerContextFragment } from "@supaterm/shared/composerContextClipboard";
+import type { ComposerContextClipboardFragment, ComposerContextRecord } from "@supaterm/contracts";
 import { resolveAssetUrl } from "~/assets/assetUrls";
 import { assetEnvironment } from "~/state/assets";
 import { readPreparedConnection } from "~/state/session";
@@ -279,7 +280,6 @@ import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import {
-  ComposerControl,
   ComposerControlIcon,
   ComposerControlSeparator,
   ComposerSelectControl,
@@ -1099,7 +1099,6 @@ import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { CircleAlertIcon, PaperclipIcon, PlayIcon, ShieldIcon, XIcon } from "lucide-react";
-import { hasProviderSetup } from "./ProviderStatusBanner";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
@@ -1108,7 +1107,7 @@ import {
   type ProviderInstanceEntry,
 } from "../../providerInstances";
 import { type AppModelOption, getAppModelOptionsForInstance } from "../../modelSelection";
-import type { UnifiedSettings } from "@supacode/contracts/settings";
+import type { UnifiedSettings } from "@supaterm/contracts/settings";
 import {
   isVideoAttachment,
   type ChatMessage,
@@ -1127,7 +1126,7 @@ import type { PendingApproval, PendingUserInput } from "../../session-logic";
 import {
   resolveComposerDispatchMode,
   type ComposerDispatchMode,
-} from "@supacode/client-runtime/state/composer-dispatch";
+} from "@supaterm/client-runtime/state/composer-dispatch";
 import {
   getProviderSlashCommandsForSlashMenu,
   getProviderSkillsForSlashMenu,
@@ -1135,7 +1134,7 @@ import {
   hasCurrentProviderWorkspaceSnapshot,
   resolveProviderSkillsForCwd,
   resolveProviderSlashCommandsForCwd,
-} from "@supacode/client-runtime/providerSkills";
+} from "@supaterm/client-runtime/providerSkills";
 import { searchProviderSkills } from "../../providerSkillSearch";
 import * as Schema from "effect/Schema";
 import { useDelayedStatus } from "../../hooks/useDelayedStatus";
@@ -1148,7 +1147,7 @@ import { serverEnvironment } from "../../state/server";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
 
 const WORKSPACE_SNAPSHOT_RETRY_COOLDOWN_MS = 10_000;
-const COMPOSER_TASKS_EXPANDED_KEY = "supacode:composer:tasks-expanded";
+const COMPOSER_TASKS_EXPANDED_KEY = "supaterm:composer:tasks-expanded";
 
 const extendReplacementRangeForTrailingSpace = (
   text: string,
@@ -1358,6 +1357,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
 const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(props: {
   compact: boolean;
   canOperateThread: boolean;
+  canQueueMessage: boolean;
   isPreparingWorktree: boolean;
   pendingAction: {
     questionIndex: number;
@@ -1397,6 +1397,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
       <ComposerPrimaryActions
         compact={props.compact}
         canOperateThread={props.canOperateThread}
+        canQueueMessage={props.canQueueMessage}
         pendingAction={props.pendingAction}
         isRunning={props.isRunning}
         canInterrupt={props.canInterrupt}
@@ -1503,6 +1504,7 @@ export interface ChatComposerProps {
   composerDraftTarget: ScopedThreadRef | DraftId;
   environmentId: EnvironmentId;
   canOperateThread: boolean;
+  canQueueMessage: boolean;
   attachmentUploadsCapabilityKnown: boolean;
   supportsAttachmentUploads: boolean;
   supportsQuestionAttachments: boolean;
@@ -1695,6 +1697,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerDraftTarget,
     environmentId,
     canOperateThread,
+    canQueueMessage,
     attachmentUploadsCapabilityKnown,
     supportsAttachmentUploads,
     supportsQuestionAttachments,
@@ -1815,6 +1818,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // hide the tasks row for it, only when the sync lasts. Logic that depends on
   // the real phase keeps reading `props.threadSyncPhase`.
   const shownSyncPhase = useDelayedStatus(composerDraftTargetKey, props.threadSyncPhase);
+  const showSyncStatus = shownSyncPhase === "syncing";
   const activeTasksProgress = shownSyncPhase === null ? props.activeTasksProgress : null;
   const activeTaskSteps = shownSyncPhase === null ? props.activeTaskSteps : null;
   const isEditingQueuedMessage = editingQueuedAttachments !== null;
@@ -1872,7 +1876,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerTerminalContexts = composerDraft.terminalContexts;
   const composerPreviewAnnotations = composerDraft.previewAnnotations;
   const composerReviewComments = composerDraft.reviewComments;
-  const composerThreadContexts = composerDraft.threadContexts;
+  const composerThreadContexts = attachmentDraft.threadContexts;
   const pendingSnapShotAnimations = useSyncExternalStore(
     subscribeToPendingSnapShotAnimations,
     getPendingSnapShotAnimations,
@@ -2154,28 +2158,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ],
   );
   const selectedInstanceId =
-    selectedProviderEntry?.instanceId ?? NO_PROVIDER_MODEL_SELECTION.instanceId;
+    selectedProviderEntry?.instanceId ??
+    unavailableProviderInstanceId ??
+    NO_PROVIDER_MODEL_SELECTION.instanceId;
   const noProviderAvailable =
     selectedProviderEntry === undefined && multipleModelSelections === null;
-  // Before the catalog arrives, every thread resolves to "no provider". Send
-  // stays blocked either way; only the chrome waits, keeping the picker with
-  // the thread's own selection instead of swapping in the setup button and
-  // back once the catalog lands.
   const providerCatalogPending = noProviderAvailable && !providerCatalogKnown;
   const showProviderUnavailable = noProviderAvailable && !providerCatalogPending;
-  const providerSetupInstanceId = noProviderAvailable
-    ? (unavailableProviderInstanceId ??
-      (lockedProvider === null
-        ? providerInstanceEntries.find((entry) => hasProviderSetup(entry.snapshot))?.instanceId
-        : undefined))
-    : undefined;
   const resolvedCompactDisabledReason =
     compactDisabledReason ?? (noProviderAvailable ? "Compacting is unavailable right now" : null);
-  // The driver kind follows the instance that will actually run the turn,
-  // which can differ from the persisted selection when that selection is
-  // disabled.
   const selectedProvider: ProviderDriverKind =
-    selectedProviderEntry?.driverKind ?? requestedDriverKind;
+    selectedProviderEntry?.driverKind ??
+    settings.providerInstances[selectedInstanceId]?.driver ??
+    requestedDriverKind;
   const supportedRuntimeModes = selectedProviderEntry?.snapshot.supportedRuntimeModes;
   const compatibleRuntimeModeOptions =
     supportedRuntimeModes && supportedRuntimeModes.length > 0
@@ -2199,10 +2194,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     projectModelSelection: activeProjectDefaultModelSelection,
     settings,
   });
-  const providerSendBlockReason = getAntigravitySendBlockReason(
-    selectedProviderEntry?.snapshot,
-    selectedModel,
-  );
+  const canQueueSelectedProvider =
+    !noProviderAvailable ||
+    (environmentUnavailable !== null &&
+      selectedInstanceId !== NO_PROVIDER_MODEL_SELECTION.instanceId &&
+      selectedModel.length > 0);
+  const providerSendBlockReason =
+    environmentUnavailable !== null
+      ? null
+      : selectedProviderEntry?.isAvailable === false
+        ? "This provider is unavailable. Choose another provider or try again later."
+        : getAntigravitySendBlockReason(selectedProviderEntry?.snapshot, selectedModel);
   const sendDisabledReason =
     externalSendDisabledReason ??
     (multipleModelSelections?.length === 0 ? "Select at least one model." : null) ??
@@ -2349,7 +2351,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
 
   const selectedPromptEffort = composerProviderState.promptEffort;
-  const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch;
+  const selectedModelOptionsForDispatch =
+    selectedProviderEntry || selectedProvider === "opencode"
+      ? composerProviderState.modelOptionsForDispatch
+      : composerModelOptions?.[selectedInstanceId];
   const interactionMode: ProviderInteractionMode = "default";
   const selectedModelSelection = useMemo<ModelSelection>(
     () => createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
@@ -3005,7 +3010,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isSendBusy ||
     isSendDisabled ||
     isConnecting ||
-    noProviderAvailable ||
+    !canQueueSelectedProvider ||
     projectSelectionRequired ||
     (environmentUnavailable !== null && showResumeAction) ||
     (!composerSendState.hasSendableContent && !showResumeAction);
@@ -3107,6 +3112,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ...composerTerminalContexts
           .filter((c) => wanted.has(terminalContextReference(c).contextId))
           .map(terminalContextRecord),
+        ...composerThreadContexts.filter((record) => wanted.has(record.contextId)),
         ...composerReviewComments
           .filter((c) => wanted.has(reviewCommentContextId(c.id)))
           .map(reviewCommentContextRecord),
@@ -3145,6 +3151,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       composerPreviewAnnotations,
       composerReviewComments,
       composerTerminalContexts,
+      composerThreadContexts,
       environmentId,
       uploadsByImageId,
     ],
@@ -3334,7 +3341,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           case "thread": {
             // The agent can only read threads on its own server; a pasted foreign one is dropped.
             if (record.environmentId !== environmentId) break;
-            addComposerDraftThreadContexts(composerDraftTarget, [record], {
+            addComposerDraftThreadContexts(attachmentDraftTarget, [record], {
               appendReference: false,
             });
             rewritten.set(record.contextId, record.contextId);
@@ -3367,6 +3374,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       addComposerDraftTerminalContexts,
       addComposerDraftThreadContexts,
       composerContextRecords,
+      attachmentDraftTarget,
       composerDraftTarget,
       environmentId,
       importAttachmentRecord,
@@ -4093,7 +4101,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
         );
         if (applied) {
-          addComposerDraftThreadContexts(composerDraftTarget, [record], {
+          addComposerDraftThreadContexts(attachmentDraftTarget, [record], {
             appendReference: false,
           });
           setComposerHighlightedItemId(null);
@@ -4105,6 +4113,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       addComposerDraftReviewComment,
       addComposerDraftThreadContexts,
       applyPromptReplacement,
+      attachmentDraftTarget,
       composerDraftTarget,
       onUsageLimitsCommand,
       resolveActiveComposerTrigger,
@@ -4156,7 +4165,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       isSendBusy ||
       isSendDisabled ||
       isConnecting ||
-      noProviderAvailable ||
+      !canQueueSelectedProvider ||
       (environmentUnavailable !== null && activePendingProgress !== null) ||
       phase === "running"
     ) {
@@ -4175,7 +4184,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isMobileViewport,
     isSendBusy,
     isSendDisabled,
-    noProviderAvailable,
+    canQueueSelectedProvider,
     phase,
   ]);
 
@@ -4186,9 +4195,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       submissionIntent?: ComposerSubmissionIntent,
     ) => {
       if (
-        noProviderAvailable ||
+        !canQueueSelectedProvider ||
         isSendDisabled ||
-        !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)
+        !(activePendingProgress
+          ? readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)
+          : readCanQueueComposerMessage(environmentId))
       ) {
         event?.preventDefault();
         return;
@@ -4256,7 +4267,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       blurMobileComposerAfterSend,
       environmentId,
       isSendDisabled,
-      noProviderAvailable,
+      canQueueSelectedProvider,
       onSend,
       settings.followUpBehavior,
       phase,
@@ -5154,9 +5165,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isStashMenuOpen ||
     isDragOverComposer ||
     isPreparingWorktree ||
-    showProviderUnavailable ||
     projectSelectionRequired ||
-    environmentUnavailable !== null ||
     composerSubmissionError !== null ||
     providerInputSubmissionError !== null ||
     hasImageAttachmentAttention;
@@ -5481,22 +5490,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const hiddenRestingBlockIds = restingBlockDefs
     .slice(restingBlockDefs.length - restingHiddenBlockCount)
     .map((def) => def.id);
-  const composerControls = showProviderUnavailable ? (
-    <ComposerControl
-      type="button"
-      disabled={!providerSetupInstanceId}
-      onClick={() => {
-        if (providerSetupInstanceId) {
-          onOpenProviderSetup(providerSetupInstanceId);
-        }
-      }}
-      data-chat-provider-unavailable="true"
-      className="shrink-0"
-    >
-      <CircleAlertIcon className="size-4" />
-      {providerSetupInstanceId ? "Open provider settings" : "No provider available"}
-    </ComposerControl>
-  ) : (
+  const composerControls = (
     <>
       {composerControlsCollapsed &&
       restingControlsHost !== null &&
@@ -5653,8 +5647,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeTaskSteps !== null &&
     activeTasksProgress.totalSteps > 0;
   const activityStackContent = hasBannerItems ? (
-    shownSyncPhase ? (
-      <ComposerActivityRow phase={shownSyncPhase} />
+    showSyncStatus ? (
+      <ComposerActivityRow />
     ) : canShowTasks ? (
       <ComposerTasksContent
         expanded={isTasksDrawerOpen}
@@ -6186,7 +6180,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       return;
     }
 
-    // Copied Supacode chips need the structured importer to bring their records and files along.
+    // Copied Supaterm chips need the structured importer to bring their records and files along.
     if ((readPastedComposerContext(event.clipboardData)?.records.length ?? 0) > 0) return;
     if (!foldPastedText(plainText, bypassAutoAttachment)) {
       return;
@@ -6260,11 +6254,60 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         const shell = readThreadShell(ref);
         return shell ? [threadContextRecord(ref, shell.title)] : [];
       });
-      if (records.length > 0) addComposerDraftThreadContexts(composerDraftTarget, records);
+      if (records.length === 0) return;
+      if (questionAttachmentTarget !== null) {
+        const canAnswer =
+          canOperateThread &&
+          !isConnecting &&
+          !isComposerApprovalState &&
+          !activePendingIsResponding &&
+          activePendingProgress?.activeQuestion?.allowCustomAnswer !== false;
+        const text = `${records
+          .map((record) => formatInlineContextReference(threadContextReference(record)))
+          .join(" ")} `;
+        const snapshot = readComposerSnapshot();
+        const cursor = snapshot.expandedCursor;
+        const leadingSpace = cursor > 0 && !/\s/.test(snapshot.value[cursor - 1] ?? "");
+        const inserted =
+          canAnswer &&
+          applyPromptReplacement(
+            cursor,
+            extendReplacementRangeForTrailingSpace(snapshot.value, cursor, text),
+            leadingSpace ? ` ${text}` : text,
+          );
+        if (!inserted) {
+          toastManager.add({
+            type: "error",
+            title: "Unable to add thread",
+            description: "The composer is busy; try again once it is ready.",
+          });
+          return;
+        }
+        addComposerDraftThreadContexts(questionAttachmentTarget, records, {
+          appendReference: false,
+        });
+        if (isComposerCollapsedMobile) expandMobileComposer();
+      } else {
+        addComposerDraftThreadContexts(composerDraftTarget, records);
+      }
     };
     form.addEventListener(THREAD_CONTEXT_DROP_EVENT, onThreadDrop);
     return () => form.removeEventListener(THREAD_CONTEXT_DROP_EVENT, onThreadDrop);
-  }, [addComposerDraftThreadContexts, composerDraftTarget, environmentId]);
+  }, [
+    activePendingIsResponding,
+    activePendingProgress?.activeQuestion?.allowCustomAnswer,
+    addComposerDraftThreadContexts,
+    applyPromptReplacement,
+    canOperateThread,
+    composerDraftTarget,
+    environmentId,
+    expandMobileComposer,
+    isComposerApprovalState,
+    isComposerCollapsedMobile,
+    isConnecting,
+    questionAttachmentTarget,
+    readComposerSnapshot,
+  ]);
 
   const onComposerMentionDragLeaveCapture = (event: React.DragEvent<HTMLFormElement>) => {
     if (!dataTransferHasComposerMention(event.dataTransfer.types)) return;
@@ -6551,7 +6594,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             : null,
         providerAvailable:
           multipleModelSelections !== null ||
-          (!noProviderAvailable && providerSendBlockReason === null),
+          (canQueueSelectedProvider && providerSendBlockReason === null),
         selectedProvider,
         selectedModel,
         selectedProviderModels,
@@ -6607,7 +6650,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       multipleModelSelections,
       setMultipleModelSelections,
       routeKind,
-      noProviderAvailable,
+      canQueueSelectedProvider,
       providerSendBlockReason,
       selectedPromptEffort,
       selectedProvider,
@@ -6728,10 +6771,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             className="relative z-0"
             items={bannerStackItems}
           />
-          {!activityStackItem && (shownSyncPhase || inlineTasksBadge) ? (
+          {!activityStackItem && (showSyncStatus || inlineTasksBadge) ? (
             <ComposerBanner.Attachment>
               <ComposerBanner.Root data-chat-composer-activity-strip="true">
-                {shownSyncPhase ? <ComposerActivityRow phase={shownSyncPhase} /> : inlineTasksBadge}
+                {showSyncStatus ? <ComposerActivityRow /> : inlineTasksBadge}
               </ComposerBanner.Root>
             </ComposerBanner.Attachment>
           ) : null}
@@ -6831,6 +6874,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             compact
                             keybindings={keybindings}
                             canOperateThread={canOperateThread}
+                            canQueueMessage={canQueueMessage}
                             pendingAction={pendingPrimaryAction}
                             isRunning={false}
                             canInterrupt={false}
@@ -7529,6 +7573,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       compact
                       keybindings={keybindings}
                       canOperateThread={canOperateThread}
+                      canQueueMessage={canQueueMessage}
                       pendingAction={pendingPrimaryAction}
                       isRunning={false}
                       canInterrupt={false}
@@ -7633,6 +7678,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   <ComposerFooterPrimaryActions
                     compact={isComposerResting || isComposerPrimaryActionsCompact}
                     canOperateThread={canOperateThread}
+                    canQueueMessage={canQueueMessage}
                     pendingAction={pendingPrimaryAction}
                     isRunning={phase === "running"}
                     canInterrupt={canInterrupt}
@@ -7644,7 +7690,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     isEnvironmentUnavailable={
                       (environmentUnavailable !== null &&
                         (activePendingProgress !== null || showResumeAction)) ||
-                      noProviderAvailable ||
+                      !canQueueSelectedProvider ||
                       projectSelectionRequired
                     }
                     isPreparingWorktree={isPreparingWorktree}

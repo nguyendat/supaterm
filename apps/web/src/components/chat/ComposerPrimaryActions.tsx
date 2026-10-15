@@ -7,8 +7,8 @@ import {
   PlayIcon,
   Minimize2Icon,
 } from "lucide-react";
-import type { ResolvedKeybindingsConfig } from "@supacode/contracts";
-import type { ClientSettings } from "@supacode/contracts/settings";
+import type { ResolvedKeybindingsConfig } from "@supaterm/contracts";
+import type { ClientSettings } from "@supaterm/contracts/settings";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { useEnvironmentIdentificationMode } from "~/hooks/useSettings";
 import { formatContextWindowTokens } from "~/lib/contextWindow";
@@ -24,7 +24,7 @@ import {
   type ActiveTurnComposerAction,
   alternateComposerDispatchAction,
   resolveComposerDispatchMode,
-} from "@supacode/client-runtime/state/composer-dispatch";
+} from "@supaterm/client-runtime/state/composer-dispatch";
 
 interface PendingActionState {
   questionIndex: number;
@@ -38,6 +38,7 @@ interface ComposerPrimaryActionsProps {
   compact: boolean;
   keybindings: ResolvedKeybindingsConfig;
   canOperateThread: boolean;
+  canQueueMessage: boolean;
   pendingAction: PendingActionState | null;
   /** The turn is running: sending steers or queues instead of starting a turn. */
   isRunning: boolean;
@@ -154,6 +155,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   compact,
   keybindings,
   canOperateThread,
+  canQueueMessage,
   pendingAction,
   isRunning,
   canInterrupt,
@@ -190,7 +192,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       activeTurnDefault: followUpBehavior,
       alternateModifier: shortcutModifiers.metaKey || shortcutModifiers.ctrlKey,
     }) === "queue";
-  const isSendDisabled = !canOperateThread || sendDisabledReason !== null;
   const stageBackdropVariant = useSidebarStageBackdropVariant(
     environmentIdentificationMode === "artwork",
   );
@@ -326,7 +327,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       onClick={showResume ? onResume : onSubmitMessage}
       disabled={
         isSendBusy ||
-        isSendDisabled ||
+        !(showResume ? canOperateThread : canQueueMessage) ||
+        sendDisabledReason !== null ||
         isConnecting ||
         isEnvironmentUnavailable ||
         (!hasSendableContent && !showResume)

@@ -5,8 +5,8 @@ import {
   type PushPreviewKey,
   type PushPreviewContent,
   type PushPreviewEnvelope,
-} from "@supacode/contracts/push";
-import { encodeBase64 } from "@supacode/shared/relay/protocol";
+} from "@supaterm/contracts/push";
+import { encodeBase64 } from "@supaterm/shared/relay/protocol";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -24,7 +24,7 @@ export class PushPreview extends Context.Service<
       content: PushPreviewContent,
     ) => Effect.Effect<PushPreviewEnvelope, PushNotificationError>;
   }
->()("supacode/notifications/PushPreview") {}
+>()("supaterm/notifications/PushPreview") {}
 
 const make = Effect.gen(function* () {
   const secrets = yield* ServerSecretStore.ServerSecretStore;

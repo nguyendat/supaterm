@@ -1,14 +1,13 @@
 import type { ReactNode } from "react";
 import { View } from "react-native";
 import { useKeyboardState } from "react-native-keyboard-controller";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { WORKSPACE_DOCK } from "./workspace-tabs-state";
+import { useWorkspaceDockBottomInset } from "./useWorkspaceDockBottomInset";
 
 export function WorkspaceDockFrame(props: {
   readonly floating?: boolean;
   readonly children: ReactNode;
 }) {
-  const insets = useSafeAreaInsets();
+  const bottomInset = useWorkspaceDockBottomInset();
   const keyboardVisible = useKeyboardState((state) => state.isVisible);
   if (keyboardVisible) return null;
   return (
@@ -21,7 +20,7 @@ export function WorkspaceDockFrame(props: {
               position: "absolute",
               left: 0,
               right: 0,
-              bottom: Math.max(insets.bottom, 12) + WORKSPACE_DOCK.bottomGap,
+              bottom: bottomInset,
               paddingHorizontal: 16,
               zIndex: 5,
             }

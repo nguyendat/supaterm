@@ -1,16 +1,17 @@
-import { scopeProjectRef } from "@supacode/client-runtime/environment";
-import { availableScratchWorkspaceRoot } from "@supacode/client-runtime/operations/projects";
+import { scopeProjectRef } from "@supaterm/client-runtime/environment";
+import { availableScratchWorkspaceRoot } from "@supaterm/client-runtime/operations/projects";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@supacode/client-runtime/state/runtime";
-import type { EnvironmentProject } from "@supacode/client-runtime/state/shell";
-import type { EnvironmentId } from "@supacode/contracts";
-import { useCallback } from "react";
+} from "@supaterm/client-runtime/state/runtime";
+import type { EnvironmentProject } from "@supaterm/client-runtime/state/shell";
+import type { EnvironmentId } from "@supaterm/contracts";
+import { useCallback, useMemo } from "react";
 
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { useEnvironments } from "~/state/environments";
+import { useProjects } from "~/state/entities";
 import { projectEnvironment } from "~/state/projects";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useNewThreadHandler } from "./useHandleNewThread";
@@ -33,19 +34,29 @@ function reportScratchFailure(title: string, error: unknown) {
  */
 export function useScratchProject() {
   const { environments } = useEnvironments();
+  const projects = useProjects();
   const openScratch = useAtomCommand(projectEnvironment.openScratch, { reportFailure: false });
   const handleNewThread = useNewThreadHandler();
 
-  /** The scratch folder of a connected environment, or null when it offers none. */
+  const scratchWorkspaceRoots = useMemo(
+    () =>
+      new Map(
+        environments.map((environment) => [
+          environment.environmentId,
+          availableScratchWorkspaceRoot({
+            environmentId: environment.environmentId,
+            connectionPhase: environment.connection.phase,
+            serverConfig: environment.serverConfig,
+            projects,
+          }),
+        ]),
+      ),
+    [environments, projects],
+  );
   const scratchWorkspaceRootFor = useCallback(
-    (environmentId: EnvironmentId | null): string | null => {
-      const environment = environments.find((entry) => entry.environmentId === environmentId);
-      return availableScratchWorkspaceRoot(
-        environment?.connection.phase,
-        environment?.serverConfig,
-      );
-    },
-    [environments],
+    (environmentId: EnvironmentId | null): string | null =>
+      environmentId === null ? null : (scratchWorkspaceRoots.get(environmentId) ?? null),
+    [scratchWorkspaceRoots],
   );
 
   // A thread without a project starts on the machine the user is working on,

@@ -1,5 +1,5 @@
 import * as Option from "effect/Option";
-import type { EnvironmentThreadShell } from "@supacode/client-runtime/state/shell";
+import type { EnvironmentThreadShell } from "@supaterm/client-runtime/state/shell";
 import {
   ANTIGRAVITY_DEFAULT_MODEL,
   type AssetCreateUrlInput,
@@ -21,22 +21,22 @@ import {
   type ThreadLinkedPullRequest,
   type RunId,
   type WorktreeSetupSnapshot,
-} from "@supacode/contracts";
-import { worktreeSetupAgentStarted } from "@supacode/client-runtime/worktree-setup";
+} from "@supaterm/contracts";
+import { worktreeSetupAgentStarted } from "@supaterm/client-runtime/worktree-setup";
 import * as DateTime from "effect/DateTime";
-import { parseScopedThreadKey } from "@supacode/client-runtime/environment";
-import { resolveAssetUrl } from "@supacode/client-runtime/state/assets";
+import { parseScopedThreadKey } from "@supaterm/client-runtime/environment";
+import { resolveAssetUrl } from "@supaterm/client-runtime/state/assets";
 import {
   squashAtomCommandFailure,
   type AtomCommandResult,
-} from "@supacode/client-runtime/state/runtime";
-import { videoMimeType } from "@supacode/shared/video";
+} from "@supaterm/client-runtime/state/runtime";
+import { videoMimeType } from "@supaterm/shared/video";
 import {
   appendCodexArtifactTemplateUsePrompt,
   codexArtifactTemplateUsePrompt,
   type CodexArtifactTemplate,
-} from "@supacode/shared/codexArtifactTemplates";
-import { presentThreadShell } from "@supacode/client-runtime/state/shell";
+} from "@supaterm/shared/codexArtifactTemplates";
+import { presentThreadShell } from "@supaterm/client-runtime/state/shell";
 import {
   type ChatMessage,
   isImageAttachment,
@@ -61,7 +61,7 @@ import {
   type ProviderInstanceEntry,
 } from "../providerInstances";
 
-export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "supacode:last-invoked-script-by-project";
+export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "supaterm:last-invoked-script-by-project";
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
 
 export const ENVIRONMENT_RECONNECT_WARNING_GRACE_MS = 2_000;
@@ -227,7 +227,7 @@ export function shouldReleaseTimelineAnchorForToolActivity(input: {
 export {
   findRecordedWorktreeSetup,
   resolveVisibleWorktreeSetup,
-} from "@supacode/client-runtime/worktree-setup";
+} from "@supaterm/client-runtime/worktree-setup";
 
 /** Keep setup visible across local dispatch, durable preparation, and the live stream. */
 export function resolveWorktreeSetupProgress(input: {
@@ -560,24 +560,20 @@ export function resolveComposerProviderSelection(input: {
       (!lockedContinuationGroupKey || entry.continuationGroupKey === lockedContinuationGroupKey) &&
       (!requiresExactInstance || entry.instanceId === input.lockedInstanceId),
   );
-  const selectedProviderEntry =
-    input.candidateInstanceIds
-      .map((candidate) =>
-        compatibleEntries.find(
-          (entry) => entry.instanceId === candidate && entry.enabled && entry.isAvailable,
-        ),
-      )
-      .find((entry) => entry !== undefined) ??
-    resolveSelectableProviderInstanceEntry(
-      compatibleEntries.filter((entry) => entry.driverKind === requestedDriverKind),
-      undefined,
-    ) ??
-    resolveSelectableProviderInstanceEntry(compatibleEntries, undefined);
+  const selectedInstanceId = input.candidateInstanceIds.find((candidate) => {
+    if (candidate == null || candidate === NO_PROVIDER_MODEL_SELECTION.instanceId) return false;
+    const entry = input.entries.find((entry) => entry.instanceId === candidate);
+    return entry === undefined || compatibleEntries.includes(entry);
+  });
+  const selectedProviderEntry = selectedInstanceId
+    ? compatibleEntries.find((entry) => entry.instanceId === selectedInstanceId && entry.enabled)
+    : (resolveSelectableProviderInstanceEntry(
+        compatibleEntries.filter((entry) => entry.driverKind === requestedDriverKind),
+        undefined,
+      ) ?? resolveSelectableProviderInstanceEntry(compatibleEntries, undefined));
   const unavailableProviderInstanceId = selectedProviderEntry
     ? undefined
-    : input.lockedProvider
-      ? (input.lockedInstanceId ?? requestedInstanceId)
-      : requestedInstanceId;
+    : (selectedInstanceId ?? (input.lockedProvider ? input.lockedInstanceId : requestedInstanceId));
   return {
     selectedProviderEntry,
     requestedDriverKind,
@@ -770,6 +766,20 @@ export function resolveSendEnvMode(input: {
   return input.isGitRepo ? input.requestedEnvMode : "local";
 }
 
+export function shouldRequireWorktreeBaseBranch(input: {
+  shouldCreateWorktree: boolean;
+  activeThreadBranch: string | null;
+  refsSettled: boolean;
+  environmentUnavailable: boolean;
+}): boolean {
+  return (
+    input.shouldCreateWorktree &&
+    !input.activeThreadBranch &&
+    input.refsSettled &&
+    !input.environmentUnavailable
+  );
+}
+
 export function resolveBackgroundDraftWorkspaceOptions(input: {
   envMode: DraftThreadEnvMode;
   branch: string | null;
@@ -936,8 +946,9 @@ export function deriveLockedProvider(input: {
   selectedProvider: string | null;
   threadProvider: string | null;
   providers: ReadonlyArray<Pick<ServerProvider, "instanceId" | "driver">>;
+  supportsProviderSwitchingViaHandoff?: boolean;
 }): ProviderDriverKind | null {
-  if (!threadHasStarted(input.thread)) {
+  if (input.supportsProviderSwitchingViaHandoff || !threadHasStarted(input.thread)) {
     return null;
   }
   const sessionProvider = input.thread?.runtime?.providerName ?? null;

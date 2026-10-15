@@ -10,7 +10,7 @@ import {
   NodeId,
   type ProjectId,
   ThreadId,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import * as Context from "effect/Context";
 import * as PushOutbox from "../notifications/PushOutbox.ts";
 import * as DateTime from "effect/DateTime";
@@ -186,7 +186,7 @@ export interface EventSinkV2Shape {
 }
 
 export class EventSinkV2 extends Context.Service<EventSinkV2, EventSinkV2Shape>()(
-  "supacode/orchestration-v2/EventSink/EventSinkV2",
+  "supaterm/orchestration-v2/EventSink/EventSinkV2",
 ) {}
 
 /**

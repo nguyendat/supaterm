@@ -6,7 +6,7 @@ import {
   PullRequestInvolvement,
   PullRequestListFilters,
   PullRequestListState,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 
 export const PullRequestListSort = Schema.Literals([
   "ready",
@@ -25,7 +25,7 @@ export interface PullRequestListPreferences {
   readonly environmentId?: EnvironmentId;
   readonly projectId?: ProjectId;
   readonly host?: string;
-  readonly q?: string;
+  readonly q?: string | undefined;
   readonly draft?: "only" | "hide";
   readonly review?: NonNullable<PullRequestListFilters["review"]>;
   readonly checks?: NonNullable<PullRequestListFilters["checks"]>;
@@ -62,7 +62,7 @@ const PullRequestListPreferencesSchema = Schema.Struct({
 const decodePullRequestListPreferences = Schema.decodeUnknownOption(
   PullRequestListPreferencesSchema,
 );
-const PULL_REQUEST_LIST_PREFERENCES_STORAGE_KEY = "supacode.pullRequests.preferences";
+const PULL_REQUEST_LIST_PREFERENCES_STORAGE_KEY = "supaterm.pullRequests.preferences";
 type PreferenceStorage = Pick<Storage, "getItem" | "setItem">;
 
 function resolvePreferenceStorage(

@@ -317,7 +317,7 @@ index ce1fe00001c9e5aee6c6ea8bb2d4757d4586d002..72dafa0845c75f0cc66bea4daa4656a2
      data: readonly any[];
      elementAtIndex: (index: number) => any;
 diff --git a/react-native.js b/react-native.js
-index b3c5a306b293f797a8b338adfca3060c0f6db22b..9be9614bc8ced72e857d2c22a3be6acd750d3e77 100644
+index b3c5a306b293f797a8b338adfca3060c0f6db22b..c278004b2561a68d4a4a3ab16ecdc666d0cc4168 100644
 --- a/react-native.js
 +++ b/react-native.js
 @@ -717,6 +717,15 @@ function hasActiveInitialScroll(state) {
@@ -659,6 +659,15 @@ index b3c5a306b293f797a8b338adfca3060c0f6db22b..9be9614bc8ced72e857d2c22a3be6acd
      if (!shouldKeepEndTargetAlive) {
        if (shouldPreserveInitialScrollForFooterLayout(initialScroll)) {
          clearPendingInitialScrollFooterLayout(ctx, {
+@@ -4313,7 +4486,7 @@ function calculateItemsInView(ctx, params = {}) {
+     const optimizeForVisibleWindow = !forceFullItemPositions && !dataChanged && numColumns > 1 && minIndexSizeChanged !== void 0;
+     updateItemPositions(ctx, dataChanged, {
+       doMVCP,
+-      forceFullUpdate: !!forceFullItemPositions,
++      forceFullUpdate: !!forceFullItemPositions || minIndexSizeChanged !== void 0,
+       optimizeForVisibleWindow,
+       scrollBottomBuffered,
+       scrollVelocity: speed,
 @@ -4672,7 +4845,8 @@ function maybeUpdateAnchoredEndSpace(ctx) {
        contentBelowAnchor = Math.max(0, contentBelowAnchor - ctx.scrollAxisGap);
        contentBelowAnchor += (ctx.values.get("footerSize") || 0) + getStylePaddingEnd(state.props);
@@ -893,7 +902,7 @@ index b3c5a306b293f797a8b338adfca3060c0f6db22b..9be9614bc8ced72e857d2c22a3be6acd
        recycleItems,
        refreshControl: refreshControlElement ? stylePaddingTopState > 0 ? React2__namespace.cloneElement(refreshControlElement, {
 diff --git a/react-native.mjs b/react-native.mjs
-index 40e87cda8c9bc79a889e5542f29af429a24b24d4..6d4f04aef5c3bb7ed3d59bb627d7d041885069bc 100644
+index 40e87cda8c9bc79a889e5542f29af429a24b24d4..9987af7158da1107647c2890f7b7958d6bdfd0be 100644
 --- a/react-native.mjs
 +++ b/react-native.mjs
 @@ -696,6 +696,15 @@ function hasActiveInitialScroll(state) {
@@ -1235,6 +1244,15 @@ index 40e87cda8c9bc79a889e5542f29af429a24b24d4..6d4f04aef5c3bb7ed3d59bb627d7d041
      if (!shouldKeepEndTargetAlive) {
        if (shouldPreserveInitialScrollForFooterLayout(initialScroll)) {
          clearPendingInitialScrollFooterLayout(ctx, {
+@@ -4292,7 +4465,7 @@ function calculateItemsInView(ctx, params = {}) {
+     const optimizeForVisibleWindow = !forceFullItemPositions && !dataChanged && numColumns > 1 && minIndexSizeChanged !== void 0;
+     updateItemPositions(ctx, dataChanged, {
+       doMVCP,
+-      forceFullUpdate: !!forceFullItemPositions,
++      forceFullUpdate: !!forceFullItemPositions || minIndexSizeChanged !== void 0,
+       optimizeForVisibleWindow,
+       scrollBottomBuffered,
+       scrollVelocity: speed,
 @@ -4651,7 +4824,8 @@ function maybeUpdateAnchoredEndSpace(ctx) {
        contentBelowAnchor = Math.max(0, contentBelowAnchor - ctx.scrollAxisGap);
        contentBelowAnchor += (ctx.values.get("footerSize") || 0) + getStylePaddingEnd(state.props);
@@ -1490,19 +1508,98 @@ index b6c7481603f4119495551b3e4c1c071984c144af..be92e2304029ded902944b3a442ad385
      data: readonly any[];
      elementAtIndex: (index: number) => any;
 diff --git a/react-native.web.js b/react-native.web.js
-index 914d2dafaafa001c9ab6791a0a0581659295e333..1d0779d66a81c2181506745ce6c6c7e03d601a6a 100644
+index 914d2dafaafa001c9ab6791a0a0581659295e333..12e5a35d7cbfb26bfb062fb43dbde7bd755c79a3 100644
 --- a/react-native.web.js
 +++ b/react-native.web.js
-@@ -5348,7 +5348,7 @@
-         top: entry.contentRect.top,
-         width: borderBoxSize.inlineSize
-       } : (_a4 = target == null ? void 0 : target.getBoundingClientRect()) != null ? _a4 : entry.contentRect;
+@@ -4343,7 +4343,7 @@ function calculateItemsInView(ctx, params = {}) {
+     const optimizeForVisibleWindow = !forceFullItemPositions && !dataChanged && numColumns > 1 && minIndexSizeChanged !== void 0;
+     updateItemPositions(ctx, dataChanged, {
+       doMVCP,
+-      forceFullUpdate: !!forceFullItemPositions,
++      forceFullUpdate: !!forceFullItemPositions || minIndexSizeChanged !== void 0,
+       optimizeForVisibleWindow,
+       scrollBottomBuffered,
+       scrollVelocity: speed,
+@@ -4958,6 +4958,7 @@ function measureContainersInLayoutEffect(ctx, targetContainerIds = null) {
+     if (itemKey !== void 0 && element) {
+       const rect = element.getBoundingClientRect();
+       setContainerLayoutBaseline(element, rect);
++      resyncResizeObserver(element, rect);
+       measurements.push({
+         containerId,
+         itemKey,
+@@ -5270,14 +5271,37 @@ function Separator({ ItemSeparatorComponent, leadingItem }) {
+ // src/hooks/createResizeObserver.ts
+ var globalResizeObserver = null;
++var resizeObserverRects = /* @__PURE__ */ new WeakMap();
++var forcedResizeObservations = /* @__PURE__ */ new WeakSet();
++function getResizeObserverRect(entry) {
++  const target = entry.target instanceof HTMLElement ? entry.target : void 0;
++  const borderBoxSize = Array.isArray(entry.borderBoxSize) ? entry.borderBoxSize[0] : entry.borderBoxSize;
++  return borderBoxSize ? {
++    height: borderBoxSize.blockSize,
++    left: entry.contentRect.left,
++    top: entry.contentRect.top,
++    width: borderBoxSize.inlineSize
++  } : target ? target.getBoundingClientRect() : entry.contentRect;
++}
++function resyncResizeObserver(element, rect) {
++  const observed = resizeObserverRects.get(element);
++  if (observed && callbackMap.has(element) && (Math.round(observed.height) !== Math.round(rect.height) || Math.round(observed.width) !== Math.round(rect.width))) {
++    forcedResizeObservations.add(element);
++    const observer = getGlobalResizeObserver();
++    observer.unobserve(element);
++    observer.observe(element, { box: "border-box" });
++  }
++}
+ function getGlobalResizeObserver() {
+   if (!globalResizeObserver) {
+     globalResizeObserver = new ResizeObserver((entries) => {
+       batchItemSizeUpdates(() => {
+         for (const entry of entries) {
++          resizeObserverRects.set(entry.target, getResizeObserverRect(entry));
++          const forceLayout = forcedResizeObservations.delete(entry.target);
+           const callbacks = callbackMap.get(entry.target);
+           if (callbacks) {
+             for (const callback of callbacks) {
+-              callback(entry);
++              callback(entry, forceLayout);
+             }
+           }
+         }
+@@ -5304,6 +5328,8 @@ function createResizeObserver(element, callback) {
+     callbacks.delete(callback);
+     if (callbacks.size === 0) {
+       callbackMap.delete(element);
++      resizeObserverRects.delete(element);
++      forcedResizeObservations.delete(element);
+       observer.unobserve(element);
+     }
+   };
+@@ -5338,18 +5364,10 @@ function useOnLayoutSync({
+       emit(toLayout(rect), true);
+       prevRect = rect;
+     }
+-    return createResizeObserver(element, (entry) => {
+-      var _a4;
+-      const target = entry.target instanceof HTMLElement ? entry.target : void 0;
+-      const borderBoxSize = Array.isArray(entry.borderBoxSize) ? entry.borderBoxSize[0] : entry.borderBoxSize;
+-      const rectObserved = borderBoxSize ? {
+-        height: borderBoxSize.blockSize,
+-        left: entry.contentRect.left,
+-        top: entry.contentRect.top,
+-        width: borderBoxSize.inlineSize
+-      } : (_a4 = target == null ? void 0 : target.getBoundingClientRect()) != null ? _a4 : entry.contentRect;
 -      const previousRect = prevRect != null ? prevRect : getContainerLayoutBaseline(element);
+-      const didSizeChange = previousRect === void 0 || rectObserved.width !== previousRect.width || rectObserved.height !== previousRect.height;
++    return createResizeObserver(element, (entry, forceLayout) => {
++      const rectObserved = getResizeObserverRect(entry);
 +      const previousRect = prevRect;
-       const didSizeChange = previousRect === void 0 || rectObserved.width !== previousRect.width || rectObserved.height !== previousRect.height;
++      const didSizeChange = forceLayout || previousRect === void 0 || rectObserved.width !== previousRect.width || rectObserved.height !== previousRect.height;
        prevRect = rectObserved;
        const shouldResyncLayout = !!(webLayoutResync == null ? void 0 : webLayoutResync());
-@@ -5415,11 +5415,6 @@
+       if (didSizeChange || shouldResyncLayout) {
+@@ -5415,11 +5433,6 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
      scheduleWebShrinkMeasurement(state, () => {
        var _a4;
        if (state.itemKey === currentItemKey) {
@@ -1514,7 +1611,7 @@ index 914d2dafaafa001c9ab6791a0a0581659295e333..1d0779d66a81c2181506745ce6c6c7e0
          applyLayout();
        }
      });
-@@ -5474,7 +5469,7 @@
+@@ -5474,7 +5487,7 @@ function useContainerMeasurement({
    });
    const { onLayout } = useOnLayoutSync(
      {
@@ -1523,7 +1620,7 @@ index 914d2dafaafa001c9ab6791a0a0581659295e333..1d0779d66a81c2181506745ce6c6c7e0
        onLayoutChange,
        ref,
        webLayoutResync: () => isInMVCPActiveMode(ctx.state)
-@@ -5651,6 +5681,18 @@ var ContainerSlot = typedMemo(function ContainerSlot2(props) {
+@@ -5651,6 +5664,18 @@ var ContainerSlot = typedMemo(function ContainerSlot2(props) {
  });
  
  // src/utils/reordering.ts
@@ -1542,7 +1639,7 @@ index 914d2dafaafa001c9ab6791a0a0581659295e333..1d0779d66a81c2181506745ce6c6c7e0
  function sortDOMElements(container, indexByElement) {
    const elements = Array.from(container.children);
    if (elements.length <= 1) return elements;
-@@ -5690,9 +5702,9 @@ function sortDOMElements(container, indexByElement) {
+@@ -5690,9 +5715,9 @@ function sortDOMElements(container, indexByElement) {
          }
        }
        if (nextStableElement) {
@@ -1554,7 +1651,7 @@ index 914d2dafaafa001c9ab6791a0a0581659295e333..1d0779d66a81c2181506745ce6c6c7e0
        }
      }
    }
-@@ -7385,6 +7397,7 @@ function createImperativeHandle(ctx, scheduleImperativeScrollCommit) {
+@@ -7385,6 +7410,7 @@ function createImperativeHandle(ctx, scheduleImperativeScrollCommit) {
      getScrollResponder: () => refScroller.current.getScrollResponder(),
      getState: () => ({
        activeStickyIndex: peek$(ctx, "activeStickyIndex"),
@@ -1563,10 +1660,97 @@ index 914d2dafaafa001c9ab6791a0a0581659295e333..1d0779d66a81c2181506745ce6c6c7e0
        data: state.props.data,
        elementAtIndex: (index) => {
 diff --git a/react-native.web.mjs b/react-native.web.mjs
-index 95465f2ab89ce41a10553f58af83618f7310e83c..f6427f90761de3349ab2c3796668fb99defe49c3 100644
+index 95465f2ab89ce41a10553f58af83618f7310e83c..cd4e6d86a453df3bb0f7e87f9c2dd2fce2cc9035 100644
 --- a/react-native.web.mjs
 +++ b/react-native.web.mjs
-@@ -5630,6 +5630,18 @@ var ContainerSlot = typedMemo(function ContainerSlot2(props) {
+@@ -4322,7 +4322,7 @@ function calculateItemsInView(ctx, params = {}) {
+     const optimizeForVisibleWindow = !forceFullItemPositions && !dataChanged && numColumns > 1 && minIndexSizeChanged !== void 0;
+     updateItemPositions(ctx, dataChanged, {
+       doMVCP,
+-      forceFullUpdate: !!forceFullItemPositions,
++      forceFullUpdate: !!forceFullItemPositions || minIndexSizeChanged !== void 0,
+       optimizeForVisibleWindow,
+       scrollBottomBuffered,
+       scrollVelocity: speed,
+@@ -4937,6 +4937,7 @@ function measureContainersInLayoutEffect(ctx, targetContainerIds = null) {
+     if (itemKey !== void 0 && element) {
+       const rect = element.getBoundingClientRect();
+       setContainerLayoutBaseline(element, rect);
++      resyncResizeObserver(element, rect);
+       measurements.push({
+         containerId,
+         itemKey,
+@@ -5249,14 +5250,37 @@ function Separator({ ItemSeparatorComponent, leadingItem }) {
+ // src/hooks/createResizeObserver.ts
+ var globalResizeObserver = null;
++var resizeObserverRects = /* @__PURE__ */ new WeakMap();
++var forcedResizeObservations = /* @__PURE__ */ new WeakSet();
++function getResizeObserverRect(entry) {
++  const target = entry.target instanceof HTMLElement ? entry.target : void 0;
++  const borderBoxSize = Array.isArray(entry.borderBoxSize) ? entry.borderBoxSize[0] : entry.borderBoxSize;
++  return borderBoxSize ? {
++    height: borderBoxSize.blockSize,
++    left: entry.contentRect.left,
++    top: entry.contentRect.top,
++    width: borderBoxSize.inlineSize
++  } : target ? target.getBoundingClientRect() : entry.contentRect;
++}
++function resyncResizeObserver(element, rect) {
++  const observed = resizeObserverRects.get(element);
++  if (observed && callbackMap.has(element) && (Math.round(observed.height) !== Math.round(rect.height) || Math.round(observed.width) !== Math.round(rect.width))) {
++    forcedResizeObservations.add(element);
++    const observer = getGlobalResizeObserver();
++    observer.unobserve(element);
++    observer.observe(element, { box: "border-box" });
++  }
++}
+ function getGlobalResizeObserver() {
+   if (!globalResizeObserver) {
+     globalResizeObserver = new ResizeObserver((entries) => {
+       batchItemSizeUpdates(() => {
+         for (const entry of entries) {
++          resizeObserverRects.set(entry.target, getResizeObserverRect(entry));
++          const forceLayout = forcedResizeObservations.delete(entry.target);
+           const callbacks = callbackMap.get(entry.target);
+           if (callbacks) {
+             for (const callback of callbacks) {
+-              callback(entry);
++              callback(entry, forceLayout);
+             }
+           }
+         }
+@@ -5283,6 +5307,8 @@ function createResizeObserver(element, callback) {
+     callbacks.delete(callback);
+     if (callbacks.size === 0) {
+       callbackMap.delete(element);
++      resizeObserverRects.delete(element);
++      forcedResizeObservations.delete(element);
+       observer.unobserve(element);
+     }
+   };
+@@ -5317,18 +5343,10 @@ function useOnLayoutSync({
+       emit(toLayout(rect), true);
+       prevRect = rect;
+     }
+-    return createResizeObserver(element, (entry) => {
+-      var _a4;
+-      const target = entry.target instanceof HTMLElement ? entry.target : void 0;
+-      const borderBoxSize = Array.isArray(entry.borderBoxSize) ? entry.borderBoxSize[0] : entry.borderBoxSize;
+-      const rectObserved = borderBoxSize ? {
+-        height: borderBoxSize.blockSize,
+-        left: entry.contentRect.left,
+-        top: entry.contentRect.top,
+-        width: borderBoxSize.inlineSize
+-      } : (_a4 = target == null ? void 0 : target.getBoundingClientRect()) != null ? _a4 : entry.contentRect;
++    return createResizeObserver(element, (entry, forceLayout) => {
++      const rectObserved = getResizeObserverRect(entry);
+       const previousRect = prevRect != null ? prevRect : getContainerLayoutBaseline(element);
+-      const didSizeChange = previousRect === void 0 || rectObserved.width !== previousRect.width || rectObserved.height !== previousRect.height;
++      const didSizeChange = forceLayout || previousRect === void 0 || rectObserved.width !== previousRect.width || rectObserved.height !== previousRect.height;
+       prevRect = rectObserved;
+       const shouldResyncLayout = !!(webLayoutResync == null ? void 0 : webLayoutResync());
+       if (didSizeChange || shouldResyncLayout) {
+@@ -5630,6 +5648,18 @@ var ContainerSlot = typedMemo(function ContainerSlot2(props) {
  });
  
  // src/utils/reordering.ts
@@ -1585,7 +1769,7 @@ index 95465f2ab89ce41a10553f58af83618f7310e83c..f6427f90761de3349ab2c3796668fb99
  function sortDOMElements(container, indexByElement) {
    const elements = Array.from(container.children);
    if (elements.length <= 1) return elements;
-@@ -5669,9 +5681,9 @@ function sortDOMElements(container, indexByElement) {
+@@ -5669,9 +5699,9 @@ function sortDOMElements(container, indexByElement) {
          }
        }
        if (nextStableElement) {
@@ -1597,7 +1781,7 @@ index 95465f2ab89ce41a10553f58af83618f7310e83c..f6427f90761de3349ab2c3796668fb99
        }
      }
    }
-@@ -7364,6 +7376,7 @@ function createImperativeHandle(ctx, scheduleImperativeScrollCommit) {
+@@ -7364,6 +7394,7 @@ function createImperativeHandle(ctx, scheduleImperativeScrollCommit) {
      getScrollResponder: () => refScroller.current.getScrollResponder(),
      getState: () => ({
        activeStickyIndex: peek$(ctx, "activeStickyIndex"),
@@ -1627,9 +1811,18 @@ index b6c7481603f4119495551b3e4c1c071984c144af..be92e2304029ded902944b3a442ad385
      data: readonly any[];
      elementAtIndex: (index: number) => any;
 diff --git a/react.js b/react.js
-index 914d2dafaafa001c9ab6791a0a0581659295e333..087a57b6ae6a1248928fe634721e5e3d0549f423 100644
+index 914d2dafaafa001c9ab6791a0a0581659295e333..c11834b88db56a53d4c6577d3e7fd3c8aacdf413 100644
 --- a/react.js
 +++ b/react.js
+@@ -4343,7 +4343,7 @@ function calculateItemsInView(ctx, params = {}) {
+     const optimizeForVisibleWindow = !forceFullItemPositions && !dataChanged && numColumns > 1 && minIndexSizeChanged !== void 0;
+     updateItemPositions(ctx, dataChanged, {
+       doMVCP,
+-      forceFullUpdate: !!forceFullItemPositions,
++      forceFullUpdate: !!forceFullItemPositions || minIndexSizeChanged !== void 0,
+       optimizeForVisibleWindow,
+       scrollBottomBuffered,
+       scrollVelocity: speed,
 @@ -4702,7 +4702,8 @@ function maybeUpdateAnchoredEndSpace(ctx) {
        contentBelowAnchor = Math.max(0, contentBelowAnchor - ctx.scrollAxisGap);
        contentBelowAnchor += (ctx.values.get("footerSize") || 0) + getStylePaddingEnd(state.props);
@@ -1653,16 +1846,86 @@ index 914d2dafaafa001c9ab6791a0a0581659295e333..087a57b6ae6a1248928fe634721e5e3d
    }
    return nextSize;
  }
-@@ -5348,7 +5348,7 @@
-         top: entry.contentRect.top,
-         width: borderBoxSize.inlineSize
-       } : (_a4 = target == null ? void 0 : target.getBoundingClientRect()) != null ? _a4 : entry.contentRect;
+@@ -4958,6 +4965,7 @@ function measureContainersInLayoutEffect(ctx, targetContainerIds = null) {
+     if (itemKey !== void 0 && element) {
+       const rect = element.getBoundingClientRect();
+       setContainerLayoutBaseline(element, rect);
++      resyncResizeObserver(element, rect);
+       measurements.push({
+         containerId,
+         itemKey,
+@@ -5270,14 +5278,37 @@ function Separator({ ItemSeparatorComponent, leadingItem }) {
+ // src/hooks/createResizeObserver.ts
+ var globalResizeObserver = null;
++var resizeObserverRects = /* @__PURE__ */ new WeakMap();
++var forcedResizeObservations = /* @__PURE__ */ new WeakSet();
++function getResizeObserverRect(entry) {
++  const target = entry.target instanceof HTMLElement ? entry.target : void 0;
++  const borderBoxSize = Array.isArray(entry.borderBoxSize) ? entry.borderBoxSize[0] : entry.borderBoxSize;
++  return borderBoxSize ? {
++    height: borderBoxSize.blockSize,
++    left: entry.contentRect.left,
++    top: entry.contentRect.top,
++    width: borderBoxSize.inlineSize
++  } : target ? target.getBoundingClientRect() : entry.contentRect;
++}
++function resyncResizeObserver(element, rect) {
++  const observed = resizeObserverRects.get(element);
++  if (observed && callbackMap.has(element) && (Math.round(observed.height) !== Math.round(rect.height) || Math.round(observed.width) !== Math.round(rect.width))) {
++    forcedResizeObservations.add(element);
++    const observer = getGlobalResizeObserver();
++    observer.unobserve(element);
++    observer.observe(element, { box: "border-box" });
++  }
++}
+ function getGlobalResizeObserver() {
+   if (!globalResizeObserver) {
+     globalResizeObserver = new ResizeObserver((entries) => {
+       batchItemSizeUpdates(() => {
+         for (const entry of entries) {
++          resizeObserverRects.set(entry.target, getResizeObserverRect(entry));
++          const forceLayout = forcedResizeObservations.delete(entry.target);
+           const callbacks = callbackMap.get(entry.target);
+           if (callbacks) {
+             for (const callback of callbacks) {
+-              callback(entry);
++              callback(entry, forceLayout);
+             }
+           }
+         }
+@@ -5304,6 +5335,8 @@ function createResizeObserver(element, callback) {
+     callbacks.delete(callback);
+     if (callbacks.size === 0) {
+       callbackMap.delete(element);
++      resizeObserverRects.delete(element);
++      forcedResizeObservations.delete(element);
+       observer.unobserve(element);
+     }
+   };
+@@ -5338,18 +5371,10 @@ function useOnLayoutSync({
+       emit(toLayout(rect), true);
+       prevRect = rect;
+     }
+-    return createResizeObserver(element, (entry) => {
+-      var _a4;
+-      const target = entry.target instanceof HTMLElement ? entry.target : void 0;
+-      const borderBoxSize = Array.isArray(entry.borderBoxSize) ? entry.borderBoxSize[0] : entry.borderBoxSize;
+-      const rectObserved = borderBoxSize ? {
+-        height: borderBoxSize.blockSize,
+-        left: entry.contentRect.left,
+-        top: entry.contentRect.top,
+-        width: borderBoxSize.inlineSize
+-      } : (_a4 = target == null ? void 0 : target.getBoundingClientRect()) != null ? _a4 : entry.contentRect;
 -      const previousRect = prevRect != null ? prevRect : getContainerLayoutBaseline(element);
+-      const didSizeChange = previousRect === void 0 || rectObserved.width !== previousRect.width || rectObserved.height !== previousRect.height;
++    return createResizeObserver(element, (entry, forceLayout) => {
++      const rectObserved = getResizeObserverRect(entry);
 +      const previousRect = prevRect;
-       const didSizeChange = previousRect === void 0 || rectObserved.width !== previousRect.width || rectObserved.height !== previousRect.height;
++      const didSizeChange = forceLayout || previousRect === void 0 || rectObserved.width !== previousRect.width || rectObserved.height !== previousRect.height;
        prevRect = rectObserved;
        const shouldResyncLayout = !!(webLayoutResync == null ? void 0 : webLayoutResync());
-@@ -5415,11 +5415,6 @@
+       if (didSizeChange || shouldResyncLayout) {
+@@ -5415,11 +5440,6 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
      scheduleWebShrinkMeasurement(state, () => {
        var _a4;
        if (state.itemKey === currentItemKey) {
@@ -1674,7 +1937,7 @@ index 914d2dafaafa001c9ab6791a0a0581659295e333..087a57b6ae6a1248928fe634721e5e3d
          applyLayout();
        }
      });
-@@ -5474,7 +5476,7 @@
+@@ -5474,7 +5494,7 @@ function useContainerMeasurement({
    });
    const { onLayout } = useOnLayoutSync(
      {
@@ -1683,7 +1946,7 @@ index 914d2dafaafa001c9ab6791a0a0581659295e333..087a57b6ae6a1248928fe634721e5e3d
        onLayoutChange,
        ref,
        webLayoutResync: () => isInMVCPActiveMode(ctx.state)
-@@ -5651,6 +5660,18 @@ var ContainerSlot = typedMemo(function ContainerSlot2(props) {
+@@ -5651,6 +5671,18 @@ var ContainerSlot = typedMemo(function ContainerSlot2(props) {
  });
  
  // src/utils/reordering.ts
@@ -1702,7 +1965,7 @@ index 914d2dafaafa001c9ab6791a0a0581659295e333..087a57b6ae6a1248928fe634721e5e3d
  function sortDOMElements(container, indexByElement) {
    const elements = Array.from(container.children);
    if (elements.length <= 1) return elements;
-@@ -5690,9 +5709,9 @@ function sortDOMElements(container, indexByElement) {
+@@ -5690,9 +5722,9 @@ function sortDOMElements(container, indexByElement) {
          }
        }
        if (nextStableElement) {
@@ -1714,7 +1977,7 @@ index 914d2dafaafa001c9ab6791a0a0581659295e333..087a57b6ae6a1248928fe634721e5e3d
        }
      }
    }
-@@ -6446,8 +6465,8 @@ function ScrollAdjust() {
+@@ -6446,8 +6478,8 @@ function ScrollAdjust() {
                window.getComputedStyle(contentNode)[axis.paddingEndProp]
              );
              const temporaryPaddingEnd = `${(currentPaddingEnd || 0) + pad}px`;
@@ -1724,7 +1987,7 @@ index 914d2dafaafa001c9ab6791a0a0581659295e333..087a57b6ae6a1248928fe634721e5e3d
              void contentNode.offsetHeight;
              scrollBy();
              if (resetPaddingRafRef.current !== void 0) {
-@@ -7385,6 +7404,7 @@ function createImperativeHandle(ctx, scheduleImperativeScrollCommit) {
+@@ -7385,6 +7417,7 @@ function createImperativeHandle(ctx, scheduleImperativeScrollCommit) {
      getScrollResponder: () => refScroller.current.getScrollResponder(),
      getState: () => ({
        activeStickyIndex: peek$(ctx, "activeStickyIndex"),
@@ -1733,9 +1996,18 @@ index 914d2dafaafa001c9ab6791a0a0581659295e333..087a57b6ae6a1248928fe634721e5e3d
        data: state.props.data,
        elementAtIndex: (index) => {
 diff --git a/react.mjs b/react.mjs
-index 95465f2ab89ce41a10553f58af83618f7310e83c..39c0cabf627fbac76839ebcee5ad8d813aac44c3 100644
+index 95465f2ab89ce41a10553f58af83618f7310e83c..f7bd4847eb63c7658b8c070e60006744358ef9df 100644
 --- a/react.mjs
 +++ b/react.mjs
+@@ -4322,7 +4322,7 @@ function calculateItemsInView(ctx, params = {}) {
+     const optimizeForVisibleWindow = !forceFullItemPositions && !dataChanged && numColumns > 1 && minIndexSizeChanged !== void 0;
+     updateItemPositions(ctx, dataChanged, {
+       doMVCP,
+-      forceFullUpdate: !!forceFullItemPositions,
++      forceFullUpdate: !!forceFullItemPositions || minIndexSizeChanged !== void 0,
+       optimizeForVisibleWindow,
+       scrollBottomBuffered,
+       scrollVelocity: speed,
 @@ -4681,7 +4681,8 @@ function maybeUpdateAnchoredEndSpace(ctx) {
        contentBelowAnchor = Math.max(0, contentBelowAnchor - ctx.scrollAxisGap);
        contentBelowAnchor += (ctx.values.get("footerSize") || 0) + getStylePaddingEnd(state.props);
@@ -1759,16 +2031,86 @@ index 95465f2ab89ce41a10553f58af83618f7310e83c..39c0cabf627fbac76839ebcee5ad8d81
    }
    return nextSize;
  }
-@@ -5327,7 +5327,7 @@
-         top: entry.contentRect.top,
-         width: borderBoxSize.inlineSize
-       } : (_a4 = target == null ? void 0 : target.getBoundingClientRect()) != null ? _a4 : entry.contentRect;
+@@ -4937,6 +4944,7 @@ function measureContainersInLayoutEffect(ctx, targetContainerIds = null) {
+     if (itemKey !== void 0 && element) {
+       const rect = element.getBoundingClientRect();
+       setContainerLayoutBaseline(element, rect);
++      resyncResizeObserver(element, rect);
+       measurements.push({
+         containerId,
+         itemKey,
+@@ -5249,14 +5257,37 @@ function Separator({ ItemSeparatorComponent, leadingItem }) {
+ // src/hooks/createResizeObserver.ts
+ var globalResizeObserver = null;
++var resizeObserverRects = /* @__PURE__ */ new WeakMap();
++var forcedResizeObservations = /* @__PURE__ */ new WeakSet();
++function getResizeObserverRect(entry) {
++  const target = entry.target instanceof HTMLElement ? entry.target : void 0;
++  const borderBoxSize = Array.isArray(entry.borderBoxSize) ? entry.borderBoxSize[0] : entry.borderBoxSize;
++  return borderBoxSize ? {
++    height: borderBoxSize.blockSize,
++    left: entry.contentRect.left,
++    top: entry.contentRect.top,
++    width: borderBoxSize.inlineSize
++  } : target ? target.getBoundingClientRect() : entry.contentRect;
++}
++function resyncResizeObserver(element, rect) {
++  const observed = resizeObserverRects.get(element);
++  if (observed && callbackMap.has(element) && (Math.round(observed.height) !== Math.round(rect.height) || Math.round(observed.width) !== Math.round(rect.width))) {
++    forcedResizeObservations.add(element);
++    const observer = getGlobalResizeObserver();
++    observer.unobserve(element);
++    observer.observe(element, { box: "border-box" });
++  }
++}
+ function getGlobalResizeObserver() {
+   if (!globalResizeObserver) {
+     globalResizeObserver = new ResizeObserver((entries) => {
+       batchItemSizeUpdates(() => {
+         for (const entry of entries) {
++          resizeObserverRects.set(entry.target, getResizeObserverRect(entry));
++          const forceLayout = forcedResizeObservations.delete(entry.target);
+           const callbacks = callbackMap.get(entry.target);
+           if (callbacks) {
+             for (const callback of callbacks) {
+-              callback(entry);
++              callback(entry, forceLayout);
+             }
+           }
+         }
+@@ -5283,6 +5314,8 @@ function createResizeObserver(element, callback) {
+     callbacks.delete(callback);
+     if (callbacks.size === 0) {
+       callbackMap.delete(element);
++      resizeObserverRects.delete(element);
++      forcedResizeObservations.delete(element);
+       observer.unobserve(element);
+     }
+   };
+@@ -5317,18 +5350,10 @@ function useOnLayoutSync({
+       emit(toLayout(rect), true);
+       prevRect = rect;
+     }
+-    return createResizeObserver(element, (entry) => {
+-      var _a4;
+-      const target = entry.target instanceof HTMLElement ? entry.target : void 0;
+-      const borderBoxSize = Array.isArray(entry.borderBoxSize) ? entry.borderBoxSize[0] : entry.borderBoxSize;
+-      const rectObserved = borderBoxSize ? {
+-        height: borderBoxSize.blockSize,
+-        left: entry.contentRect.left,
+-        top: entry.contentRect.top,
+-        width: borderBoxSize.inlineSize
+-      } : (_a4 = target == null ? void 0 : target.getBoundingClientRect()) != null ? _a4 : entry.contentRect;
 -      const previousRect = prevRect != null ? prevRect : getContainerLayoutBaseline(element);
+-      const didSizeChange = previousRect === void 0 || rectObserved.width !== previousRect.width || rectObserved.height !== previousRect.height;
++    return createResizeObserver(element, (entry, forceLayout) => {
++      const rectObserved = getResizeObserverRect(entry);
 +      const previousRect = prevRect;
-       const didSizeChange = previousRect === void 0 || rectObserved.width !== previousRect.width || rectObserved.height !== previousRect.height;
++      const didSizeChange = forceLayout || previousRect === void 0 || rectObserved.width !== previousRect.width || rectObserved.height !== previousRect.height;
        prevRect = rectObserved;
        const shouldResyncLayout = !!(webLayoutResync == null ? void 0 : webLayoutResync());
-@@ -5394,11 +5394,6 @@
+       if (didSizeChange || shouldResyncLayout) {
+@@ -5394,11 +5419,6 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
      scheduleWebShrinkMeasurement(state, () => {
        var _a4;
        if (state.itemKey === currentItemKey) {
@@ -1780,7 +2122,7 @@ index 95465f2ab89ce41a10553f58af83618f7310e83c..39c0cabf627fbac76839ebcee5ad8d81
          applyLayout();
        }
      });
-@@ -5453,7 +5455,7 @@
+@@ -5453,7 +5473,7 @@ function useContainerMeasurement({
    });
    const { onLayout } = useOnLayoutSync(
      {
@@ -1789,7 +2131,7 @@ index 95465f2ab89ce41a10553f58af83618f7310e83c..39c0cabf627fbac76839ebcee5ad8d81
        onLayoutChange,
        ref,
        webLayoutResync: () => isInMVCPActiveMode(ctx.state)
-@@ -5630,6 +5639,18 @@ var ContainerSlot = typedMemo(function ContainerSlot2(props) {
+@@ -5630,6 +5650,18 @@ var ContainerSlot = typedMemo(function ContainerSlot2(props) {
  });
  
  // src/utils/reordering.ts
@@ -1808,7 +2150,7 @@ index 95465f2ab89ce41a10553f58af83618f7310e83c..39c0cabf627fbac76839ebcee5ad8d81
  function sortDOMElements(container, indexByElement) {
    const elements = Array.from(container.children);
    if (elements.length <= 1) return elements;
-@@ -5669,9 +5688,9 @@ function sortDOMElements(container, indexByElement) {
+@@ -5669,9 +5701,9 @@ function sortDOMElements(container, indexByElement) {
          }
        }
        if (nextStableElement) {
@@ -1820,7 +2162,7 @@ index 95465f2ab89ce41a10553f58af83618f7310e83c..39c0cabf627fbac76839ebcee5ad8d81
        }
      }
    }
-@@ -6425,8 +6444,8 @@ function ScrollAdjust() {
+@@ -6425,8 +6457,8 @@ function ScrollAdjust() {
                window.getComputedStyle(contentNode)[axis.paddingEndProp]
              );
              const temporaryPaddingEnd = `${(currentPaddingEnd || 0) + pad}px`;
@@ -1830,7 +2172,7 @@ index 95465f2ab89ce41a10553f58af83618f7310e83c..39c0cabf627fbac76839ebcee5ad8d81
              void contentNode.offsetHeight;
              scrollBy();
              if (resetPaddingRafRef.current !== void 0) {
-@@ -7364,6 +7383,7 @@ function createImperativeHandle(ctx, scheduleImperativeScrollCommit) {
+@@ -7364,6 +7396,7 @@ function createImperativeHandle(ctx, scheduleImperativeScrollCommit) {
      getScrollResponder: () => refScroller.current.getScrollResponder(),
      getState: () => ({
        activeStickyIndex: peek$(ctx, "activeStickyIndex"),

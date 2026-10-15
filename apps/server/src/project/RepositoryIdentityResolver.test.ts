@@ -1,8 +1,8 @@
-import { SourceControlProviderKind } from "@supacode/contracts";
+import { SourceControlProviderKind } from "@supaterm/contracts";
 // @effect-diagnostics nodeBuiltinImport:off - realpathSync.native resolves Windows 8.3 short names, which the Effect realPath does not.
 import * as NodeFS from "node:fs";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { SourceControlProviderError } from "@supacode/contracts";
+import { SourceControlProviderError } from "@supaterm/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -129,6 +129,36 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
     }).pipe(Effect.provide(Layer.merge(TestClock.layer(), layerResolver)));
   });
 
+  it.effect("resolves a remote annotated by Git partial-clone metadata", () => {
+    const layerProcessRunner = Layer.succeed(ProcessRunner.ProcessRunner, {
+      run: (input) =>
+        Effect.succeed({
+          stdout: input.args.includes("rev-parse")
+            ? "/repo\n"
+            : "origin\thttps://github.com/acme/repo.git (fetch) [blob:none]\n",
+          stderr: "",
+          code: ChildProcessSpawner.ExitCode(0),
+          timedOut: false,
+          stdoutTruncated: false,
+          stderrTruncated: false,
+          stdoutInvalidUtf8: false,
+          stderrInvalidUtf8: false,
+        }),
+    });
+    const layerResolver = Layer.effect(
+      RepositoryIdentityResolver.RepositoryIdentityResolver,
+      RepositoryIdentityResolver.make(),
+    ).pipe(Layer.provide(layerProcessRunner));
+
+    return Effect.gen(function* () {
+      const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+      const identity = yield* resolver.resolve("/repo");
+
+      expect(identity?.canonicalKey).toBe("github.com/acme/repo");
+      expect(identity?.locator.remoteName).toBe("origin");
+    }).pipe(Effect.provide(layerResolver));
+  });
+
   it.effect("retries Git root discovery after the negative TTL", () => {
     const calls: Array<ReadonlyArray<string>> = [];
     let rootAttempts = 0;
@@ -179,7 +209,7 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const cwd = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "supacode-repository-identity-test-",
+        prefix: "supaterm-repository-identity-test-",
       });
 
       yield* git(cwd, ["init"]);
@@ -208,7 +238,7 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const repoRoot = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "supacode-repository-identity-nested-root-test-",
+        prefix: "supaterm-repository-identity-nested-root-test-",
       });
       const nestedWorkspace = path.join(repoRoot, "packages", "web");
 
@@ -239,10 +269,10 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const nonGitDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "supacode-repository-identity-non-git-",
+        prefix: "supaterm-repository-identity-non-git-",
       });
       const gitDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "supacode-repository-identity-no-remote-",
+        prefix: "supaterm-repository-identity-no-remote-",
       });
 
       yield* git(gitDir, ["init"]);
@@ -262,11 +292,11 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const cwd = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "supacode-repository-identity-upstream-test-",
+          prefix: "supaterm-repository-identity-upstream-test-",
         });
 
         yield* git(cwd, ["init"]);
-        yield* git(cwd, ["remote", "add", "origin", "git@github.com:julius/supacode.git"]);
+        yield* git(cwd, ["remote", "add", "origin", "git@github.com:julius/supaterm.git"]);
         if (change === "replace") {
           yield* git(cwd, ["remote", "add", "upstream", "git@github.com:SupabitApp/previous.git"]);
         }
@@ -274,7 +304,7 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
         const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
         const initialIdentity = yield* resolver.resolve(cwd);
         expect(initialIdentity?.canonicalKey).toBe(
-          change === "add" ? "github.com/julius/supacode" : "github.com/supabitapp/previous",
+          change === "add" ? "github.com/julius/supaterm" : "github.com/supabitapp/previous",
         );
 
         yield* git(cwd, [
@@ -298,11 +328,11 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const cwd = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "supacode-repository-identity-fork-test-",
+        prefix: "supaterm-repository-identity-fork-test-",
       });
 
       yield* git(cwd, ["init"]);
-      yield* git(cwd, ["remote", "add", "origin", "git@github.com:julius/supacode-fork.git"]);
+      yield* git(cwd, ["remote", "add", "origin", "git@github.com:julius/supaterm-fork.git"]);
       yield* git(cwd, ["remote", "add", "upstream", "git@github.com:supabitapp/supacode-next.git"]);
 
       const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
@@ -311,8 +341,8 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
       expect(identity?.canonicalKey).toBe("github.com/supabitapp/supacode-next");
       expect(identity?.displayName).toBe("supabitapp/supacode-next");
       expect(identity?.origin).toEqual({
-        canonicalKey: "github.com/julius/supacode-fork",
-        displayName: "julius/supacode-fork",
+        canonicalKey: "github.com/julius/supaterm-fork",
+        displayName: "julius/supaterm-fork",
       });
     }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
   );
@@ -321,20 +351,20 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const cwd = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "supacode-repository-identity-nested-group-test-",
+        prefix: "supaterm-repository-identity-nested-group-test-",
       });
 
       yield* git(cwd, ["init"]);
-      yield* git(cwd, ["remote", "add", "origin", "git@gitlab.com:Supacode/platform/supacode.git"]);
+      yield* git(cwd, ["remote", "add", "origin", "git@gitlab.com:Supaterm/platform/supaterm.git"]);
 
       const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
       const identity = yield* resolver.resolve(cwd);
 
       expect(identity).not.toBeNull();
-      expect(identity?.canonicalKey).toBe("gitlab.com/supacode/platform/supacode");
-      expect(identity?.displayName).toBe("supacode/platform/supacode");
-      expect(identity?.owner).toBe("supacode");
-      expect(identity?.name).toBe("supacode");
+      expect(identity?.canonicalKey).toBe("gitlab.com/supaterm/platform/supaterm");
+      expect(identity?.displayName).toBe("supaterm/platform/supaterm");
+      expect(identity?.owner).toBe("supaterm");
+      expect(identity?.name).toBe("supaterm");
     }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
   );
 
@@ -344,7 +374,7 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const cwd = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "supacode-repository-identity-late-remote-test-",
+          prefix: "supaterm-repository-identity-late-remote-test-",
         });
 
         yield* git(cwd, ["init"]);
@@ -383,16 +413,16 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const cwd = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "supacode-repository-identity-remote-change-test-",
+        prefix: "supaterm-repository-identity-remote-change-test-",
       });
 
       yield* git(cwd, ["init"]);
-      yield* git(cwd, ["remote", "add", "origin", "git@github.com:SupabitApp/supacode.git"]);
+      yield* git(cwd, ["remote", "add", "origin", "git@github.com:SupabitApp/supaterm.git"]);
 
       const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
       const initialIdentity = yield* resolver.resolve(cwd);
       expect(initialIdentity).not.toBeNull();
-      expect(initialIdentity?.canonicalKey).toBe("github.com/supabitapp/supacode");
+      expect(initialIdentity?.canonicalKey).toBe("github.com/supabitapp/supaterm");
 
       yield* git(cwd, [
         "remote",
@@ -403,7 +433,7 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
 
       const cachedIdentity = yield* resolver.resolve(cwd);
       expect(cachedIdentity).not.toBeNull();
-      expect(cachedIdentity?.canonicalKey).toBe("github.com/supabitapp/supacode");
+      expect(cachedIdentity?.canonicalKey).toBe("github.com/supabitapp/supaterm");
 
       yield* TestClock.adjust(Duration.millis(180));
 

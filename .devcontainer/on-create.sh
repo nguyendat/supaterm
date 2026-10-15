@@ -7,7 +7,7 @@ fi
 
 export PATH="$HOME/.local/bin:$PATH"
 sudo ln -sf "$(command -v mise)" /usr/local/bin/mise
-mise install --locked
+mise install
 mise reshim
 
 activation='eval "$(mise activate bash)"'
@@ -18,7 +18,7 @@ fi
 # First-run terminal notice, rendered by the devcontainers base image.
 sudo mkdir -p /usr/local/etc/vscode-dev-containers
 sudo tee /usr/local/etc/vscode-dev-containers/first-run-notice.txt >/dev/null <<'EOF'
-Supacode devcontainer
+Supaterm devcontainer
 
   vp run dev            start server + web, then open the pairing URL it
                         prints (the bare forwarded port will not authenticate)

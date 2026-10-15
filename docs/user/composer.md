@@ -46,7 +46,7 @@ file upload before sending still requires you to attach that file again.
 You can drag or paste images into the web or desktop composer. HEIC and HEIF
 photos are converted to JPEG there and when selected from the mobile photo
 library; photos over the image limit are also resized to fit. On mobile, you can
-also send files to Supacode through another app's system share sheet.
+also send files to Supaterm through another app's system share sheet.
 
 See [images and videos](#images-and-videos-in-messages) for previewing and saving media.
 
@@ -81,11 +81,11 @@ you have already opened. Pending messages and their attachments survive app rest
 and send automatically after reconnecting.
 
 Edit or cancel a pending message before delivery starts. If a connection drops during
-sending, Supacode keeps that message until it can confirm delivery. Approvals and
+sending, Supaterm keeps that message until it can confirm delivery. Approvals and
 question answers require a live connection.
 
 Mobile also keeps local copies of draft attachments. When an offline worktree task's
-base branch is unavailable, Supacode uses the repository's default branch after
+base branch is unavailable, Supaterm uses the repository's default branch after
 reconnecting, or its current branch when no default is available. An explicit branch
 choice stays selected.
 
@@ -95,9 +95,24 @@ On web and desktop, use Settings → Providers → **Models** to add an unlisted
 name and options. Only options supported by the provider integration affect turns. Antigravity
 uses its account catalog and does not support custom models.
 
+To rename a built-in model on every client, edit the server's `settings.json` in its `userdata`
+directory. Add a custom model entry with the built-in model ID and a new name under that provider
+instance:
+
+```json
+{
+  "providerInstances": {
+    "codex": {
+      "driver": "codex",
+      "config": { "customModels": [{ "slug": "gpt-5.5", "name": "Team GPT" }] }
+    }
+  }
+}
+```
+
 ## Model defaults
 
-Supacode remembers your provider, model, and model options for new threads. A
+Supaterm remembers your provider, model, and model options for new threads. A
 project's configured model takes precedence; resetting that project setting
 returns to the remembered selection.
 
@@ -165,14 +180,16 @@ and use **Attach again** or remove the missing file before sending.
 
 ## Voice input on iPhone
 
-On supported iPhones with iOS 26 or later, use the composer's microphone to record,
-then confirm to transcribe. Text is inserted where your selection was when
-recording started, ready for you to review and edit before sending.
+On supported iPhones with iOS 26 or later, use the composer's microphone to record.
+Stop to transcribe and review the text, or tap the up arrow to transcribe and send.
+Text is inserted where your selection was when recording started. In scheduled-task
+prompts, confirming only updates the draft; save the schedule separately.
 
 The first use may download Apple's speech model and needs a network connection.
 Later transcription works offline for that language. Recordings can be up to five
-minutes long. Canceling, leaving the screen, or an audio interruption discards the
-recording and preserves your existing draft. While recording, the screen stays
+minutes long. Canceling or an audio interruption discards the recording and preserves
+your existing draft. Leaving the screen keeps dictation available in the floating
+control, but cancels a pending send. While recording, the screen stays
 awake; it can sleep normally once recording stops.
 
 Voice input records from the first connected microphone in **Settings → Microphone**.
@@ -182,7 +199,7 @@ for example, put **Other Bluetooth** above your AirPods so a new headset is pref
 while the AirPods microphone stays low. By default, CarPlay comes after the built-in
 microphone.
 
-Transcription runs on your device. Supacode deletes the temporary audio after
+Transcription runs on your device. Supaterm deletes the temporary audio after
 transcription or cancellation; only the message text is sent when you submit.
 
 ## Queued messages
@@ -225,11 +242,11 @@ menu**, which also stops `/` from suggesting skills later in a message. It is in
 **Settings → General** on web and desktop, and **Settings → Thread behavior** on
 mobile. Only skills enabled for the provider are listed.
 
-To install Supacode's optional `supacode-advisor` and `supacode-commitee` skills,
+To install Supaterm's optional `supaterm-advisor` and `supaterm-commitee` skills,
 choose **Install** in **Settings → Integrations → Orchestration skills**
 on web and desktop, or **Settings → Agent behavior** on mobile. Nothing installs
 automatically. Installation applies to all projects on the selected connected
-environments and links the providers' native skill folders to Supacode's bundled skills.
+environments and links the providers' native skill folders to Supaterm's bundled skills.
 With **All environments** selected, offline environments are skipped; reconnect
 and install again to include them.
 Installed skills update when the updated app starts. Use **Uninstall** to
@@ -289,7 +306,7 @@ exist only as chips: deleting a file's last chip removes the file from the messa
 Copy text that holds chips and paste it into another draft, in the same thread or another one,
 and the chips come along with what they point to. Images and files are fetched again from the
 environment they came from; while that happens the chip shows a dashed outline, and if it cannot
-complete Supacode tells you and leaves the chip for you to remove or replace. A chip whose
+complete Supaterm tells you and leaves the chip for you to remove or replace. A chip whose
 context is no longer available shows the same dashed outline; hover it for what to do.
 
 Copying a message with the copy button, or copying text out of it, gives other apps readable
@@ -336,7 +353,7 @@ styles, or images from neighboring files.
 
 On web and desktop, HTML and PDF files open as rendered pages. Switch an HTML
 file to source view to read its markup; a link to a specific line opens source
-automatically. HTML previews cannot access your Supacode session.
+automatically. HTML previews cannot access your Supaterm session.
 
 The file viewer recognizes images, HTML, and PDF files by their filename extension,
 including filenames or folders containing `#` or `?`.

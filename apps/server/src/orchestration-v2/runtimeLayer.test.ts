@@ -1,6 +1,6 @@
-import { SourceControlProviderKind } from "@supacode/contracts";
+import { SourceControlProviderKind } from "@supaterm/contracts";
 import { limitRecoveryCommand } from "./UsageLimitRecoveryWorker.ts";
-import * as McpProviderSessions from "@supacode/provider-core/server/McpProviderSessions";
+import * as McpProviderSessions from "@supaterm/provider-core/server/McpProviderSessions";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -19,6 +19,7 @@ import {
   type ModelSelection,
   type OrchestrationV2Run,
   ProjectId,
+  type PullRequestCheckStatus,
   type PullRequestDetail,
   type PullRequestComment,
   PullRequestOperationError,
@@ -28,7 +29,7 @@ import {
   ProviderTurnId,
   RunId,
   ThreadId,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -52,7 +53,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistryTestkit from "../mcp/McpSessionRegistry.testkit.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
-import type { ProviderInstance } from "@supacode/provider-core/server/driver";
+import type { ProviderInstance } from "@supaterm/provider-core/server/driver";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
@@ -66,7 +67,8 @@ import * as ProviderRuntimeRecoveryService from "./ProviderRuntimeRecoveryServic
 import * as ProjectionMaintenance from "./ProjectionMaintenance.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as PullRequestWatchReactor from "./PullRequestWatchReactor.ts";
-import { PullRequestProviderError } from "@supacode/source-control-core/server/PullRequestProvider";
+import * as WorkflowRunWatchReactor from "./WorkflowRunWatchReactor.ts";
+import { PullRequestProviderError } from "@supaterm/source-control-core/server/PullRequestProvider";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
@@ -75,7 +77,7 @@ import { shellStreamItemFromThreadShell } from "./ShellStream.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
-import type * as ProviderAdapter from "@supacode/provider-core/server/ProviderAdapter";
+import type * as ProviderAdapter from "@supaterm/provider-core/server/ProviderAdapter";
 
 const layerPlatformTest = Layer.merge(
   NodeServices.layer,
@@ -85,7 +87,7 @@ const layerPlatformTest = Layer.merge(
 );
 
 const layerServerConfig = ServerConfig.layerTest(process.cwd(), {
-  prefix: "supacode-orchestration-v2-runtime-layer-",
+  prefix: "supaterm-orchestration-v2-runtime-layer-",
 });
 
 const modelSelection = {
@@ -550,7 +552,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
         interactionMode: "default",
         branch: null,
         // Its own path, so other rollback tests keep an isolated worktree.
-        worktreePath: `/tmp/supacode-${name}`,
+        worktreePath: `/tmp/supaterm-${name}`,
       });
       yield* orchestrator.dispatch({
         type: "message.dispatch",
@@ -583,7 +585,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
               parentCheckpointId: null,
               ordinalWithinScope: 0,
               appRunOrdinal: null,
-              ref: CheckpointRef.make(`refs/supacode/${name}`),
+              ref: CheckpointRef.make(`refs/supaterm/${name}`),
               status: "ready",
               files: [],
               capturedAt: now,
@@ -735,7 +737,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive", (it) => {
                 parentCheckpointId: null,
                 ordinalWithinScope: 0,
                 appRunOrdinal: null,
-                ref: CheckpointRef.make(`refs/supacode/runtime-rollback-${status}`),
+                ref: CheckpointRef.make(`refs/supaterm/runtime-rollback-${status}`),
                 status,
                 files: [],
                 capturedAt: now,
@@ -1721,7 +1723,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         threadId,
         title: "Renamed lifecycle thread",
         branch: "feature/v2",
-        worktreePath: "/tmp/supacode-v2-worktree",
+        worktreePath: "/tmp/supaterm-v2-worktree",
       });
       const staleWorkspaceUpdate = yield* orchestrator
         .dispatch({
@@ -1738,7 +1740,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       assert.equal(projectionAfterStaleWorkspaceUpdate.thread.branch, "feature/v2");
       assert.equal(
         projectionAfterStaleWorkspaceUpdate.thread.worktreePath,
-        "/tmp/supacode-v2-worktree",
+        "/tmp/supaterm-v2-worktree",
       );
       const pullRequestSnapshot = yield* orchestrator.getShellSnapshot();
       const pullRequest = {
@@ -1758,7 +1760,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           expected: {
             workspaceRoot: "/workspace/project",
             branch: "feature/v2",
-            worktreePath: "/tmp/supacode-v2-worktree",
+            worktreePath: "/tmp/supaterm-v2-worktree",
             linkedPullRequest: null,
             branchPullRequest: null,
           },
@@ -1776,7 +1778,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         expected: {
           workspaceRoot: "/workspace/project",
           branch: "feature/v2",
-          worktreePath: "/tmp/supacode-v2-worktree",
+          worktreePath: "/tmp/supaterm-v2-worktree",
           linkedPullRequest: null,
           branchPullRequest: null,
         },
@@ -1796,7 +1798,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           expected: {
             workspaceRoot: "/workspace/project",
             branch: "feature/v2",
-            worktreePath: "/tmp/supacode-v2-worktree",
+            worktreePath: "/tmp/supaterm-v2-worktree",
             linkedPullRequest: null,
             branchPullRequest: null,
           },
@@ -1964,7 +1966,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       const projection = yield* orchestrator.getThreadProjection(threadId);
       assert.equal(projection.thread.title, "Renamed lifecycle thread");
       assert.equal(projection.thread.branch, "feature/v2");
-      assert.equal(projection.thread.worktreePath, "/tmp/supacode-v2-worktree");
+      assert.equal(projection.thread.worktreePath, "/tmp/supaterm-v2-worktree");
       assert.equal(projection.thread.runtimeMode, "approval-required");
       assert.equal(projection.thread.interactionMode, "plan");
       assert.equal(projection.thread.modelSelection.model, "gpt-5.5");
@@ -2473,6 +2475,275 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         threadId,
       });
       assert.isFalse(yield* watched);
+    }),
+  );
+
+  it.effect("watches a workflow run until it completes, then wakes the agent once", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const threadId = ThreadId.make("runtime-workflow-run-watch");
+      const projectId = ProjectId.make("run-watch-project");
+      yield* seedProject({
+        projectId,
+        title: "Watch a run",
+        workspaceRoot: "/workspace/run-watch",
+        defaultModelSelection: null,
+        createdAt: "2026-10-01T00:00:00.000Z",
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("run-watch-create"),
+        threadId,
+        projectId,
+        title: "Watch a run",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+      });
+      const run = { host: "github.com", repository: "supabitapp/supacode-next", runId: 42 };
+      const url = "https://github.com/supabitapp/supacode-next/actions/runs/42";
+      yield* orchestrator.dispatch({
+        type: "thread.workflow-run-watch.start",
+        commandId: CommandId.make("run-watch-start"),
+        threadId,
+        ...run,
+        name: "Release",
+        url,
+      });
+      assert.deepEqual((yield* orchestrator.getThreadShell(threadId))?.pendingBackgroundTasks, [
+        {
+          taskId: "workflow-run-watch:github.com/supabitapp/supacode-next#42",
+          description: "Watching Release run",
+          kind: "monitor",
+        },
+      ]);
+
+      let status: "pending" | "failure" = "pending";
+      const reads: Array<unknown> = [];
+      const job = (name: string, jobStatus: PullRequestCheckStatus) => ({
+        name,
+        status: jobStatus,
+        description: null,
+        url: null,
+      });
+      const reactor = yield* WorkflowRunWatchReactor.make.pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            NodeServices.layer,
+            Layer.mock(PullRequestService.PullRequestService)({
+              workflowRun: (input) =>
+                Effect.sync(() => {
+                  reads.push(input);
+                  return {
+                    ...run,
+                    name: "Release",
+                    url,
+                    status,
+                    checks: [
+                      job("Lint", "success"),
+                      job("Mobile preview ios", status === "pending" ? "pending" : "failure"),
+                      job("Deploy", "skipped"),
+                    ],
+                  };
+                }),
+            }),
+          ),
+        ),
+      );
+      const watches = Effect.map(
+        orchestrator.getThreadProjection(threadId),
+        (projection) => projection.thread.workflowRunWatches ?? [],
+      );
+
+      yield* reactor.sweep;
+      assert.lengthOf(yield* watches, 1);
+      status = "failure";
+      yield* reactor.sweep;
+      yield* reactor.sweep;
+
+      assert.deepEqual(yield* watches, []);
+      assert.deepEqual(reads, [
+        { projectId, ...run },
+        { projectId, ...run },
+      ]);
+      const { messages } = yield* orchestrator.getThreadRecords(threadId, ["messages"]);
+      assert.deepEqual(
+        messages.map((message) => message.notification?.summary),
+        ["Release failed"],
+      );
+      assert.include(messages[0]?.text, "- Failed: Mobile preview ios");
+      assert.include(messages[0]?.text, "- Skipped: Deploy");
+      assert.include(messages[0]?.text, "- Passed: 1 job");
+    }),
+  );
+
+  it.effect("stops watching a run it cannot read, or that outlives six hours, and says so", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const threadId = ThreadId.make("runtime-workflow-run-watch-stops");
+      const projectId = ProjectId.make("run-watch-stops-project");
+      yield* seedProject({
+        projectId,
+        title: "Watch stops",
+        workspaceRoot: "/workspace/run-watch-stops",
+        defaultModelSelection: null,
+        createdAt: "2026-10-01T00:00:00.000Z",
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("run-watch-stops-create"),
+        threadId,
+        projectId,
+        title: "Watch stops",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+      });
+      const names = { 1: "Unreadable", 2: "Unsupported", 3: "Stuck" } as const;
+      for (const runId of [1, 2, 3] as const) {
+        yield* orchestrator.dispatch({
+          type: "thread.workflow-run-watch.start",
+          commandId: CommandId.make(`run-watch-stops-start-${runId}`),
+          threadId,
+          host: "github.com",
+          repository: "supabitapp/supacode-next",
+          runId,
+          name: names[runId],
+          url: null,
+        });
+      }
+      const reactor = yield* WorkflowRunWatchReactor.make.pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            NodeServices.layer,
+            Layer.mock(PullRequestService.PullRequestService)({
+              workflowRun: (input) =>
+                input.runId === 1
+                  ? Effect.die("host unreachable")
+                  : Effect.succeed(
+                      input.runId === 2
+                        ? null
+                        : {
+                            host: "github.com",
+                            repository: "supabitapp/supacode-next",
+                            name: "Stuck",
+                            url: null,
+                            status: "pending" as const,
+                            checks: [],
+                          },
+                    ),
+            }),
+          ),
+        ),
+      );
+      const watched = Effect.map(orchestrator.getThreadProjection(threadId), (projection) =>
+        (projection.thread.workflowRunWatches ?? []).map((watch) => watch.runId),
+      );
+      const summaries = Effect.map(
+        orchestrator.getThreadRecords(threadId, ["messages"]),
+        ({ messages }) => messages.flatMap((message) => message.notification?.summary ?? []),
+      );
+
+      yield* reactor.sweep;
+      assert.deepEqual(yield* watched, [1, 3]);
+      for (let pass = 1; pass < 8; pass += 1) yield* reactor.sweep;
+      assert.deepEqual(yield* watched, [3]);
+      yield* TestClock.adjust("6 hours");
+      yield* reactor.sweep;
+      assert.deepEqual(yield* watched, []);
+      assert.deepEqual(yield* summaries, [
+        "Unsupported: stopped watching",
+        "Unreadable: stopped watching",
+        "Stuck: stopped watching",
+      ]);
+    }),
+  );
+
+  it.effect("ends a workflow run watch on unwatch and settle, and ignores a late end", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const threadId = ThreadId.make("runtime-workflow-run-watch-ends");
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("run-watch-ends-create"),
+        threadId,
+        projectId: ProjectId.make("run-watch-ends-project"),
+        title: "Watch ends",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+      });
+      const run = { host: "github.com", repository: "supabitapp/supacode-next", runId: 7 };
+      const watching = (commandId: string, on: boolean) =>
+        orchestrator.dispatch(
+          on
+            ? {
+                type: "thread.workflow-run-watch.start",
+                commandId: CommandId.make(commandId),
+                threadId,
+                ...run,
+                name: "CI",
+                url: null,
+              }
+            : {
+                type: "thread.workflow-run.unwatch",
+                commandId: CommandId.make(commandId),
+                threadId,
+                ...run,
+              },
+        );
+      const watches = Effect.map(
+        orchestrator.getThreadProjection(threadId),
+        (projection) => projection.thread.workflowRunWatches ?? [],
+      );
+
+      yield* watching("run-watch-ends-start", true);
+      const [started] = yield* watches;
+      assert.isDefined(started);
+      if (started === undefined) return;
+      yield* watching("run-watch-ends-stop", false);
+      assert.deepEqual(yield* watches, []);
+      // A completion read before the stop must neither wake the agent nor end a newer watch.
+      const late = yield* orchestrator
+        .dispatch({
+          type: "thread.workflow-run-watch.end",
+          commandId: CommandId.make("run-watch-ends-late"),
+          threadId,
+          ...run,
+          startedAt: started.startedAt,
+          wake: {
+            messageId: MessageId.make("run-watch-ends-late-wake"),
+            text: "Done",
+            notification: { source: { kind: "monitor" }, outcome: "completed", summary: "CI" },
+          },
+        })
+        .pipe(Effect.flip);
+      assert.equal(late._tag, "OrchestratorDispatchError");
+      const { messages } = yield* orchestrator.getThreadRecords(threadId, ["messages"]);
+      assert.deepEqual(messages, []);
+
+      yield* watching("run-watch-ends-restart", true);
+      assert.lengthOf(yield* watches, 1);
+      yield* orchestrator.dispatch({
+        type: "thread.settle",
+        commandId: CommandId.make("run-watch-ends-settle"),
+        threadId,
+      });
+      assert.deepEqual(yield* watches, []);
+      const refused = yield* watching("run-watch-ends-settled", true).pipe(Effect.flip);
+      assert.equal(refused._tag, "OrchestratorDispatchError");
     }),
   );
 
@@ -3225,7 +3496,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           notification: {
             source: { kind: "system" as const },
             outcome: "updated" as const,
-            summary: "Supacode restarted and resumed this turn",
+            summary: "Supaterm restarted and resumed this turn",
             detail: "Continue where you left off.",
           },
           attachments: [],
@@ -3247,7 +3518,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           continuationItems.flatMap((item) =>
             item.type === "notification" ? [[item.summary, item.detail]] : [],
           ),
-          ["Supacode restarted and resumed this turn", "Continue where you left off."],
+          ["Supaterm restarted and resumed this turn", "Continue where you left off."],
         );
         // A differently identified stale delivery still must not create another run.
         yield* orchestrator.dispatch({
@@ -3331,7 +3602,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           commandId: CommandId.make(`restart-${status}-continuation`),
           threadId,
           messageId: MessageId.make(`restart-${status}-continuation`),
-          text: "Note: the Supacode server restarted.",
+          text: "Note: the Supaterm server restarted.",
           attachments: [],
           modelSelection,
           dispatchMode: { type: "start_immediately" },
@@ -4615,6 +4886,51 @@ it.layer(layerSharedApplicationDataPlaneTest)("snooze projection", (it) => {
       const awakened = yield* orchestrator.getThreadProjection(threadId);
       assert.isNull(awakened.thread.snoozedUntil);
       assert.isNull(awakened.thread.snoozedAt);
+    }),
+  );
+
+  it.effect("clears snooze state when settling a snoozed thread", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const threadId = ThreadId.make("runtime-layer-settle-snoozed-thread");
+      const snoozedUntil = "2099-07-25T09:00:00.000Z";
+
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("runtime-layer-settle-snoozed-thread-create"),
+        threadId,
+        projectId: ProjectId.make("runtime-layer-settle-snoozed-project"),
+        title: "Settled snoozed thread",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.snooze",
+        commandId: CommandId.make("runtime-layer-settle-snoozed-thread-snooze"),
+        threadId,
+        snoozedUntil,
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.settle",
+        commandId: CommandId.make("runtime-layer-settle-snoozed-thread-settle"),
+        threadId,
+      });
+
+      const projection = yield* orchestrator.getThreadProjection(threadId);
+      assert.equal(projection.thread.settledOverride, "settled");
+      assert.isNull(projection.thread.snoozedUntil);
+      assert.isNull(projection.thread.snoozedAt);
+
+      const shell = yield* orchestrator.getShellSnapshot();
+      const settled = shell.threads.find((thread) => thread.id === threadId);
+      assert.isDefined(settled);
+      assert.isNull(settled.snoozedUntil);
+      assert.isNull(settled.snoozedAt);
     }),
   );
 });

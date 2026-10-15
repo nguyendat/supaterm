@@ -1,18 +1,18 @@
-import { worktreeSetupAgentStarted } from "@supacode/client-runtime/worktree-setup";
-export { worktreeSetupAgentStarted } from "@supacode/client-runtime/worktree-setup";
-import { isLiveSubagentTurnItem } from "@supacode/client-runtime/state/subagentRuntime";
+import { worktreeSetupAgentStarted } from "@supaterm/client-runtime/worktree-setup";
+export { worktreeSetupAgentStarted } from "@supaterm/client-runtime/worktree-setup";
+import { isLiveSubagentTurnItem } from "@supaterm/client-runtime/state/subagentRuntime";
 import * as DateTime from "effect/DateTime";
 import * as Equal from "effect/Equal";
 import {
   assistantCitationLabel,
   collectAssistantCitations,
-} from "@supacode/shared/assistantCitations";
+} from "@supaterm/shared/assistantCitations";
 import { shallow } from "zustand/vanilla/shallow";
-import { renderCodexDirectivesForCopy } from "@supacode/shared/codexMarkdownDirectives";
+import { renderCodexDirectivesForCopy } from "@supaterm/shared/codexMarkdownDirectives";
 import {
   commandDisplayText,
   commandProgramName,
-} from "@supacode/client-runtime/work-log/command-label";
+} from "@supaterm/client-runtime/work-log/command-label";
 import {
   latestToolGroupImage,
   type ToolGroupImage,
@@ -23,11 +23,11 @@ import {
   toolGroupAction,
   toolGroupSummaryKind,
   type ToolGroupSummaryKind,
-} from "@supacode/client-runtime/work-log/presentation";
+} from "@supaterm/client-runtime/work-log/presentation";
 export {
   normalizeCompactToolLabel,
   toolGroupAction,
-} from "@supacode/client-runtime/work-log/presentation";
+} from "@supaterm/client-runtime/work-log/presentation";
 import {
   deriveRevertTurnCountByUserMessageId,
   formatDuration,
@@ -55,24 +55,24 @@ import {
   RunId,
   type ThreadId,
   type TurnItemId,
-} from "@supacode/contracts";
-import type { ThreadRunSummary } from "@supacode/client-runtime/state/shell";
+} from "@supaterm/contracts";
+import type { ThreadRunSummary } from "@supaterm/client-runtime/state/shell";
 import {
-  resolveSupacodeMcpToolDefinition,
-  resolveSupacodeMcpToolPresentation,
-  type SupacodeMcpToolPresentation,
-} from "@supacode/shared/supacodeMcpToolPresentation";
-import { compactDynamicToolOutput } from "@supacode/shared/toolOutput";
-import { htmlRenderReferencesEqual, type HtmlRenderReference } from "@supacode/shared/htmlRender";
-import { mcpAppReferencesEqual, type McpAppReference } from "@supacode/shared/mcpApp";
-import { dynamicToolTitle } from "@supacode/shared/toolActivity";
+  resolveSupatermMcpToolDefinition,
+  resolveSupatermMcpToolPresentation,
+  type SupatermMcpToolPresentation,
+} from "@supaterm/shared/supatermMcpToolPresentation";
+import { compactDynamicToolOutput } from "@supaterm/shared/toolOutput";
+import { htmlRenderReferencesEqual, type HtmlRenderReference } from "@supaterm/shared/htmlRender";
+import { mcpAppReferencesEqual, type McpAppReference } from "@supaterm/shared/mcpApp";
+import { dynamicToolTitle } from "@supaterm/shared/toolActivity";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import {
   collectToolFilePaths,
   formatReadToolLabel,
   formatSearchToolLabel,
-} from "@supacode/shared/toolActivity";
-import { isWindowsAbsolutePath } from "@supacode/shared/path";
+} from "@supaterm/shared/toolActivity";
+import { isWindowsAbsolutePath } from "@supaterm/shared/path";
 
 function latestWorkGroupImage(entries: ReadonlyArray<WorkLogEntry>) {
   return latestToolGroupImage(
@@ -105,7 +105,8 @@ function singleToolCallLabel(entry: WorkLogEntry): string {
   const toolPresentation = resolveWorkEntryToolPresentation(entry, "completed");
   if (toolPresentation) return toolPresentation.displayName;
   const item = entry.structuredPayload;
-  const title = item?.type === "dynamic_tool" ? dynamicToolTitle(item.toolName, item.input) : null;
+  const title =
+    item?.type === "dynamic_tool" ? dynamicToolTitle(item.toolName, item.input, item.title) : null;
   if (title) return title;
   // A lone web search keeps its heading; the query stays in its detail.
   if (entry.itemType === "web_search") return entry.toolTitle ?? "Web search";
@@ -165,7 +166,8 @@ export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string
   const providerRetry =
     entry.projectedItem?.item.type === "error" && entry.projectedItem.item.retry !== undefined;
   const item = entry.structuredPayload;
-  const title = item?.type === "dynamic_tool" ? dynamicToolTitle(item.toolName, item.input) : null;
+  const title =
+    item?.type === "dynamic_tool" ? dynamicToolTitle(item.toolName, item.input, item.title) : null;
   if (title) return title;
   const compactDetail = entry.detail?.trim();
   const detailIsSearchOutput =
@@ -190,14 +192,14 @@ export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string
 export function threadReadTargetId(entry: Pick<WorkLogEntry, "structuredPayload">) {
   const item = entry.structuredPayload;
   if (item?.type !== "dynamic_tool") return null;
-  if (resolveSupacodeMcpToolDefinition(item.toolName)?.summaryAction !== "thread-read") return null;
+  if (resolveSupatermMcpToolDefinition(item.toolName)?.summaryAction !== "thread-read") return null;
   const input = item.input;
   const threadId =
     input !== null && typeof input === "object" && "threadId" in input ? input.threadId : null;
   return typeof threadId === "string" && threadId.trim().length > 0 ? threadId.trim() : null;
 }
 
-const THREAD_READ_OBJECT = " a Supacode thread";
+const THREAD_READ_OBJECT = " a Supaterm thread";
 
 export function threadReadTargetTitle(
   shell: Pick<ThreadShell, "title" | "archivedAt" | "deletedAt"> | null,
@@ -575,7 +577,7 @@ type MessagesTimelineRowContent =
       summaryKind: ToolGroupSummaryKind;
       toolSurface?: WorkLogEntry["toolSurface"];
       toolIcon?: WorkLogEntry["toolIcon"];
-      summaryToolIcon?: "browser" | "device" | "supacode" | "pull-request";
+      summaryToolIcon?: "browser" | "device" | "supaterm" | "pull-request";
       hasFailure: boolean;
     }
   | {
@@ -682,8 +684,8 @@ function workGroupId(timelineEntryId: string): string {
   return `work-group:${timelineEntryId}`;
 }
 
-export type TimelineToolPresentation = SupacodeMcpToolPresentation;
-export const resolveTimelineToolPresentation = resolveSupacodeMcpToolPresentation;
+export type TimelineToolPresentation = SupatermMcpToolPresentation;
+export const resolveTimelineToolPresentation = resolveSupatermMcpToolPresentation;
 
 function expandedWorkGroupRow(
   groupId: string,
@@ -1312,7 +1314,7 @@ function withoutSubagentDelegationRows(entries: ReadonlyArray<TimelineEntry>) {
       item?.type !== "dynamic_tool" ||
       item.runId === null ||
       (item.status !== "running" && item.status !== "completed") ||
-      resolveSupacodeMcpToolDefinition(item.toolName)?.summaryAction !== "delegate"
+      resolveSupatermMcpToolDefinition(item.toolName)?.summaryAction !== "delegate"
     )
       return true;
     const output = compactDynamicToolOutput(item.output);
@@ -1497,9 +1499,10 @@ export function deriveMessagesTimelineRows(input: {
       } else if ((entry.attempt?.id ?? null) !== tailAttemptId) {
         break;
       }
-      activeToolEntries.unshift(entry);
+      activeToolEntries.push(entry);
     }
   }
+  activeToolEntries.reverse();
   const visibleActiveToolEntries = activeToolEntries.filter((entry) =>
     workEntryIsVisibleInGroup(entry.entry, true),
   );

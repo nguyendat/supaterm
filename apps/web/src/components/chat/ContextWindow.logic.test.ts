@@ -1,4 +1,4 @@
-import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@supacode/contracts";
+import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@supaterm/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import {
@@ -102,10 +102,15 @@ describe("formatContextWindowCompactionMessage", () => {
 
 describe("shouldOfferResumeCompaction", () => {
   const now = "2026-08-24T12:00:00.000Z";
+  const session = {
+    selectedInstanceId: ProviderInstanceId.make("claudeAgent"),
+    sessionInstanceId: ProviderInstanceId.make("claudeAgent"),
+  };
 
   it("matches Claude's old-session age and context thresholds", () => {
     expect(
       shouldOfferResumeCompaction({
+        ...session,
         provider: "claudeAgent",
         usedTokens: 100_000,
         updatedAt: "2026-08-24T10:50:00.000Z",
@@ -117,6 +122,7 @@ describe("shouldOfferResumeCompaction", () => {
   it("does not prompt for recent or smaller sessions", () => {
     expect(
       shouldOfferResumeCompaction({
+        ...session,
         provider: "claudeAgent",
         usedTokens: 99_999,
         updatedAt: "2026-08-24T10:00:00.000Z",
@@ -125,6 +131,7 @@ describe("shouldOfferResumeCompaction", () => {
     ).toBe(false);
     expect(
       shouldOfferResumeCompaction({
+        ...session,
         provider: "claudeAgent",
         usedTokens: 200_000,
         updatedAt: "2026-08-24T10:51:00.000Z",
@@ -136,6 +143,7 @@ describe("shouldOfferResumeCompaction", () => {
   it("uses the reported prompt cache TTL instead of the fallback", () => {
     const offer = (updatedAt: string) =>
       shouldOfferResumeCompaction({
+        ...session,
         provider: "claudeAgent",
         usedTokens: 200_000,
         updatedAt,
@@ -149,6 +157,7 @@ describe("shouldOfferResumeCompaction", () => {
   it("does not show Claude's resume prompt for another provider", () => {
     expect(
       shouldOfferResumeCompaction({
+        ...session,
         provider: "codex",
         usedTokens: 300_000,
         updatedAt: "2026-08-24T09:00:00.000Z",
@@ -156,6 +165,23 @@ describe("shouldOfferResumeCompaction", () => {
       }),
     ).toBe(false);
   });
+
+  it.each(["codex", "claude-other", null])(
+    "does not compact when the selected model needs a handoff from session %s",
+    (sessionInstanceId) => {
+      expect(
+        shouldOfferResumeCompaction({
+          ...session,
+          sessionInstanceId:
+            sessionInstanceId === null ? null : ProviderInstanceId.make(sessionInstanceId),
+          provider: "claudeAgent",
+          usedTokens: 300_000,
+          updatedAt: "2026-08-24T09:00:00.000Z",
+          now,
+        }),
+      ).toBe(false);
+    },
+  );
 });
 
 describe("hasDismissedResumeCompaction", () => {

@@ -1,11 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useLinkTo } from "@react-navigation/native";
-import { type EnvironmentId, ThreadId } from "@supacode/contracts";
-import { threadNotificationAttention } from "@supacode/shared/threadNotificationAttention";
+import { type EnvironmentId, ThreadId } from "@supaterm/contracts";
+import { threadNotificationAttention } from "@supaterm/shared/threadNotificationAttention";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { PushNotificationError } from "@supacode/contracts/push";
+import { PushNotificationError } from "@supaterm/contracts/push";
 import * as Notifications from "expo-notifications";
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import { AppState, Platform } from "react-native";

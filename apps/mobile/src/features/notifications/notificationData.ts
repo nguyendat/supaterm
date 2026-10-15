@@ -1,4 +1,4 @@
-import { PushEnrollmentData, PushNotificationData } from "@supacode/contracts/push";
+import { PushEnrollmentData, PushNotificationData } from "@supaterm/contracts/push";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 

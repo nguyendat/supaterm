@@ -20,7 +20,7 @@ import {
   type OrchestrationV2ThreadLaunchInput,
   type OrchestrationV2ThreadProjection,
   type ProjectMutation,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -461,7 +461,7 @@ describe("V2 environment commands", () => {
     }).pipe(Effect.provide(layerTestCrypto)),
   );
 
-  it.effect("Stop with no run left ends the thread's pull request watches", () =>
+  it.effect("Stop with no run left ends the thread's pull request and workflow run watches", () =>
     Effect.gen(function* () {
       const link = {
         host: "github.com",
@@ -492,6 +492,16 @@ describe("V2 environment commands", () => {
             { ...link, number: 8 },
             { ...link, number: 9, source: "stack-dismissed", watch },
           ],
+          workflowRunWatches: [
+            {
+              host: "github.com",
+              repository: "supabitapp/supacode-next",
+              runId: 42,
+              name: "CI",
+              url: null,
+              startedAt: "2026-10-05T00:00:00.000Z",
+            },
+          ],
         },
       };
       const commands: OrchestrationV2Command[] = [];
@@ -510,6 +520,14 @@ describe("V2 environment commands", () => {
           repository: "supabitapp/supacode-next",
           number: 7,
           watching: false,
+        },
+        {
+          type: "thread.workflow-run.unwatch",
+          commandId: expect.any(String),
+          threadId: v2ThreadId,
+          host: "github.com",
+          repository: "supabitapp/supacode-next",
+          runId: 42,
         },
       ]);
     }).pipe(Effect.provide(layerTestCrypto)),
@@ -768,7 +786,7 @@ describe("V2 environment commands", () => {
       parentCheckpointId: null,
       ordinalWithinScope: input.ordinalWithinScope,
       appRunOrdinal: input.appRunOrdinal,
-      ref: CheckpointRef.make(`refs/supacode/${input.id}`),
+      ref: CheckpointRef.make(`refs/supaterm/${input.id}`),
       status: input.status,
       files: [],
       capturedAt: v2Now,

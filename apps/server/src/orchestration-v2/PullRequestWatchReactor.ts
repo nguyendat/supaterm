@@ -8,12 +8,12 @@ import {
   type PullRequestThreadCommentsResult,
   type ThreadPullRequestLink,
   type ThreadPullRequestWatch,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import {
   normalizeThreadPullRequestKey,
   threadPullRequestKeyOf,
   visibleThreadPullRequests,
-} from "@supacode/shared/threadPullRequests";
+} from "@supaterm/shared/threadPullRequests";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -23,13 +23,9 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
-import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 
-import {
-  type ProviderChangeRequestWatchFingerprint,
-  PullRequestProviderError,
-} from "@supacode/source-control-core/server/PullRequestProvider";
+import type { ProviderChangeRequestWatchFingerprint } from "@supaterm/source-control-core/server/PullRequestProvider";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as Orchestrator from "./Orchestrator.ts";
@@ -54,18 +50,6 @@ const QUIET_REREAD_MS = 10 * 60_000;
  * does not see edits to comments inside review threads.
  */
 const FINGERPRINT_REREAD_MS = 30 * 60_000;
-
-const isProviderError = Schema.is(PullRequestProviderError);
-
-/** A rate limit is the host asking us to wait, not a sign the pull request cannot be read. */
-const isRateLimited = (cause: Cause.Cause<PullRequestService.PullRequestError>) =>
-  Option.match(Cause.findErrorOption(cause), {
-    onNone: () => false,
-    onSome: (error) =>
-      error._tag === "PullRequestOperationError" &&
-      isProviderError(error.cause) &&
-      error.cause.reason === "rate-limited",
-  });
 
 const logFailure =
   (message: string, fields: Record<string, unknown>) =>
@@ -228,7 +212,7 @@ export class PullRequestWatchReactor extends Context.Service<
     /** One pass over every watched pull request. */
     readonly sweep: Effect.Effect<void>;
   }
->()("supacode/orchestration-v2/PullRequestWatchReactor") {}
+>()("supaterm/orchestration-v2/PullRequestWatchReactor") {}
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
@@ -327,7 +311,7 @@ export const make = Effect.gen(function* () {
   // "Watching" while it learns nothing.
   const giveUp = (target: WatchTarget) =>
     record(target, null, {
-      text: `Supacode stopped watching pull request #${target.link.number} (${target.link.url}) because it failed to read it from the host ${READ_FAILURE_LIMIT} times in a row. Check it yourself, and call watch_pull_request to watch it again.`,
+      text: `Supaterm stopped watching pull request #${target.link.number} (${target.link.url}) because it failed to read it from the host ${READ_FAILURE_LIMIT} times in a row. Check it yourself, and call watch_pull_request to watch it again.`,
       notification: {
         source: { kind: "monitor" },
         outcome: "failed",
@@ -395,7 +379,7 @@ export const make = Effect.gen(function* () {
   // A closed pull request can reopen, but the watch has nothing to report until then.
   const closed = (target: WatchTarget) =>
     record(target, null, {
-      text: `Pull request #${target.link.number} (${target.link.url}) was closed, so Supacode stopped watching it. Call watch_pull_request if it reopens.`,
+      text: `Pull request #${target.link.number} (${target.link.url}) was closed, so Supaterm stopped watching it. Call watch_pull_request if it reopens.`,
       notification: {
         source: { kind: "monitor" },
         outcome: "updated",
@@ -457,7 +441,7 @@ export const make = Effect.gen(function* () {
         (cause): Effect.Effect<ProviderChangeRequestWatchFingerprint | null | "paused"> =>
           Cause.hasInterruptsOnly(cause)
             ? Effect.interrupt
-            : isRateLimited(cause)
+            : PullRequestService.isRateLimited(cause)
               ? Effect.succeed("paused")
               : // The snapshot-gated reads report a host that cannot be read, and count toward
                 // giving up.
@@ -495,7 +479,7 @@ export const make = Effect.gen(function* () {
       if (Cause.hasInterruptsOnly(read.cause)) return yield* Effect.failCause(read.cause);
       lastReads.delete(group.key);
       // The host's pause refuses later reads without a request, so waiting it out is free.
-      if (isRateLimited(read.cause)) return;
+      if (PullRequestService.isRateLimited(read.cause)) return;
       const failures = (readFailures.get(group.key) ?? 0) + 1;
       readFailures.set(group.key, failures);
       // The count stays until every stop lands, so a failed stop is tried again on the next

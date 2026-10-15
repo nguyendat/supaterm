@@ -1,5 +1,5 @@
-import type { OrchestrationV2ThreadShell } from "@supacode/contracts";
-import type { PushNotificationKind, PushPreviewContent } from "@supacode/contracts/push";
+import type { OrchestrationV2ThreadShell } from "@supaterm/contracts";
+import type { PushNotificationKind, PushPreviewContent } from "@supaterm/contracts/push";
 
 const labels: Record<PushNotificationKind, string> = {
   approval: "Approval needed",

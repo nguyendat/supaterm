@@ -1,10 +1,10 @@
 import { beforeEach, expect, it, vi } from "vite-plus/test";
-import { EnvironmentId } from "@supacode/contracts";
+import { EnvironmentId } from "@supaterm/contracts";
 import {
   DEFAULT_PUSH_PREFERENCES,
   PushNotificationError,
   type PushRegistration,
-} from "@supacode/contracts/push";
+} from "@supaterm/contracts/push";
 import * as Effect from "effect/Effect";
 
 const mocks = vi.hoisted(() => ({
@@ -94,7 +94,7 @@ vi.mock("../../lib/runtime", async () => {
     Layer.provideMerge(storage),
     Layer.provideMerge(crypto),
   );
-  // oxlint-disable-next-line supacode/no-manual-effect-runtime-in-tests -- Native lifecycle helpers use the app promise runtime; this fixture exercises that boundary and its persistent state.
+  // oxlint-disable-next-line supaterm/no-manual-effect-runtime-in-tests -- Native lifecycle helpers use the app promise runtime; this fixture exercises that boundary and its persistent state.
   return { runtime: ManagedRuntime.make(layer) };
 });
 import { runtime } from "../../lib/runtime";

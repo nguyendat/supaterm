@@ -8,8 +8,8 @@ import type {
   PullRequestMergeability,
   PullRequestReviewDecision,
   PullRequestState,
-} from "@supacode/contracts";
-import { formatDiffCount } from "@supacode/client-runtime/diff-count";
+} from "@supaterm/contracts";
+import { formatDiffCount } from "@supaterm/client-runtime/diff-count";
 import {
   CircleCheckIcon,
   CircleDashedIcon,
@@ -345,6 +345,12 @@ const CHECKS_STATE_PRESENTATION = {
 
 export function pullRequestChecksStatePresentation(state: PullRequestChecksState) {
   return CHECKS_STATE_PRESENTATION[state];
+}
+
+/** The ring's own color for a rollup, for an indicator that stands in for the ring. */
+export function pullRequestChecksStateRingToneClassName(state: PullRequestChecksState): string {
+  const status = state === "passing" ? "success" : state === "failing" ? "failure" : "pending";
+  return CHECK_STATUS_PRESENTATION[status].toneClassName;
 }
 
 /**

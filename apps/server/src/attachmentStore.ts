@@ -3,8 +3,8 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
-import type { ChatAttachment } from "@supacode/contracts";
-import { htmlRenderFromToolItem, mcpAppFromToolItem } from "@supacode/shared/toolOutput";
+import type { ChatAttachment } from "@supaterm/contracts";
+import { htmlRenderFromToolItem, mcpAppFromToolItem } from "@supaterm/shared/toolOutput";
 
 import {
   normalizeAttachmentRelativePath,
@@ -101,6 +101,21 @@ export function createDeterministicAttachmentId(
     .slice(0, 32);
   const uuid = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20)}`;
   return `${threadSegment}-${uuid}`;
+}
+
+/**
+ * Stable key for an inline chat attachment. A retry resends the same bytes and
+ * keeps its id. Editing a queued message reuses the message id, so the bytes
+ * also stop a new image from taking an earlier image's id and file. Clients
+ * cache attachment images by id, which relies on ids never changing bytes.
+ */
+export function chatAttachmentStableKey(
+  messageId: string,
+  index: number,
+  bytes: Uint8Array,
+): string {
+  const digest = NodeCrypto.createHash("sha256").update(bytes).digest("hex");
+  return `${messageId}:${index}:${digest}`;
 }
 
 export function parseThreadSegmentFromAttachmentId(attachmentId: string): string | null {

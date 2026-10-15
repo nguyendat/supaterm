@@ -2,12 +2,12 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
     tags:
       - "v*.*.*"
       - "!v*-nightly.*"
       - "!v*-preview.*"
+  schedule:
+    - cron: "8 */4 * * *"
   workflow_dispatch:
     inputs:
       channel:
@@ -24,14 +24,14 @@ on:
         required: false
         type: string
 
-# Serialize nightlies (push and manual) so overlapping runs cannot build
+# Serialize nightlies (scheduled and manual) so overlapping runs cannot build
 # the same commit twice or publish out of order. Stable tag releases get their
 # own group so a nightly never blocks them. Running publishers are never
 # canceled, and queue: max keeps every pending run instead of the default
 # newest-wins single slot, so a queued stable tag can never be silently
 # dropped. Automatic nightlies recheck for new commits after leaving the queue.
 concurrency:
-  group: release-${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || inputs.channel == 'nightly' || inputs.channel == 'preview') && 'nightly' || 'stable' }}
+  group: release-${{ (github.event_name == 'schedule' || inputs.channel == 'nightly' || inputs.channel == 'preview') && 'nightly' || 'stable' }}
   cancel-in-progress: false
   queue: max
 
@@ -76,8 +76,7 @@ jobs:
             } = require('./.github/scripts/check-nightly-release.cjs');
 
             const dispatchChannel = process.env.DISPATCH_CHANNEL || 'preview';
-            const automaticNightly = context.eventName === 'push' && context.ref === 'refs/heads/main';
-            const releaseChannel = automaticNightly
+            const releaseChannel = context.eventName === 'schedule'
               ? 'nightly'
               : context.eventName === 'workflow_dispatch'
                 ? dispatchChannel
@@ -85,7 +84,7 @@ jobs:
 
             await assertReleaseSource({ github, context, releaseChannel });
 
-            if (automaticNightly) {
+            if (context.eventName === 'schedule') {
               core.setOutput('has_changes', await shouldReleaseNightly({ github, context, core }));
               core.setOutput('ref', context.sha);
             } else if (context.eventName === 'workflow_dispatch' && dispatchChannel === 'stable') {
@@ -103,7 +102,7 @@ jobs:
     needs: [resolve_commit]
     if: |
       needs.resolve_commit.result == 'success' &&
-      needs.resolve_commit.outputs.has_changes != 'false'
+      (github.event_name != 'schedule' || needs.resolve_commit.outputs.has_changes == 'true')
     runs-on: depot-ubuntu-24.04-8
     timeout-minutes: 10
     outputs:
@@ -142,7 +141,7 @@ jobs:
           NIGHTLY_SHA: ${{ needs.resolve_commit.outputs.ref }}
           NIGHTLY_RUN_NUMBER: ${{ github.run_number }}
         run: |
-          if [[ ( "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF}" == "refs/heads/main" ) || ( "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${DISPATCH_CHANNEL:-preview}" == "nightly" ) ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == "schedule" || ( "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${DISPATCH_CHANNEL:-preview}" == "nightly" ) ]]; then
             nightly_date="$(date -u -d "$NIGHTLY_DATE" +%Y%m%d)"
 
             node scripts/resolve-nightly-release.ts \
@@ -197,7 +196,7 @@ jobs:
             echo "release_channel=stable" >> "$GITHUB_OUTPUT"
             echo "version=$version" >> "$GITHUB_OUTPUT"
             echo "tag=v$version" >> "$GITHUB_OUTPUT"
-            echo "name=Supacode v$version" >> "$GITHUB_OUTPUT"
+            echo "name=Supaterm v$version" >> "$GITHUB_OUTPUT"
             echo "cli_dist_tag=latest" >> "$GITHUB_OUTPUT"
             if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
@@ -241,7 +240,7 @@ jobs:
       - name: Install workspace dependencies
         run: mise exec -- vp install
       - name: Ensure Electron runtime is installed
-        run: vp run --filter @supacode/desktop ensure:electron
+        run: vp run --filter @supaterm/desktop ensure:electron
 
       - name: Check
         run: vp check
@@ -268,7 +267,7 @@ jobs:
       - name: Install workspace dependencies
         run: mise exec -- vp install
       - name: Ensure Electron runtime is installed
-        run: vp run --filter @supacode/desktop ensure:electron
+        run: vp run --filter @supaterm/desktop ensure:electron
 
       - uses: ./.github/actions/setup-apt-mirrors
 
@@ -278,7 +277,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config build-essential
 
       - name: Test
-        run: vp run --parallel --concurrency-limit 4 --filter '!supacode' --filter '!@supacode/monorepo' test
+        run: vp run --parallel --concurrency-limit 4 --filter '!supaterm' --filter '!@supaterm/monorepo' test
 
   test_server:
     name: Release server tests ${{ matrix.shard }}
@@ -304,7 +303,7 @@ jobs:
         run: node apps/server/node_modules/playwright-core/cli.js install --with-deps --only-shell chromium
 
       - name: Test
-        run: vp run --filter supacode test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
+        run: vp run --filter supaterm test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
 
   # The platform-independent JS (server bundle, web client, Electron main) is
   # built exactly once here and handed to every platform job as `js-bundle`.
@@ -332,20 +331,20 @@ jobs:
       - name: Install bundle dependencies
         env:
           pnpm_config_cache_dir: ${{ runner.temp }}/pnpm-metadata
-        run: vp install --filter=supacode... --filter=@supacode/web... --filter=@supacode/desktop... --filter=@supacode/scripts...
+        run: vp install --filter=supaterm... --filter=@supaterm/web... --filter=@supaterm/desktop... --filter=@supaterm/scripts...
 
       - name: Align package versions to release version
         run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
 
       - uses: ./.github/actions/setup-apt-mirrors
 
-      # @supacode/desktop#build compiles the Linux browser secret helper on a
+      # @supaterm/desktop#build compiles the Linux browser secret helper on a
       # Linux host before packing, and that needs libsecret headers.
       - name: Install browser secret helper build libraries
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
 
-      # Runs supacode#build (which depends on @supacode/web#build) and
-      # @supacode/desktop#build, so apps/server/dist holds the server bundle
+      # Runs supaterm#build (which depends on @supaterm/web#build) and
+      # @supaterm/desktop#build, so apps/server/dist holds the server bundle
       # plus the web client and apps/desktop/dist-electron the Electron main.
       - name: Build JS bundle
         run: vp run build:desktop
@@ -523,7 +522,7 @@ jobs:
       - name: Setup Mise
         uses: ./.github/actions/setup-mise
       - name: Install workspace dependencies
-        run: mise exec -- vp install --filter=supacode... --filter=@supacode/scripts...
+        run: mise exec -- vp install --filter=supaterm... --filter=@supaterm/scripts...
       - name: Download all CLI archives
         uses: actions/download-artifact@v8
         with:
@@ -540,7 +539,7 @@ jobs:
       - name: Check npm publish access (dry run)
         run: |
           if ! node apps/server/scripts/cli.ts publish --packages-dir npm-packages --tag "${{ needs.preflight.outputs.cli_dist_tag }}" --provenance --dry-run --verbose; then
-            echo "::error::npm publish --dry-run failed. Make sure the @supabitapp npm account owns the scope and that supacode and every @supabitapp/supacode-<platform> package has a trusted publisher registered for .github/workflows/release.yml (see docs/operations/release.md)." >&2
+            echo "::error::npm publish --dry-run failed. Make sure the @supabitapp npm account owns the scope and that supaterm and every @supabitapp/supaterm-<platform> package has a trusted publisher registered for .github/workflows/release.yml (see docs/operations/release.md)." >&2
             exit 1
           fi
 
@@ -574,7 +573,7 @@ jobs:
       - name: Setup Mise
         uses: ./.github/actions/setup-mise
       - name: Install workspace dependencies
-        run: mise exec -- vp install --filter=@supacode/scripts...
+        run: mise exec -- vp install --filter=@supaterm/scripts...
       - name: Download all desktop artifacts
         uses: actions/download-artifact@v8
         with:
@@ -597,7 +596,7 @@ jobs:
           set -euo pipefail
           cd release-assets
           shopt -s nullglob
-          archives=(supacode-*.tar.gz supacode-*.zip)
+          archives=(supaterm-*.tar.gz supaterm-*.zip)
           if [[ ${#archives[@]} -eq 0 ]]; then
             echo "No CLI archives were produced." >&2
             exit 1
@@ -687,7 +686,7 @@ jobs:
           > [!WARNING]
           > **This is a preview build. Do not install it unless you know exactly why you are here.**
           >
-          > Preview builds are cut by maintainers from unreleased branches to exercise the release pipeline. They can be broken, receive no fixes, are never offered as updates, and are not supported. If you want Supacode, install the [latest release](https://github.com/supabitapp/supacode-next/releases/latest) or a nightly instead.
+          > Preview builds are cut by maintainers from unreleased branches to exercise the release pipeline. They can be broken, receive no fixes, are never offered as updates, and are not supported. If you want Supaterm, install the [latest release](https://github.com/supabitapp/supacode-next/releases/latest) or a nightly instead.
 
           Built from `${{ needs.preflight.outputs.ref }}`.
           EOF
@@ -741,7 +740,7 @@ jobs:
     timeout-minutes: 10
     env:
       APP_VERSION: ${{ needs.preflight.outputs.version }}
-      VITE_HOSTED_APP_URL: https://app.next.supacode.sh
+      VITE_HOSTED_APP_URL: https://app.supaterm.com
       VITE_HOSTED_APP_CHANNEL: ${{ needs.preflight.outputs.release_channel == 'stable' && 'latest' || 'nightly' }}
     steps:
       - name: Checkout
@@ -751,10 +750,10 @@ jobs:
       - name: Setup Mise
         uses: ./.github/actions/setup-mise
       - name: Install workspace dependencies
-        run: mise exec -- vp install --filter=@supacode/scripts... --filter=@supacode/web...
+        run: mise exec -- vp install --filter=@supaterm/scripts... --filter=@supaterm/web...
       - name: Build hosted app
         run: |
-          vp run --filter @supacode/web build
+          vp run --filter @supaterm/web build
           node scripts/apply-web-brand-assets.ts --channel "$VITE_HOSTED_APP_CHANNEL"
       - name: Stage hosted app
         uses: actions/upload-artifact@v4
@@ -808,9 +807,9 @@ jobs:
       - name: Setup Mise
         uses: ./.github/actions/setup-mise
       - name: Install workspace dependencies
-        run: mise exec -- vp install --filter=@supacode/marketing...
+        run: mise exec -- vp install --filter=@supaterm/marketing...
       - name: Build site
-        run: vp run --filter @supacode/marketing build
+        run: vp run --filter @supaterm/marketing build
       - name: Stage site
         uses: actions/upload-artifact@v4
         with:
@@ -898,7 +897,7 @@ jobs:
       - name: Setup Mise
         uses: ./.github/actions/setup-mise
       - name: Install workspace dependencies
-        run: mise exec -- vp install --filter=@supacode/scripts... --filter=@supacode/oxlint-plugin-supacode...
+        run: mise exec -- vp install --filter=@supaterm/scripts... --filter=@supaterm/oxlint-plugin-supaterm...
       - id: update_versions
         name: Update version strings
         env:

@@ -701,6 +701,31 @@ export const PullRequestRef = Schema.Struct({
 });
 export type PullRequestRef = typeof PullRequestRef.Type;
 
+/**
+ * A GitHub Actions run, read as checks: one per job. Without a `repository`, the run is read
+ * from the repository `gh` picks in the project's checkout. `host` only qualifies a repository.
+ */
+export const PullRequestWorkflowRunRef = Schema.Struct({
+  projectId: ProjectId,
+  host: Schema.optional(TrimmedNonEmptyString),
+  repository: Schema.optional(TrimmedNonEmptyString),
+  runId: PositiveInt,
+});
+export type PullRequestWorkflowRunRef = typeof PullRequestWorkflowRunRef.Type;
+
+/** A GitHub Actions run read as checks: its jobs, and its own verdict once it completes. */
+export const PullRequestWorkflowRun = Schema.Struct({
+  host: TrimmedNonEmptyString,
+  /** `owner/name`, resolved from the checkout when the reference named none. */
+  repository: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  url: Schema.NullOr(TrimmedNonEmptyString),
+  /** Pending until the run completes. */
+  status: PullRequestCheckStatus,
+  checks: Schema.Array(PullRequestCheck),
+});
+export type PullRequestWorkflowRun = typeof PullRequestWorkflowRun.Type;
+
 /** Account discovery never needs the originating project's private repository metadata. */
 export const PullRequestRoutingIdentityInput = Schema.Struct({
   host: TrimmedNonEmptyString,
@@ -1325,7 +1350,7 @@ const PROVIDER_REQUIREMENT = new Map<
       missing:
         "Install Forgejo CLI (`fj` 0.6 or later) from https://codeberg.org/forgejo-contrib/forgejo-cli or Gitea CLI (`tea` 0.16 or later) from https://gitea.com/gitea/tea to browse Forgejo pull requests.",
       unauthenticated:
-        "Authenticate your Forgejo or Gitea server with `fj --host <server-url> auth add-token` on the Supacode server. If fj is missing or unconfigured for that server, use `tea login add`. A configured fj account must be repaired with fj.",
+        "Authenticate your Forgejo or Gitea server with `fj --host <server-url> auth add-token` on the Supaterm server. If fj is missing or unconfigured for that server, use `tea login add`. A configured fj account must be repaired with fj.",
     },
   ],
   [

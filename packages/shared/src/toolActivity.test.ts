@@ -6,6 +6,7 @@ import {
   collectToolFilePaths,
   deriveToolActivityPresentation,
   dynamicToolTitle,
+  dynamicToolSurface,
   formatReadToolLabel,
   formatSearchToolLabel,
   mergeToolActivityData,
@@ -93,9 +94,9 @@ describe("toolActivity", () => {
     ).toBe("Searched TODO in web");
     expect(
       formatSearchToolLabel({
-        input: { glob: "*.ts", path: "/tmp/supacode-chat-new" },
+        input: { glob: "*.ts", path: "/tmp/supaterm-chat-new" },
       }),
-    ).toBe("Searched files *.ts in supacode-chat-new");
+    ).toBe("Searched files *.ts in supaterm-chat-new");
     expect(
       formatSearchToolLabel({ rawInput: {}, input: { pattern: "TODO", path: "apps/web" } }),
     ).toBe("Searched TODO in web");
@@ -121,6 +122,44 @@ describe("toolActivity", () => {
     expect(
       mergeToolActivityData({ rawInput: { path: "src/a.ts" } }, { rawInput: { startLine: 4 } }),
     ).toEqual({ rawInput: { path: "src/a.ts", startLine: 4 } });
+  });
+
+  it.each(["cua_repl.js", "node_repl.js", "js"])("uses the action title for %s", (toolName) => {
+    expect(dynamicToolTitle(toolName, { title: " Read the current desktop window " })).toBe(
+      "Read the current desktop window",
+    );
+    const fallback = toolName === "cua_repl.js" ? "Computer use" : "Run JavaScript";
+    expect(dynamicToolTitle(toolName, { title: " " })).toBe(fallback);
+    expect(dynamicToolTitle(toolName, { title: 123 })).toBe(fallback);
+    expect(dynamicToolTitle(toolName, {})).toBe(fallback);
+    expect(dynamicToolTitle(toolName, { code: "await sky.get_app_state(app);" })).toBe(
+      "Computer use",
+    );
+  });
+
+  it("keeps a retained action title but replaces raw REPL names", () => {
+    expect(dynamicToolTitle("js", {}, "Read the window")).toBe("Read the window");
+    expect(dynamicToolTitle("js", { title: "Inspect the window" }, "Read the window")).toBe(
+      "Inspect the window",
+    );
+    expect(dynamicToolTitle("js", { code: "await sky.click(app);" }, "Js")).toBe("Computer use");
+    expect(dynamicToolTitle("node_repl.js", {}, "Node_repl.js")).toBe("Run JavaScript");
+  });
+
+  it("recognizes computer-use REPL calls before result metadata exists", () => {
+    expect(dynamicToolSurface("cua_repl.js", {})).toBe("computer");
+    for (const name of ["node_repl.js", "js"]) {
+      expect(dynamicToolSurface(name, { code: "await sky.get_app_state(app);" })).toBe("computer");
+      expect(dynamicToolSurface(name, { code: "const sky = await import('@oai/sky');" })).toBe(
+        "computer",
+      );
+      expect(dynamicToolSurface(name, { code: "await fs.readFile(path);" })).toBeUndefined();
+    }
+    expect(dynamicToolSurface("github.js", { code: "await sky.click(app);" })).toBeUndefined();
+  });
+
+  it("leaves ordinary tool titles in their arguments", () => {
+    expect(dynamicToolTitle("github.create_issue", { title: "Issue title" })).toBeUndefined();
   });
 
   it("titles Claude skill calls with the skill they load", () => {

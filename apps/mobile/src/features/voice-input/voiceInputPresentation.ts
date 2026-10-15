@@ -1,7 +1,7 @@
-import type { VoiceInputState } from "@supacode/client-runtime/voice-input";
+import type { VoiceInputState } from "@supaterm/client-runtime/voice-input";
 
 export type VoiceComposerPresentation = {
-  readonly leadingAction: "cancel" | null;
+  readonly leadingAction: "cancel" | "stop" | null;
   readonly trailingAction: "mic" | "confirm";
   readonly showsSend: boolean;
   readonly statusKind: "active" | "error" | null;
@@ -44,7 +44,7 @@ export function resolveVoiceComposerPresentation(
     case "recording": {
       const seconds = Math.max(0, Math.floor(elapsedSeconds));
       return {
-        leadingAction: "cancel",
+        leadingAction: "stop",
         trailingAction: "confirm",
         showsSend: false,
         statusKind: "active",

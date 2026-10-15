@@ -1,9 +1,11 @@
 # Voice input
 
-Transcription edits a composer draft. It does not submit an agent turn. Audio is
-temporary client input, and only normal message submission sends the resulting
-text. The current implementation transcribes locally on supported iOS devices;
-environment-backed transcription is not implemented.
+Transcription edits a composer draft. Audio is temporary client input. When the
+user chooses to transcribe and send, the mobile composer waits for a successful
+draft insertion before invoking normal message submission with its current guards.
+Navigation cancels that send intent without discarding the transcript. The current
+implementation transcribes locally on supported iOS devices; environment-backed
+transcription is not implemented.
 
 The [shared controller](../../packages/client-runtime/src/voice-input/controller.ts)
 owns the operation while the client supplies capture and transcription. Preparation

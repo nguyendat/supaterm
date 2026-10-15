@@ -6,13 +6,10 @@ import {
   useMemo,
   useReducer,
   useRef,
-  useState,
-  type SetStateAction,
   type Dispatch,
   type ReactNode,
 } from "react";
 import {
-  WORKSPACE_DOCK,
   initialWorkspaceTabsState,
   workspaceTabsReducer,
   type WorkspaceTab,
@@ -30,8 +27,6 @@ export const WorkspaceTabsContext = createContext<{
   readonly dispatch: Dispatch<WorkspaceTabsAction>;
   readonly isTabActive: (tab: WorkspaceTab) => boolean;
   readonly bottomClearance: number;
-  readonly dockHeight: number;
-  readonly setDockHeight: Dispatch<SetStateAction<number>>;
   readonly getScrollOffset: (tab: WorkspaceTab) => number;
   readonly recordScrollOffset: (tab: WorkspaceTab, offset: number) => void;
   readonly getScrollAnchor: (tab: WorkspaceTab) => WorkspaceScrollAnchor | undefined;
@@ -45,7 +40,6 @@ export function useWorkspaceTabs() {
 /** The tab controller and its list screens share state across native container changes. */
 export function WorkspaceTabsProvider(props: { readonly children: ReactNode }) {
   const [state, dispatch] = useReducer(workspaceTabsReducer, undefined, initialWorkspaceTabsState);
-  const [dockHeight, setDockHeight] = useState(WORKSPACE_DOCK.height);
   const activeTab = useRef(state.selectedTab);
   useLayoutEffect(() => {
     activeTab.current = state.selectedTab;
@@ -67,22 +61,12 @@ export function WorkspaceTabsProvider(props: { readonly children: ReactNode }) {
       dispatch,
       isTabActive,
       bottomClearance: 0,
-      dockHeight,
-      setDockHeight,
       getScrollOffset,
       recordScrollOffset,
       getScrollAnchor,
       recordScrollAnchor,
     }),
-    [
-      state,
-      dockHeight,
-      isTabActive,
-      getScrollOffset,
-      recordScrollOffset,
-      getScrollAnchor,
-      recordScrollAnchor,
-    ],
+    [state, isTabActive, getScrollOffset, recordScrollOffset, getScrollAnchor, recordScrollAnchor],
   );
   return <WorkspaceTabsContext value={context}>{props.children}</WorkspaceTabsContext>;
 }

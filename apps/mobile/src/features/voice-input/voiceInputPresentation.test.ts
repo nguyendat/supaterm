@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { voiceInputFreezesEditor } from "@supacode/client-runtime/voice-input";
+import { voiceInputFreezesEditor } from "@supaterm/client-runtime/voice-input";
 
 import { resolveVoiceComposerPresentation } from "./voiceInputPresentation";
 
@@ -27,7 +27,7 @@ describe("resolveVoiceComposerPresentation", () => {
     expect(
       resolveVoiceComposerPresentation({ phase: "recording", error: null, errorAction: null }, 64),
     ).toMatchObject({
-      leadingAction: "cancel",
+      leadingAction: "stop",
       trailingAction: "confirm",
       showsSend: false,
       statusLabel: "Recording 1:04",

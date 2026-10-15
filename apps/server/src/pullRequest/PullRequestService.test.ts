@@ -1,4 +1,4 @@
-import { SourceControlProviderKind } from "@supacode/contracts";
+import { SourceControlProviderKind } from "@supaterm/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeV8 from "node:v8";
 import * as NodeVM from "node:vm";
@@ -20,25 +20,25 @@ import type {
   ProjectId,
   PullRequestReviewCapabilities,
   PullRequestReviewerCapabilities,
-} from "@supacode/contracts";
-import { DEFAULT_SERVER_SETTINGS } from "@supacode/contracts/settings";
-import type { ServerSettings } from "@supacode/contracts";
+} from "@supaterm/contracts";
+import { DEFAULT_SERVER_SETTINGS } from "@supaterm/contracts/settings";
+import type { ServerSettings } from "@supaterm/contracts";
 import * as ServerSettingsService from "../serverSettings.ts";
-import { PullRequestOperationError } from "@supacode/contracts";
+import { PullRequestOperationError } from "@supaterm/contracts";
 
 import * as ProjectService from "../project/ProjectService.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as PullRequestFilesViewed from "../persistence/PullRequestFilesViewed.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
-import * as SourceControlRateLimit from "@supacode/source-control-core/server/SourceControlRateLimit";
-import * as ForgejoCli from "@supacode/source-control-forgejo/server/ForgejoCli";
-import * as ForgejoPullRequestProvider from "@supacode/source-control-forgejo/server/ForgejoPullRequestProvider";
+import * as SourceControlRateLimit from "@supaterm/source-control-core/server/SourceControlRateLimit";
+import * as ForgejoCli from "@supaterm/source-control-forgejo/server/ForgejoCli";
+import * as ForgejoPullRequestProvider from "@supaterm/source-control-forgejo/server/ForgejoPullRequestProvider";
 import {
   PullRequestProviderError,
   type ProviderChangeRequest,
   type PullRequestProviderApi,
-} from "@supacode/source-control-core/server/PullRequestProvider";
+} from "@supaterm/source-control-core/server/PullRequestProvider";
 import * as PullRequestProviderRegistry from "./PullRequestProviderRegistry.ts";
 import * as PullRequestService from "./PullRequestService.ts";
 import * as PullRequestReadCache from "./PullRequestReadCache.ts";
@@ -727,7 +727,7 @@ it.effect("reads nothing from a host with no implementation, but reports it", ()
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -780,7 +780,7 @@ it.effect("asks for a whole page of a host, and for the reader's own size when g
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -810,7 +810,7 @@ it.effect("says where each repository carries on, and from nothing it has run ou
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -844,7 +844,7 @@ it.effect("offers no continuation for a host that cannot be carried on from", ()
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -912,7 +912,7 @@ it.effect("reads only the repositories it was asked to carry on with", () =>
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -949,7 +949,7 @@ it.effect("keeps a row already sent at the boundary instant from arriving twice"
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -994,7 +994,7 @@ it.effect("keeps the earlier exclusions when a slice ends on the instant it bega
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -1037,7 +1037,7 @@ it.effect("refuses a continuation it did not issue, before asking any host anyth
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -1070,7 +1070,7 @@ it.effect("calls a transient viewer failure a failed operation, not a signed-out
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -1103,7 +1103,7 @@ it.effect("reports an unusable host over a merely failing one", () =>
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -1147,7 +1147,7 @@ it.effect("lists every host that has an implementation", () =>
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -1200,7 +1200,7 @@ it.effect("narrows the listing to one host when asked", () =>
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -1286,7 +1286,7 @@ it.effect("keeps one host listed when another is not set up", () =>
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -1336,7 +1336,7 @@ it.effect("fails as unavailable only when no host can be read", () =>
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -1366,13 +1366,13 @@ it.effect("reads a repository once when several worktrees share it", () =>
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
         project({
           id: "p2",
-          title: "supacode worktree",
+          title: "supaterm worktree",
           workspaceRoot: "/b",
           repository: "SupabitApp/Supacode-Next",
         }),
@@ -1404,7 +1404,7 @@ it.effect("keeps healthy repositories when one of them cannot be read", () =>
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -2151,6 +2151,65 @@ it.effect("does not fall back to full detail when checks are unsupported", () =>
   }),
 );
 
+it.effect("reads a bare workflow run id from the project's checkout, a named one as named", () =>
+  Effect.gen(function* () {
+    const reads: Array<{ cwd: string; repository?: string; host: string; runId: number }> = [];
+    const job = { name: "Lint", status: "pending" as const, description: null, url: null };
+    const service = yield* makeService({
+      projects: [
+        project({ id: "p1", title: "web", workspaceRoot: "/repo", repository: "acme/web" }),
+        project({ id: "p2", title: "notes", workspaceRoot: "/notes" }),
+        project({
+          id: "p3",
+          title: "lab",
+          workspaceRoot: "/lab",
+          repository: "acme/lab",
+          provider: SourceControlProviderKind.make("gitlab"),
+        }),
+      ],
+      providers: [
+        fakeProvider(SourceControlProviderKind.make("github"), {
+          getWorkflowRun: (input) => {
+            reads.push(input);
+            return Effect.succeed({
+              repository: input.repository ?? "acme/web",
+              name: "Release",
+              url: null,
+              status: "pending" as const,
+              checks: [job],
+            });
+          },
+        }),
+        fakeProvider(SourceControlProviderKind.make("gitlab")),
+      ],
+    });
+
+    assert.deepStrictEqual(
+      yield* service.workflowRun({ projectId: "p1" as ProjectId, runId: 42 }),
+      {
+        host: "github.com",
+        repository: "acme/web",
+        name: "Release",
+        url: null,
+        status: "pending",
+        checks: [job],
+      },
+    );
+    yield* service.workflowRun({
+      projectId: "p1" as ProjectId,
+      repository: "acme/api",
+      runId: 43,
+    });
+    assert.deepStrictEqual(reads, [
+      { cwd: "/repo", host: "github.com", runId: 42 },
+      { cwd: "/repo", repository: "acme/api", host: "github.com", runId: 43 },
+    ]);
+    assert.isNull(yield* service.workflowRun({ projectId: "p2" as ProjectId, runId: 42 }));
+    assert.isNull(yield* service.workflowRun({ projectId: "p3" as ProjectId, runId: 42 }));
+    assert.strictEqual(reads.length, 2);
+  }),
+);
+
 it.effect("uses a manual rate limit to pause later reads", () =>
   Effect.gen(function* () {
     let listCalls = 0;
@@ -2199,7 +2258,7 @@ it.effect("flags a review request for the viewer but not on their own change req
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -2238,7 +2297,7 @@ it.effect("refuses a repository that does not belong to the requested project", 
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -2866,7 +2925,7 @@ it.effect("rejects an empty comment before reaching the host", () =>
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -2952,7 +3011,7 @@ it.effect("refuses line comments on a host that takes only a summary", () =>
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -2998,7 +3057,7 @@ it.effect(
         projects: [
           project({
             id: "p1",
-            title: "supacode",
+            title: "supaterm",
             workspaceRoot: "/a",
             repository: "supabitapp/supacode-next",
           }),
@@ -3035,7 +3094,7 @@ it.effect("refuses to resolve a conversation on a host that cannot", () =>
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -3081,7 +3140,7 @@ it.effect("refuses to react on a host with no reactions", () =>
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -3123,7 +3182,7 @@ it.effect("refuses to react on a host whose capabilities omit reactions entirely
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -3169,7 +3228,7 @@ it.effect("passes a reaction through with its subject id on a host that has them
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -3245,7 +3304,7 @@ it.effect("refuses an empty reply before it reaches the host", () =>
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -3278,7 +3337,7 @@ it.effect("refuses a merge strategy the host does not offer", () =>
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -3365,7 +3424,7 @@ it.effect("asks every host the reader's search, rather than filtering what came 
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -3398,7 +3457,7 @@ it.effect("asks for no search when the reader has typed nothing", () =>
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -3428,13 +3487,13 @@ it.effect("asks another checkout who is signed in when the first one cannot answ
         // two places to ask.
         project({
           id: "p1",
-          title: "supacode (stale worktree)",
+          title: "supaterm (stale worktree)",
           workspaceRoot: "/gone",
           repository: "supabitapp/supacode-next",
         }),
         project({
           id: "p2",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/healthy",
           repository: "supabitapp/supacode-next",
         }),
@@ -4395,7 +4454,7 @@ it.effect("reads a host's repositories in one search, and files the rows back un
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -4461,7 +4520,7 @@ it.effect("carries every repository of a slice on from the oldest row in it", ()
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),
@@ -6225,7 +6284,7 @@ it.effect("keeps the diff cached across a file being ticked off", () =>
       projects: [
         project({
           id: "p1",
-          title: "supacode",
+          title: "supaterm",
           workspaceRoot: "/a",
           repository: "supabitapp/supacode-next",
         }),

@@ -4,15 +4,15 @@ import type {
   VcsRef,
   ProjectId,
   WorktreeSubmodules,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import * as Schema from "effect/Schema";
-import { sanitizeNewRefName } from "@supacode/shared/git";
+import { sanitizeNewRefName } from "@supaterm/shared/git";
 import { toSortableTimestamp } from "../lib/threadSort";
 export {
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
   sanitizeNewRefName,
-} from "@supacode/shared/git";
+} from "@supaterm/shared/git";
 
 export interface EnvironmentOption {
   environmentId: EnvironmentId;
@@ -242,7 +242,7 @@ export function resolveBranchTriggerLabel(input: {
     startFromOrigin,
   } = input;
   if (!resolvedActiveBranch) {
-    return "Select ref";
+    return effectiveEnvMode === "worktree" && !activeWorktreePath ? "Default branch" : "Select ref";
   }
   if (effectiveEnvMode === "worktree" && !activeWorktreePath) {
     const baseRef =

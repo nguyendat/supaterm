@@ -297,9 +297,9 @@ export type OrchestrationV2CheckpointCapabilities =
 
 export const OrchestrationV2RuntimePolicyCapabilities = Schema.Struct({
   /**
-   * Where Supacode runtime modes are actually enforced. "native" providers receive
+   * Where Supaterm runtime modes are actually enforced. "native" providers receive
    * the approval and sandbox policy each turn and confine their own execution.
-   * "client-boundary" providers only have policy applied where Supacode mediates the
+   * "client-boundary" providers only have policy applied where Supaterm mediates the
    * work (permission requests and client fs/terminal handlers); provider-owned
    * execution is not confined, so sandbox guarantees are reduced.
    */
@@ -361,6 +361,26 @@ export const OrchestrationV2LimitRecoveryUpdate = Schema.Struct({
 );
 export type OrchestrationV2LimitRecoveryUpdate = typeof OrchestrationV2LimitRecoveryUpdate.Type;
 
+/** A GitHub Actions run, by the repository it belongs to. */
+export const ThreadWorkflowRunKey = Schema.Struct({
+  host: TrimmedNonEmptyString,
+  repository: TrimmedNonEmptyString,
+  runId: PositiveInt,
+});
+export type ThreadWorkflowRunKey = typeof ThreadWorkflowRunKey.Type;
+
+/**
+ * A GitHub Actions run the server watches for the thread's agent, which it wakes once when the
+ * run completes. Ends then, on unwatch, Stop, settle or archive, and after reads keep failing.
+ */
+export const ThreadWorkflowRunWatch = Schema.Struct({
+  ...ThreadWorkflowRunKey.fields,
+  name: TrimmedNonEmptyString,
+  url: Schema.NullOr(TrimmedNonEmptyString),
+  startedAt: IsoDateTime,
+});
+export type ThreadWorkflowRunWatch = typeof ThreadWorkflowRunWatch.Type;
+
 export const OrchestrationV2AppThread = Schema.Struct({
   ...OrchestrationV2CreationFields,
   id: ThreadId,
@@ -376,6 +396,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
       pre-linking servers still decode. */
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   pullRequests: Schema.optional(Schema.Array(ThreadPullRequestLink)),
+  workflowRunWatches: Schema.optional(Schema.Array(ThreadWorkflowRunWatch)),
   /** Pull request discovered from the thread's current branch. */
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   activeProviderThreadId: Schema.NullOr(ProviderThreadId),
@@ -444,7 +465,7 @@ export type OrchestrationV2AppThread = typeof OrchestrationV2AppThread.Type;
 /**
  * A subagent the provider spawned on its own (Claude's Agent tool, Codex or
  * Cursor native subagents). The provider owns its conversation, so it cannot
- * take messages; Supacode delegate_task children (`creationSource: "mcp"`) can.
+ * take messages; Supaterm delegate_task children (`creationSource: "mcp"`) can.
  */
 export function isProviderNativeSubagentThread(
   thread: Pick<OrchestrationV2AppThread, "lineage" | "creationSource">,
@@ -974,7 +995,7 @@ export type OrchestrationV2ProviderGoalStatus = typeof OrchestrationV2ProviderGo
 
 /**
  * A provider-native goal set with `/goal` (Codex and Claude). The provider
- * keeps working until it judges the objective met and owns this state; Supacode
+ * keeps working until it judges the objective met and owns this state; Supaterm
  * mirrors the latest native report. Usage fields are provider-specific.
  */
 export const OrchestrationV2ProviderGoal = Schema.Struct({
@@ -1219,7 +1240,7 @@ export const OrchestrationV2NotificationSource = kindUnionWithFallback(
     CommandNotificationSource,
     Schema.Struct({ kind: Schema.Literal("monitor") }),
     Schema.Struct({ kind: Schema.Literal("background_task") }),
-    /** Supacode itself, such as a restart continuing an interrupted turn. */
+    /** Supaterm itself, such as a restart continuing an interrupted turn. */
     Schema.Struct({ kind: Schema.Literal("system") }),
   ],
   (kind) => Schema.Struct({ kind }),
@@ -1774,6 +1795,7 @@ export const OrchestrationV2DomainEvent = Schema.Union([
       "thread.marked-unread",
       "thread.metadata-updated",
       "thread.pull-request-synced",
+      "thread.workflow-run-watch-synced",
       "thread.runtime-mode-updated",
       "thread.interaction-mode-updated",
       "thread.model-selection-updated",
@@ -2592,6 +2614,7 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
       "thread.visited",
       "thread.marked-unread",
       "thread.pull-request-synced",
+      "thread.workflow-run-watch-synced",
       "thread.metadata-updated",
       "thread.runtime-mode-updated",
       "thread.interaction-mode-updated",
@@ -2893,6 +2916,13 @@ export const OrchestrationV2Command = Schema.Union([
       Schema.Struct({ url: TrimmedNonEmptyString, source: ThreadPullRequestLinkSource }),
     ),
   }),
+  /** Stop the server watching a GitHub Actions run for this thread's agent. */
+  Schema.Struct({
+    type: Schema.Literal("thread.workflow-run.unwatch"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    ...ThreadWorkflowRunKey.fields,
+  }),
   Schema.Struct({
     type: Schema.Literal("thread.pull-request.sync"),
     commandId: CommandId,
@@ -3022,7 +3052,6 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     runId: RunId,
     subagentId: NodeId,
-    workflowOnly: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     type: Schema.Literal("run.interrupt"),
@@ -3209,6 +3238,34 @@ const OrchestrationV2InternalCommand = Schema.Union([
       }),
     ),
   }),
+  /** Watch a GitHub Actions run for the thread's agent, which only agents start. */
+  Schema.Struct({
+    type: Schema.Literal("thread.workflow-run-watch.start"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    ...ThreadWorkflowRunKey.fields,
+    name: TrimmedNonEmptyString,
+    url: Schema.NullOr(TrimmedNonEmptyString),
+  }),
+  /**
+   * Ends the workflow run watch started at `startedAt`, waking the agent in the same transaction
+   * when `wake` is set. Rejected once that watch has ended, and a wake is rejected on a settled
+   * or archived thread, so a read that raced either changes nothing.
+   */
+  Schema.Struct({
+    type: Schema.Literal("thread.workflow-run-watch.end"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    ...ThreadWorkflowRunKey.fields,
+    startedAt: IsoDateTime,
+    wake: Schema.optional(
+      Schema.Struct({
+        messageId: MessageId,
+        text: Schema.String,
+        notification: OrchestrationV2Notification,
+      }),
+    ),
+  }),
   /** Records that the provider rollback `requestId` failed for good. */
   Schema.Struct({
     type: Schema.Literal("checkpoint.rollback.fail"),
@@ -3221,7 +3278,9 @@ const OrchestrationV2InternalCommand = Schema.Union([
    * Follows a Stop once its provider returned: background work the settled
    * thread still shows on that provider thread is no longer reported by any
    * provider process, so it is marked interrupted. Only the stopped turn's run
-   * and older runs are settled; a later run's work is its own.
+   * and older runs are settled; a later run's work is its own. A subagent target
+   * limits repair to that task and its runless child work, using a confirmed
+   * provider outcome.
    */
   Schema.Struct({
     type: Schema.Literal("thread.background-work.settle"),
@@ -3229,10 +3288,21 @@ const OrchestrationV2InternalCommand = Schema.Union([
     threadId: ThreadId,
     providerThreadId: ProviderThreadId,
     providerTurnId: ProviderTurnId,
+    subagent: Schema.optional(
+      Schema.Struct({
+        id: NodeId,
+        stoppedAt: Schema.DateTimeUtc,
+        outcome: Schema.Struct({
+          status: Schema.Literals(["completed", "failed", "cancelled"]),
+          completedAt: Schema.DateTimeUtc,
+          result: Schema.NullOr(Schema.String),
+        }),
+      }),
+    ),
   }),
   /**
    * Stop for one thread, whatever it is doing: interrupts its running turn, holds its queue,
-   * ends its pull request watches, and drops pending delegated-task wakes. Nothing to stop is
+   * ends its pull request and workflow run watches, and drops pending delegated-task wakes. Nothing to stop is
    * an accepted no-op. Delegated tasks under the thread get their own `thread.stop`.
    */
   Schema.Struct({
@@ -3429,6 +3499,11 @@ const knownDomainEventTypes: ReadonlySet<string> = new Set(
     return "literals" in type ? type.literals : [type.literal];
   }),
 );
+
+/** Whether `type` is an {@link OrchestrationV2DomainEvent} discriminant in this build. */
+export function isKnownOrchestrationV2EventType(type: string): boolean {
+  return knownDomainEventTypes.has(type);
+}
 
 /**
  * A thread event whose type this build does not know, or a turn-item.updated

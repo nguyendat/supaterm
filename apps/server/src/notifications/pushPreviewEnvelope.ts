@@ -6,13 +6,13 @@ import type {
   PushPreviewContent,
   PushPreviewKey,
   PushPreviewEnvelope,
-} from "@supacode/contracts/push";
-import { decodeBase64, encodeBase64 } from "@supacode/shared/relay/protocol";
+} from "@supaterm/contracts/push";
+import { decodeBase64, encodeBase64 } from "@supaterm/shared/relay/protocol";
 import {
   PUSH_PREVIEW_INFO,
   pushPreviewAssociatedData,
   pushPreviewSignatureData,
-} from "@supacode/shared/pushPreviewEnvelope";
+} from "@supaterm/shared/pushPreviewEnvelope";
 
 export const pushPreviewSuite = new CipherSuite({
   kem: new DhkemX25519HkdfSha256(),

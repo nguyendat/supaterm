@@ -3,11 +3,11 @@ import type {
   OrchestrationV2Run,
   OrchestrationV2ThreadProjection,
   OrchestrationV2TurnItem,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import {
   createOrchestrationV2TurnItemVisibility,
   isOrchestrationV2TurnItemVisible,
-} from "@supacode/shared/orchestrationV2Timeline";
+} from "@supaterm/shared/orchestrationV2Timeline";
 
 export type ApplyOrchestrationV2ProjectionEventOptions = {
   readonly partialTimeline?: boolean;
@@ -216,6 +216,7 @@ export function applyOrchestrationV2ProjectionEvent(
     case "thread.active-reordered":
     case "thread.metadata-updated":
     case "thread.pull-request-synced":
+    case "thread.workflow-run-watch-synced":
     case "thread.runtime-mode-updated":
     case "thread.interaction-mode-updated":
     case "thread.model-selection-updated":

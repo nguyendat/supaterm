@@ -10,12 +10,13 @@ import {
   OrchestrationV2Run,
   OrchestrationV2ThreadProjection,
   ThreadId,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import { withoutWatches } from "./threadWatches.ts";
 
 export interface ThreadForkPlanV2 {
   readonly targetThread: OrchestrationV2AppThread;
@@ -55,7 +56,7 @@ export interface ThreadForkServiceV2Shape {
 export class ThreadForkServiceV2 extends Context.Service<
   ThreadForkServiceV2,
   ThreadForkServiceV2Shape
->()("supacode/orchestration-v2/ThreadForkService/ThreadForkServiceV2") {}
+>()("supaterm/orchestration-v2/ThreadForkService/ThreadForkServiceV2") {}
 
 export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
   ThreadForkServiceV2,
@@ -70,7 +71,7 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
           });
         }
         const targetThread: OrchestrationV2AppThread = {
-          ...input.sourceProjection.thread,
+          ...withoutWatches(input.sourceProjection.thread),
           createdBy: input.createdBy,
           creationSource: input.creationSource,
           id: input.targetThreadId,

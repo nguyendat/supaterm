@@ -1,13 +1,13 @@
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import { ComposerContextLabel } from "./ComposerContextLabel";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
-import { resolveThreadCurrentPullRequestLink } from "@supacode/shared/threadPullRequests";
+import { resolveThreadCurrentPullRequestLink } from "@supaterm/shared/threadPullRequests";
 import { useRightPanelStore } from "../rightPanelStore";
-import { scopeProjectRef, scopeThreadRef } from "@supacode/client-runtime/environment";
+import { scopeProjectRef, scopeThreadRef } from "@supaterm/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@supacode/client-runtime/state/runtime";
+} from "@supaterm/client-runtime/state/runtime";
 import {
   AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
@@ -15,7 +15,7 @@ import {
   type EnvironmentId,
   type VcsRef,
   type ThreadId,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import { ChevronDownIcon, GitBranchIcon } from "lucide-react";
 import {
   useCallback,
@@ -175,6 +175,19 @@ export function BranchToolbarBranchSelector({
       draftThreadEnvMode: draftThread?.envMode,
     });
 
+  const isDraftOnCurrentProject = useCallback(() => {
+    const store = useComposerDraftStore.getState();
+    const currentDraft = draftId
+      ? store.getDraftSession(draftId)
+      : store.getDraftThreadByRef(threadRef);
+    return Boolean(
+      currentDraft &&
+      !currentDraft.promotedTo &&
+      currentDraft.environmentId === environmentId &&
+      currentDraft.projectId === activeProject?.id,
+    );
+  }, [activeProject?.id, draftId, environmentId, threadRef]);
+
   // ---------------------------------------------------------------------------
   // Thread branch mutation (colocated — only this component calls it)
   // ---------------------------------------------------------------------------
@@ -206,6 +219,7 @@ export function BranchToolbarBranchSelector({
         onActiveThreadBranchOverrideChange?.(branch);
         return;
       }
+      if (!isDraftOnCurrentProject()) return;
       const nextDraftEnvMode = resolveDraftEnvModeAfterBranchChange({
         nextWorktreePath: worktreePath,
         currentWorktreePath: activeWorktreePath,
@@ -216,7 +230,6 @@ export function BranchToolbarBranchSelector({
         worktreePath,
         envMode: nextDraftEnvMode,
         environmentSelection: "manual",
-        projectRef: scopeProjectRef(environmentId, activeProject.id),
       });
     },
     [
@@ -225,6 +238,7 @@ export function BranchToolbarBranchSelector({
       serverSession,
       activeWorktreePath,
       hasServerThread,
+      isDraftOnCurrentProject,
       onActiveThreadBranchOverrideChange,
       setDraftThreadContext,
       draftId,
@@ -426,6 +440,10 @@ export function BranchToolbarBranchSelector({
         }),
       );
       return;
+    }
+    if (!hasServerThread) {
+      if (!isDraftOnCurrentProject()) return;
+      setDraftThreadContext(draftId ?? threadRef, { environmentSelection: "manual" });
     }
     startBranchActionTransition(async () => {
       await action();

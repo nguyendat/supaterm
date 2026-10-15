@@ -1,4 +1,4 @@
-import { SourceControlProviderKind } from "@supacode/contracts";
+import { SourceControlProviderKind } from "@supaterm/contracts";
 import { assert, describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import {
@@ -18,9 +18,9 @@ import {
   type ServerSettings as ContractServerSettings,
   type ServerSettingsPatch,
   type ThreadPullRequestLink,
-} from "@supacode/contracts";
-import { applyServerSettingsPatch } from "@supacode/shared/serverSettings";
-import * as KeyedLock from "@supacode/shared/KeyedLock";
+} from "@supaterm/contracts";
+import { applyServerSettingsPatch } from "@supaterm/shared/serverSettings";
+import * as KeyedLock from "@supaterm/shared/KeyedLock";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -747,6 +747,31 @@ const startHarness = Effect.fn("startThreadSettlementHarness")(function* (
 });
 
 describe("ThreadSettlementServiceV2 worker", () => {
+  it.effect("keeps recently merged threads active with default settings", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const latestUserMessageAt = DateTime.makeUnsafe("2026-08-27T00:00:00.000Z");
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([
+            makeThread("merged-link", {
+              latestUserMessageAt,
+              pullRequests: [makeMergedPullRequestLink()],
+            }),
+            makeThread("merged-branch", { latestUserMessageAt, branch: "feature" }),
+          ]),
+          branchPullRequest: () => Effect.succeed(makeBranchPullRequest("merged")),
+        });
+
+        yield* Effect.gen(function* () {
+          const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+          yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+          expect(yield* Ref.get(fixture.commands)).toEqual([]);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
   it.effect("settles a merged pull request stored only in the thread links", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -756,7 +781,11 @@ describe("ThreadSettlementServiceV2 worker", () => {
         });
         const fixture = yield* makeHarness({
           snapshot: makeSnapshot([thread]),
-          settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: null },
+          settings: {
+            ...DEFAULT_SERVER_SETTINGS,
+            sidebarAutoSettleAfterDays: null,
+            sidebarAutoSettleOnMerge: true,
+          },
         });
 
         yield* Effect.gen(function* () {
@@ -786,7 +815,11 @@ describe("ThreadSettlementServiceV2 worker", () => {
           ]),
           branchPullRequest: () => Effect.succeed(makeBranchPullRequest("merged")),
           // Only the merge can settle these threads, so the branch lookup path is exercised.
-          settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: null },
+          settings: {
+            ...DEFAULT_SERVER_SETTINGS,
+            sidebarAutoSettleAfterDays: null,
+            sidebarAutoSettleOnMerge: true,
+          },
         });
 
         yield* Effect.gen(function* () {
@@ -907,6 +940,7 @@ describe("ThreadSettlementServiceV2 worker", () => {
         const mergedThreadSettled = yield* Deferred.make<void>();
         const branchLookupCount = yield* Ref.make(0);
         const fixture = yield* makeHarness({
+          settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleOnMerge: true },
           snapshot: makeSnapshot([
             makeThread("merged-in-app", {
               latestUserMessageAt: DateTime.makeUnsafe("2026-08-27T00:00:00.000Z"),
@@ -965,6 +999,7 @@ describe("ThreadSettlementServiceV2 worker", () => {
           const state = yield* Ref.make<"open" | "merged">("open");
           const mergedThreadSettled = yield* Deferred.make<void>();
           const fixture = yield* makeHarness({
+            settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleOnMerge: true },
             snapshot: makeSnapshot([
               makeThread("branch-thread", {
                 branch: "saved-feature",
@@ -1005,6 +1040,7 @@ describe("ThreadSettlementServiceV2 worker", () => {
         const releaseMergeLookup = yield* Deferred.make<void>();
         const lookupCount = yield* Ref.make(0);
         const fixture = yield* makeHarness({
+          settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleOnMerge: true },
           snapshot: makeSnapshot([
             makeThread("merged-in-app", {
               latestUserMessageAt: DateTime.makeUnsafe("2026-08-27T00:00:00.000Z"),

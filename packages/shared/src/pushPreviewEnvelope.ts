@@ -1,4 +1,4 @@
-import type { PushDeliveryMetadata, PushPreviewEnvelope } from "@supacode/contracts/push";
+import type { PushDeliveryMetadata, PushPreviewEnvelope } from "@supaterm/contracts/push";
 
 export const PUSH_PREVIEW_INFO = "supacode-push-preview-hpke-v1";
 

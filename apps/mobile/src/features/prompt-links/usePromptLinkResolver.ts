@@ -1,27 +1,27 @@
 import { StackActions, useNavigation } from "@react-navigation/native";
-import { availableScratchWorkspaceRoot } from "@supacode/client-runtime/operations/projects";
+import { availableScratchWorkspaceRoot } from "@supaterm/client-runtime/operations/projects";
 import {
   findPromptLinkProject,
   findPromptLinkPullRequestThread,
   resolvePromptLinkModelSelection,
-} from "@supacode/client-runtime/prompt-links";
+} from "@supaterm/client-runtime/prompt-links";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@supacode/client-runtime/state/runtime";
-import type { EnvironmentProject } from "@supacode/client-runtime/state/shell";
-import type { EnvironmentId } from "@supacode/contracts";
+} from "@supaterm/client-runtime/state/runtime";
+import type { EnvironmentProject } from "@supaterm/client-runtime/state/shell";
+import type { EnvironmentId } from "@supaterm/contracts";
 import {
   parseNewThreadLink,
   type LinkedPrompt,
   type PromptLinkPullRequest,
   type PromptLinkRepository,
-} from "@supacode/shared/promptLinks";
+} from "@supaterm/shared/promptLinks";
 import { useEffect, useEffectEvent, useRef } from "react";
 import { Alert } from "react-native";
 
 import { scopedThreadKey } from "../../lib/scopedEntities";
-import { useServerConfigs, useThreadShells } from "../../state/entities";
+import { useProjects, useServerConfigs, useThreadShells } from "../../state/entities";
 import { projectEnvironment } from "../../state/projects";
 import { composerPullRequests } from "../../state/pull-requests";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -54,7 +54,7 @@ type LinkedDraftRequest = {
 };
 
 /**
- * Opens a `supacode://new?…` link. The link lands on the New Task picker with its query as route
+ * Opens a `supaterm://new?…` link. The link lands on the New Task picker with its query as route
  * params; this resolves it to a project, a thread, or a choice, then fills a draft. Nothing is
  * ever sent: the user reads the prompt and presses Send. Used by `NewTaskRouteScreen`.
  */
@@ -63,6 +63,7 @@ export function usePromptLinkResolver(params: Readonly<Record<string, unknown>> 
   const flow = useNewTaskFlow();
   const { state: catalogState } = useWorkspaceState();
   const threads = useThreadShells();
+  const projects = useProjects();
   const serverConfigs = useServerConfigs();
   const { connectedEnvironments } = useRemoteConnectionStatus();
   const openScratch = useAtomCommand(projectEnvironment.openScratch, { reportFailure: false });
@@ -166,17 +167,19 @@ export function usePromptLinkResolver(params: Readonly<Record<string, unknown>> 
       connectedEnvironments
         .filter(
           (environment) =>
-            availableScratchWorkspaceRoot(
-              environment.connectionState,
-              serverConfigs.get(environment.environmentId),
-            ) !== null,
+            availableScratchWorkspaceRoot({
+              environmentId: environment.environmentId,
+              connectionPhase: environment.connectionState,
+              serverConfig: serverConfigs.get(environment.environmentId),
+              projects,
+            }) !== null,
         )
         .map((environment) => environment.environmentId),
     );
     if (environmentId === null) {
       Alert.alert(
         "Could not start without a project",
-        "No connected environment offers threads without a project.",
+        "Connect to an environment to start without a project.",
       );
       return;
     }

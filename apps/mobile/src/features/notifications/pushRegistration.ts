@@ -1,19 +1,19 @@
 import {
   createAtomCommandScheduler,
   squashAtomCommandFailure,
-} from "@supacode/client-runtime/state/runtime";
+} from "@supaterm/client-runtime/state/runtime";
 import * as AsyncResult from "effect/reactivity/AsyncResult";
-import type { EnvironmentId } from "@supacode/contracts";
+import type { EnvironmentId } from "@supaterm/contracts";
 import {
   type PushConfirmInput,
   type PushPreferences,
   type PushEnrollmentData,
   PushNotificationError,
   type PushRegistration,
-} from "@supacode/contracts/push";
+} from "@supaterm/contracts/push";
 import * as Effect from "effect/Effect";
 import * as Crypto from "effect/Crypto";
-import { encodeBase64 } from "@supacode/shared/relay/protocol";
+import { encodeBase64 } from "@supaterm/shared/relay/protocol";
 import * as Schema from "effect/Schema";
 import * as Application from "expo-application";
 import * as Notifications from "expo-notifications";

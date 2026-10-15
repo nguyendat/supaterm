@@ -2,20 +2,20 @@ import type {
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
   OrchestrationV2ThreadHistoryPage,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import {
   latestExecutedRun,
   latestRootProviderFailure,
   runRanAfter,
   usageLimitBlockedRun,
-} from "@supacode/shared/orchestrationV2ThreadError";
-import { threadPullRequestsOf } from "@supacode/shared/threadPullRequests";
+} from "@supaterm/shared/orchestrationV2ThreadError";
+import { threadPullRequestsOf } from "@supaterm/shared/threadPullRequests";
 import {
   normalizeThreadPullRequestKey,
   visibleThreadPullRequests,
   threadPullRequestKeysEqual,
   legacyThreadPullRequestKey,
-} from "@supacode/shared/threadPullRequests";
+} from "@supaterm/shared/threadPullRequests";
 import {
   ORCHESTRATION_V2_WORKSPACE_PREPARATION_FAILURE_CODE,
   canAutoDismissUserInput,
@@ -31,7 +31,6 @@ import {
   type OrchestrationV2InternalCommand,
   type OrchestrationV2ServerCommand,
   type ThreadPullRequestLink,
-  type ThreadPullRequestWatch,
   type OrchestrationV2AppThread,
   type OrchestrationV2ContextHandoff,
   type OrchestrationV2ContextSourcePoint,
@@ -64,12 +63,12 @@ import {
   ThreadLinkedPullRequest,
   ThreadId,
   type TurnItemId,
-} from "@supacode/contracts";
-import { modelSelectionsEqual } from "@supacode/shared/model";
+} from "@supaterm/contracts";
+import { modelSelectionsEqual } from "@supaterm/shared/model";
 import {
   derivePendingBackgroundWork,
   pendingBackgroundTurnItems,
-} from "@supacode/shared/orchestrationV2PendingBackgroundWork";
+} from "@supaterm/shared/orchestrationV2PendingBackgroundWork";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -91,13 +90,13 @@ import { CheckpointServiceV2 } from "./CheckpointService.ts";
 import { CommandPolicyV2, resolveMessageDispatchIntent } from "./CommandPolicy.ts";
 import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
 import { ContextHandoffServiceV2 } from "./ContextHandoffService.ts";
-import { notificationTurnItem } from "@supacode/provider-core/server/notification";
+import { notificationTurnItem } from "@supaterm/provider-core/server/notification";
 import { isRestartNoteSource } from "./RestartBackgroundNote.ts";
 import { isUndeliveredMailboxSteer } from "./NotificationMailbox.ts";
 import { EventSinkV2 } from "./EventSink.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
 import type { OrchestrationEffectRequestV2, PendingOrchestrationEffectV2 } from "./EffectOutbox.ts";
-import * as IdAllocator from "@supacode/provider-core/server/IdAllocator";
+import * as IdAllocator from "@supaterm/provider-core/server/IdAllocator";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import { DispatchModeLimit, exceededDispatchModeLimit } from "./DispatchModeLimit.ts";
 import {
@@ -113,9 +112,11 @@ import {
   type ProjectionCheckpointContext,
   type ShellSnapshotOptions,
 } from "./ProjectionStore.ts";
+import { withPullRequestWatch, withoutWatches } from "./threadWatches.ts";
+import { sameWorkflowRun } from "./workflowRunWatch.ts";
 import { ProviderAdapterRegistryV2 } from "./ProviderAdapterRegistry.ts";
-import * as ProviderContinuationRequests from "@supacode/provider-core/server/ProviderContinuationRequests";
-import { makeProviderFailure } from "@supacode/provider-core/server/failure";
+import * as ProviderContinuationRequests from "@supaterm/provider-core/server/ProviderContinuationRequests";
+import { makeProviderFailure } from "@supaterm/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import { ProviderSwitchServiceV2 } from "./ProviderSwitchService.ts";
@@ -128,10 +129,10 @@ import {
   subagentResultForRun,
   delegatedTaskProgress,
   subagentThreadTitle,
-} from "@supacode/provider-core/server/subagentProjection";
+} from "@supaterm/provider-core/server/subagentProjection";
 import { forkableSourceRunStatusError, ThreadForkServiceV2 } from "./ThreadForkService.ts";
 import { planThreadDeletion } from "./ThreadDeletion.ts";
-import type * as ProviderAdapter from "@supacode/provider-core/server/ProviderAdapter";
+import type * as ProviderAdapter from "@supaterm/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
 
 export class OrchestratorDispatchError extends Schema.TaggedError<OrchestratorDispatchError>()(
@@ -379,7 +380,7 @@ export interface OrchestratorV2Shape {
 }
 
 export class OrchestratorV2 extends Context.Service<OrchestratorV2, OrchestratorV2Shape>()(
-  "supacode/orchestration-v2/Orchestrator/OrchestratorV2",
+  "supaterm/orchestration-v2/Orchestrator/OrchestratorV2",
 ) {}
 
 function nextRunOrdinal(projection: Pick<OrchestrationV2ThreadProjection, "runs">): number {
@@ -421,7 +422,7 @@ function wakeWorkStartedAt(
 export function isNativeMaintenanceCommand(message: {
   readonly text: string;
   readonly attachments: ReadonlyArray<ChatAttachment>;
-  readonly context?: import("@supacode/contracts").OrchestrationMessageContext | undefined;
+  readonly context?: import("@supaterm/contracts").OrchestrationMessageContext | undefined;
 }): boolean {
   return (
     message.attachments.length === 0 &&
@@ -463,6 +464,9 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.pull-request-link.sync":
     case "thread.pull-request.watch":
     case "thread.pull-request-watch.sync":
+    case "thread.workflow-run.unwatch":
+    case "thread.workflow-run-watch.start":
+    case "thread.workflow-run-watch.end":
     case "thread.pull-request.sync":
     case "thread.title.regeneration.complete":
     case "thread.runtime-mode.set":
@@ -549,13 +553,14 @@ function hasLiveRun(projection: Pick<OrchestrationV2ThreadProjection, "runs">): 
   );
 }
 
-/** The link with its watch replaced, or removed when `watch` is undefined. */
-function withPullRequestWatch(
-  link: ThreadPullRequestLink,
-  watch: ThreadPullRequestWatch | undefined,
-): ThreadPullRequestLink {
-  const { watch: _previous, ...rest } = link;
-  return watch === undefined ? rest : { ...rest, watch };
+/** Same rule as a direct message.dispatch: a provider-native subagent takes no messages. */
+function takesNoWakes(thread: OrchestrationV2AppThread): boolean {
+  return (
+    thread.archivedAt !== null ||
+    thread.settledOverride === "settled" ||
+    thread.settledAt !== null ||
+    isProviderNativeSubagentThread(thread)
+  );
 }
 
 /** A legacy single-PR link as a link entry. Re-linking a pull request keeps its watch. */
@@ -1992,7 +1997,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           : "disposed";
       const now = yield* DateTime.now;
       const emitEvent = emit(events, command);
-      // task_status and supacode_thread_read use distinct command IDs, so two
+      // task_status and supaterm_thread_read use distinct command IDs, so two
       // valid observations can race after their read preflight. Re-emit the
       // existing task row so the second dispatch is a successful idempotent
       // no-op rather than "already acknowledged/disposed" or empty-events.
@@ -2357,60 +2362,55 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
   // Checked under the thread lock: the watch or the thread can change while the host is read.
   // The watch is recorded first so the wake's own thread events carry it.
-  const dispatchPullRequestWatchSync = Effect.fn("orchestrationV2.dispatch.pullRequestWatchSync")(
-    function* (
-      command: Extract<
-        OrchestrationV2ServerCommand,
-        { readonly type: "thread.pull-request-watch.sync" }
-      >,
-      events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
-      effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
-    ) {
-      const thread = yield* projectionStore
-        .getThread(command.threadId)
-        .pipe(
-          Effect.mapError(
-            (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
-          ),
-        );
-      const key = normalizeThreadPullRequestKey(command);
-      const link = threadPullRequestsOf(thread).find(
-        (candidate) =>
-          candidate.source !== "stack-dismissed" && threadPullRequestKeysEqual(candidate, key),
+  const dispatchWatchUpdate = Effect.fn("orchestrationV2.dispatch.watchUpdate")(function* (
+    command: Extract<
+      OrchestrationV2ServerCommand,
+      { readonly type: "thread.pull-request-watch.sync" | "thread.workflow-run-watch.end" }
+    >,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+  ) {
+    const thread = yield* projectionStore
+      .getThread(command.threadId)
+      .pipe(
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+        ),
       );
-      // Same rule as a direct message.dispatch: a provider-native subagent takes no messages.
-      const inactive =
-        thread.archivedAt !== null ||
-        thread.settledOverride === "settled" ||
-        thread.settledAt !== null ||
-        isProviderNativeSubagentThread(thread);
-      if (link?.watch?.startedAt !== command.startedAt || (command.wake && inactive)) {
-        return yield* new OrchestratorDispatchError({
-          commandId: command.commandId,
-          commandType: command.type,
-          cause: "The pull request watch ended or its thread settled while it was read.",
-        });
-      }
-      yield* dispatchThreadMutation(command, events, effects);
-      if (command.wake === undefined) return;
-      yield* dispatchMessage(
-        {
-          type: "message.dispatch",
-          commandId: command.commandId,
-          threadId: command.threadId,
-          messageId: command.wake.messageId,
-          text: command.wake.text,
-          notification: command.wake.notification,
-          attachments: [],
-          dispatchMode: { type: "queue_after_active" },
-          createdBy: "agent",
-          creationSource: "server",
-        },
-        events,
-        effects,
-      );
-    },
-  );
+    const startedAt =
+      command.type === "thread.pull-request-watch.sync"
+        ? threadPullRequestsOf(thread).find(
+            (candidate) =>
+              candidate.source !== "stack-dismissed" &&
+              threadPullRequestKeysEqual(candidate, normalizeThreadPullRequestKey(command)),
+          )?.watch?.startedAt
+        : thread.workflowRunWatches?.find((watch) => sameWorkflowRun(watch, command))?.startedAt;
+    if (startedAt !== command.startedAt || (command.wake && takesNoWakes(thread))) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "The watch ended or its thread settled while it was read.",
+      });
+    }
+    yield* dispatchThreadMutation(command, events, effects);
+    if (command.wake === undefined) return;
+    yield* dispatchMessage(
+      {
+        type: "message.dispatch",
+        commandId: command.commandId,
+        threadId: command.threadId,
+        messageId: command.wake.messageId,
+        text: command.wake.text,
+        notification: command.wake.notification,
+        attachments: [],
+        dispatchMode: { type: "queue_after_active" },
+        createdBy: "agent",
+        creationSource: "server",
+      },
+      events,
+      effects,
+    );
+  });
 
   const dispatchThreadMutation = Effect.fn("orchestrationV2.dispatch.threadMutation")(function* (
     command: Extract<
@@ -2435,6 +2435,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           | "thread.pull-request-link.sync"
           | "thread.pull-request.watch"
           | "thread.pull-request-watch.sync"
+          | "thread.workflow-run.unwatch"
+          | "thread.workflow-run-watch.start"
+          | "thread.workflow-run-watch.end"
           | "thread.pull-request.sync"
           | "thread.title.regeneration.complete"
           | "thread.runtime-mode.set"
@@ -2462,19 +2465,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: `Thread ${command.threadId} is deleted.`,
       });
     }
-    if (
-      command.type === "thread.pull-request.watch" &&
-      command.watching &&
-      isProviderNativeSubagentThread(thread)
-    ) {
+    const startsWatch =
+      (command.type === "thread.pull-request.watch" && command.watching) ||
+      command.type === "thread.workflow-run-watch.start";
+    if (startsWatch && isProviderNativeSubagentThread(thread)) {
       return yield* new OrchestratorSubagentThreadReadOnlyError({
         commandId: command.commandId,
         threadId: command.threadId,
       });
     }
     if (
-      command.type === "thread.pull-request.watch" &&
-      command.watching &&
+      startsWatch &&
       (thread.settledOverride === "settled" ||
         thread.settledAt !== null ||
         thread.archivedAt !== null)
@@ -2482,28 +2483,26 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
         commandType: command.type,
-        cause: `Thread ${command.threadId} is settled or archived and cannot watch pull requests.`,
+        cause: `Thread ${command.threadId} is settled or archived and cannot start a watch.`,
       });
     }
-    // A subagent or delegated task reports to its parent thread, which owns the pull request.
-    // Its own watch would wake it on every change of a PR it was not asked to babysit.
-    if (
-      command.type === "thread.pull-request.watch" &&
-      command.watching &&
-      thread.lineage.relationshipToParent === "subagent"
-    ) {
+    // A subagent or delegated task reports to its parent thread, which owns the pull request
+    // or run. Its own watch would wake it on news it was not asked to babysit.
+    if (startsWatch && thread.lineage.relationshipToParent === "subagent") {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
         commandType: command.type,
-        cause: `Thread ${command.threadId} is a subagent; its parent thread watches pull requests.`,
+        cause: `Thread ${command.threadId} is a subagent; its parent thread owns the watch.`,
       });
     }
-    // Only the agent's watch_pull_request links as "agent". A call that raced a Stop may land
-    // after its run ended, so the latest run that executed decides. A user can still watch.
+    // Only the agent's watch_pull_request links as "agent", and only agents watch runs. A call
+    // that raced a Stop may land after its run ended, so the latest run that executed decides.
+    // A user can still watch a pull request.
     if (
-      command.type === "thread.pull-request.watch" &&
-      command.watching &&
-      command.link?.source === "agent"
+      (command.type === "thread.pull-request.watch" &&
+        command.watching &&
+        command.link?.source === "agent") ||
+      command.type === "thread.workflow-run-watch.start"
     ) {
       const { runs } = yield* projectionStore
         .getThreadRecords(command.threadId, ["runs"])
@@ -2833,29 +2832,27 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         case "thread.archive":
           // An archived thread takes no wakes, so its watches end like a settled thread's.
           return {
-            ...thread,
+            ...withoutWatches(thread),
             archivedAt: now,
             titleRegeneration: null,
-            pullRequests: thread.pullRequests?.map((link) => withPullRequestWatch(link, undefined)),
             updatedAt: now,
           };
         case "thread.unarchive":
           return { ...thread, archivedAt: null, updatedAt: now };
         case "thread.settle": {
-          // Settling is "I'm done with this": it clears a pin the same way it
-          // parks the thread (mirrors the v1 decider's settle/pin exclusion).
           const wasPinned = thread.pinnedAt != null;
           const alreadySettled =
             thread.settledOverride === "settled" && thread.settledAt !== null && !wasPinned;
           return {
-            ...thread,
+            ...withoutWatches(thread),
             settledOverride: "settled",
             settledAt: alreadySettled ? thread.settledAt : (command.settledAt ?? now),
-            pullRequests: thread.pullRequests?.map((link) => withPullRequestWatch(link, undefined)),
             unsettledAt: null,
             pinnedAt: null,
             pinOrderKey: null,
             activeOrderKey: null,
+            snoozedUntil: null,
+            snoozedAt: null,
             updatedAt: alreadySettled ? thread.updatedAt : now,
           };
         }
@@ -3183,6 +3180,38 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             updatedAt: command.type === "thread.pull-request.watch" ? now : thread.updatedAt,
           };
         }
+        case "thread.workflow-run-watch.start":
+        case "thread.workflow-run.unwatch":
+        case "thread.workflow-run-watch.end": {
+          const watches = thread.workflowRunWatches ?? [];
+          const existing = watches.find((watch) => sameWorkflowRun(watch, command));
+          const ended = { ...thread, workflowRunWatches: watches.filter((w) => w !== existing) };
+          switch (command.type) {
+            // A read that raced a stop or a newer watch of the run must not end that one.
+            // Ending is recorded progress, not activity.
+            case "thread.workflow-run-watch.end":
+              return existing?.startedAt === command.startedAt ? ended : thread;
+            case "thread.workflow-run.unwatch":
+              return existing === undefined ? thread : { ...ended, updatedAt: now };
+            case "thread.workflow-run-watch.start":
+              if (existing !== undefined) return thread;
+              return {
+                ...thread,
+                workflowRunWatches: [
+                  ...watches,
+                  {
+                    host: command.host,
+                    repository: command.repository,
+                    runId: command.runId,
+                    name: command.name,
+                    url: command.url,
+                    startedAt: DateTime.formatIso(now),
+                  },
+                ],
+                updatedAt: now,
+              };
+          }
+        }
         case "thread.pull-request.sync":
           return {
             ...thread,
@@ -3275,6 +3304,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         case "thread.pull-request-watch.sync":
         case "thread.pull-request.sync":
           return "thread.pull-request-synced" as const;
+        case "thread.workflow-run.unwatch":
+        case "thread.workflow-run-watch.start":
+        case "thread.workflow-run-watch.end":
+          return "thread.workflow-run-watch-synced" as const;
         case "thread.runtime-mode.set":
           return "thread.runtime-mode-updated" as const;
         case "thread.interaction-mode.set":
@@ -3813,7 +3846,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     readonly messageId: OrchestrationV2ConversationMessage["id"];
     readonly text: string;
     readonly attachments: ReadonlyArray<ChatAttachment>;
-    readonly context?: import("@supacode/contracts").OrchestrationMessageContext | undefined;
+    readonly context?: import("@supaterm/contracts").OrchestrationMessageContext | undefined;
     readonly createdBy: OrchestrationV2ConversationMessage["createdBy"];
     readonly creationSource: OrchestrationV2ConversationMessage["creationSource"];
     readonly scheduledTaskId?: OrchestrationV2ConversationMessage["scheduledTaskId"];
@@ -8801,7 +8834,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
   /**
    * What Stop holds besides the run it interrupts: queued runs wait for the user, the
-   * thread's pull request watches end, and every wake its delegated tasks still owe is
+   * thread's pull request and workflow run watches end, and every wake its delegated tasks still owe is
    * dropped, since Stop stops those tasks too. Nothing automatic starts the thread again.
    * `cohortRunIds` are dropped even when they owe nothing, like a plain interrupt's.
    */
@@ -8848,6 +8881,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             ...thread,
             pullRequests: pullRequests.map((link) => withPullRequestWatch(link, undefined)),
           },
+        });
+      }
+      // Carries the pull request watches' end too, as the later of the two events. Stop is
+      // activity, and this event's payload sets the thread's update time.
+      if ((thread.workflowRunWatches ?? []).length > 0) {
+        yield* emitEvent({
+          type: "thread.workflow-run-watch-synced",
+          threadId: thread.id,
+          providerInstanceId: thread.providerInstanceId,
+          occurredAt: input.now,
+          payload: { ...withoutWatches(thread), updatedAt: input.now },
         });
       }
       const cohortRunIds = new Set(input.cohortRunIds);
@@ -8920,6 +8964,60 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
         ),
       );
+      if (command.subagent !== undefined) {
+        const outcome = command.subagent.outcome;
+        const subagent = projection.subagents.find((task) => task.id === command.subagent?.id);
+        if (
+          subagent?.origin !== "provider_native" ||
+          !["pending", "running", "waiting"].includes(subagent.status) ||
+          (subagent.startedAt !== null &&
+            DateTime.toEpochMillis(subagent.startedAt) >
+              DateTime.toEpochMillis(command.subagent.stoppedAt))
+        )
+          return;
+        const now = yield* DateTime.now;
+        const allocateEventId = () =>
+          idAllocator.allocate.event({
+            threadId: command.threadId,
+            commandId: command.commandId,
+          });
+        const ended = yield* endOrphanedNativeSubagent({
+          projection,
+          subagentId: subagent.id,
+          result: outcome.result,
+          status: outcome.status,
+          completedAt: outcome.completedAt,
+          now,
+          emitted: yield* Ref.get(events),
+          allocateEventId,
+        }).pipe(mapDispatchError(command));
+        yield* Ref.update(events, (current) => [...current, ...ended]);
+        if (subagent.childThreadId !== null) {
+          const child = yield* projectionStore
+            .getThreadRecords(subagent.childThreadId, ["nodes", "turnItems"], {
+              turnItemRunIds: [null],
+              turnItemStatuses: ["pending", "running", "waiting"],
+            })
+            .pipe(
+              Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
+              mapDispatchError(command),
+            );
+          if (child !== null) {
+            const childEnded = yield* endRunlessRootTurns({
+              threadId: subagent.childThreadId,
+              providerInstanceId: subagent.providerInstanceId,
+              projection: child,
+              status: outcome.status,
+              completedAt: outcome.completedAt,
+              now,
+              emitted: yield* Ref.get(events),
+              allocateEventId,
+            }).pipe(mapDispatchError(command));
+            yield* Ref.update(events, (current) => [...current, ...childEnded]);
+          }
+        }
+        return;
+      }
       const stoppedRunId = projection.attempts.find(
         (attempt) => attempt.id === stopped.providerTurn?.runAttemptId,
       )?.runId;
@@ -8997,16 +9095,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           cause: "The requested native subagent cannot be stopped on this run.",
         });
       }
-      if (
-        command.workflowOnly === true &&
-        (subagent.workflow === undefined || subagent.status !== "running")
-      ) {
-        return yield* new OrchestratorDispatchError({
-          commandId: command.commandId,
-          commandType: command.type,
-          cause: "The requested workflow is no longer running.",
-        });
-      }
       if (!["pending", "running", "waiting"].includes(subagent.status)) return;
       const providerThread = projection.providerThreads.find(
         (candidate) => candidate.id === run?.providerThreadId,
@@ -9029,7 +9117,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const providerSessionId = providerThread.providerSessionId;
       const nativeTaskId = subagent.nativeTaskRef.nativeId;
       const now = yield* DateTime.now;
-      // Record the request with its effect; the provider notification supplies the outcome.
+      // The effect can repair stale projections only after the provider confirms an outcome.
       yield* emit(
         events,
         command,
@@ -10717,8 +10805,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "provider.switch":
         yield* dispatchThreadMutation(command, events, effects);
         break;
+      case "thread.workflow-run.unwatch":
+      case "thread.workflow-run-watch.start":
+        yield* dispatchThreadMutation(command, events, effects);
+        break;
       case "thread.pull-request-watch.sync":
-        yield* dispatchPullRequestWatchSync(command, events, effects);
+      case "thread.workflow-run-watch.end":
+        yield* dispatchWatchUpdate(command, events, effects);
         break;
       case "provider-session.detach":
         yield* dispatchProviderSessionDetach(command, events, effects);

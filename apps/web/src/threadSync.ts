@@ -1,4 +1,4 @@
-import type { EnvironmentThreadStatus } from "@supacode/client-runtime/state/threads";
+import type { EnvironmentThreadStatus } from "@supaterm/client-runtime/state/threads";
 
 export type ThreadSyncPhase = "loading" | "syncing";
 
@@ -20,8 +20,4 @@ export function resolveThreadSyncPhase(input: {
     case "live":
       return null;
   }
-}
-
-export function threadSyncLabel(phase: ThreadSyncPhase): string {
-  return phase === "loading" ? "Loading messages..." : "Syncing messages...";
 }

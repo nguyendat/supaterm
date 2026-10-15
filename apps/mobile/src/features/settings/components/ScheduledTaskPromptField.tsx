@@ -3,7 +3,7 @@ import { TextInput, View } from "react-native";
 import { AppText as Text } from "../../../components/AppText";
 import type { ComposerEditorSelection } from "../../../components/ComposerEditor";
 import {
-  ComposerDictationCancelAction,
+  ComposerDictationLeadingAction,
   ComposerDictationPrimaryAction,
   ComposerDictationStartAction,
   ComposerDictationStatus,
@@ -56,9 +56,13 @@ export function ScheduledTaskPromptField(props: {
         ) : null}
       </View>
       {showsDictation ? (
-        <ComposerDictationToolbar showsDictation>
-          <View className="h-11 flex-row items-center">
-            <ComposerDictationCancelAction presentation={presentation} onCancel={voice.cancel} />
+        <ComposerDictationToolbar statusKind={presentation.statusKind}>
+          <View className="h-full flex-row items-center gap-2">
+            <ComposerDictationLeadingAction
+              presentation={presentation}
+              onStop={voice.stop}
+              onCancel={voice.cancel}
+            />
             <ComposerDictationStatus
               audioLevels={voice.audioLevels}
               elapsedSeconds={voice.elapsedSeconds}

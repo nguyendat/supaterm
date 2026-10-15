@@ -3,8 +3,9 @@ import {
   ProjectId,
   type ProjectReadFileResult,
   type ScopedProjectRef,
+  type ServerConfig,
   WS_METHODS,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -36,7 +37,8 @@ import {
 } from "../operations/commands.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { createFileMetadataAtoms } from "./fileMetadata.ts";
-import { resolveWorkspaceFilePath } from "@supacode/shared/path";
+import { resolveWorkspaceFilePath } from "@supaterm/shared/path";
+import { findExistingAddProject } from "../operations/projects.ts";
 
 export type {
   CreateProjectInput,
@@ -85,6 +87,10 @@ export function createProjectEnvironmentAtoms<R, E>(
   options: {
     /** The client store's project; openScratch waits here for the created project. */
     readonly projectAtom: (ref: ScopedProjectRef) => Atom.Atom<EnvironmentProject | null>;
+    readonly projectsAtom: Atom.Atom<ReadonlyArray<EnvironmentProject>>;
+    readonly serverConfigValueAtom: (
+      environmentId: EnvironmentId,
+    ) => Atom.Atom<Pick<ServerConfig, "scratchWorkspaceRoot"> | null>;
   },
 ) {
   const fileMetadata = createFileMetadataAtoms(runtime);
@@ -168,8 +174,6 @@ export function createProjectEnvironmentAtoms<R, E>(
       scheduler: projectScheduler,
       concurrency: projectConcurrency,
     }),
-    // Finds or creates the environment's Scratch project and resolves once the
-    // project is in the client store, since drafts key off its stored path.
     openScratch: createEnvironmentCommand(runtime, {
       label: "environment-data:projects:open-scratch",
       execute: (
@@ -177,22 +181,35 @@ export function createProjectEnvironmentAtoms<R, E>(
         registry,
         environmentId,
       ) =>
-        request(WS_METHODS.projectsEnsureScratch, input).pipe(
-          Effect.flatMap(({ projectId }) =>
-            AtomRegistry.toStream(registry, options.projectAtom({ environmentId, projectId })).pipe(
-              Stream.filter(Predicate.isNotNull),
-              Stream.runHead,
-              Effect.timeoutOption("10 seconds"),
-              Effect.map(Option.flatten),
-              Effect.flatMap(
-                Option.match({
-                  onSome: Effect.succeed,
-                  onNone: () => Effect.fail(new ScratchProjectNotLoadedError({ projectId })),
-                }),
-              ),
+        Effect.gen(function* () {
+          const workspaceRoot = registry.get(
+            options.serverConfigValueAtom(environmentId),
+          )?.scratchWorkspaceRoot;
+          const existing = workspaceRoot
+            ? findExistingAddProject({
+                projects: registry.get(options.projectsAtom),
+                environmentId,
+                path: workspaceRoot,
+              })
+            : null;
+          if (existing) return existing;
+          const { projectId } = yield* request(WS_METHODS.projectsEnsureScratch, input);
+          return yield* AtomRegistry.toStream(
+            registry,
+            options.projectAtom({ environmentId, projectId }),
+          ).pipe(
+            Stream.filter(Predicate.isNotNull),
+            Stream.runHead,
+            Effect.timeoutOption("10 seconds"),
+            Effect.map(Option.flatten),
+            Effect.flatMap(
+              Option.match({
+                onSome: Effect.succeed,
+                onNone: () => Effect.fail(new ScratchProjectNotLoadedError({ projectId })),
+              }),
             ),
-          ),
-        ),
+          );
+        }),
       scheduler: projectScheduler,
       concurrency: { mode: "serial", key: ({ environmentId }) => environmentId },
     }),

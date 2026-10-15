@@ -1,5 +1,5 @@
 import { requireOptionalNativeModule } from "expo";
-import type { PushPreviewKey } from "@supacode/contracts/push";
+import type { PushPreviewKey } from "@supaterm/contracts/push";
 
 interface PushPreviewModule {
   ensure(environmentId: string): Promise<PushPreviewKey>;

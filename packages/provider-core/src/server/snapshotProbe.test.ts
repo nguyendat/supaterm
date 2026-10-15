@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
-import type { ModelCapabilities } from "@supacode/contracts";
-import * as HostProcess from "@supacode/shared/HostProcess";
-import { createModelCapabilities } from "@supacode/shared/model";
+import type { ModelCapabilities } from "@supaterm/contracts";
+import * as HostProcess from "@supaterm/shared/HostProcess";
+import { createModelCapabilities } from "@supaterm/shared/model";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
@@ -73,6 +73,25 @@ describe("providerModelsFromSettings", () => {
       },
       { slug: "named", name: "Named", isCustom: true, capabilities },
     ]);
+  });
+
+  it("renames a built-in model when a named entry uses its slug", () => {
+    const capabilities = createModelCapabilities({ optionDescriptors: [] });
+    const models = providerModelsFromSettings(
+      [
+        {
+          slug: "gpt-5.5",
+          name: "GPT-5.5",
+          shortName: "5.5",
+          isCustom: false,
+          capabilities,
+        },
+      ],
+      [{ slug: "gpt-5.5", name: "Team GPT" }],
+      capabilities,
+    );
+
+    expect(models).toEqual([{ slug: "gpt-5.5", name: "Team GPT", isCustom: false, capabilities }]);
   });
 
   it("preserves a custom slug that collides with a provider alias", () => {

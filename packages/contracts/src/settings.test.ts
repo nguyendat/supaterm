@@ -711,10 +711,10 @@ describe("ClientSettings follow-up behavior", () => {
 });
 
 describe("ServerSettings thread settlement", () => {
-  it("defaults merge settlement on and inactivity settlement to three days", () => {
+  it("defaults merge settlement off and inactivity settlement to three days", () => {
     const settings = decodeServerSettings({});
     expect(settings.sidebarAutoSettleAfterDays).toBe(3);
-    expect(settings.sidebarAutoSettleOnMerge).toBe(true);
+    expect(settings.sidebarAutoSettleOnMerge).toBe(false);
   });
 
   it("allows both automatic rules to be disabled", () => {
@@ -1035,10 +1035,10 @@ it("validates remote device hosts and rejects ambiguous host ids", () => {
 });
 
 describe("branch naming settings", () => {
-  it("defaults existing settings to the Supacode static prefix", () => {
+  it("defaults existing settings to the Supaterm static prefix", () => {
     expect(decodeServerSettings({})).toMatchObject({
       branchNamingMode: "static",
-      branchNamePrefix: "supacode",
+      branchNamePrefix: "supaterm",
       branchNamePrefixFromRepository: false,
       branchNameInstructions: "",
     });

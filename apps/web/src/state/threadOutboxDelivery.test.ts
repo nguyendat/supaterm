@@ -1,6 +1,6 @@
-import { shouldRetryThreadOutboxDelivery } from "@supacode/client-runtime/thread-outbox";
+import { shouldRetryThreadOutboxDelivery } from "@supaterm/client-runtime/thread-outbox";
 import { AtomRegistry } from "effect/reactivity";
-import { EnvironmentId, ThreadId } from "@supacode/contracts";
+import { EnvironmentId, ThreadId } from "@supaterm/contracts";
 import { describe, expect, it, vi } from "@effect/vitest";
 
 import {
@@ -206,6 +206,22 @@ describe("durable thread outbox", () => {
     await recovered.drain();
     expect(h.delivered).toHaveLength(1);
     expect(h.records.size).toBe(0);
+  });
+
+  it("keeps a message sending until its acknowledgement is recorded", async () => {
+    const h = harness();
+    const outbox = h.create();
+    h.connect();
+    await outbox.enqueue(message("prompt"));
+    const write = vi.mocked(h.storage.write).getMockImplementation()!;
+    let sendingWhenAcknowledged: boolean | null = null;
+    vi.mocked(h.storage.write).mockImplementation(async (entry) => {
+      if (entry.status === "delivered") sendingWhenAcknowledged = outbox.isSending(entry.id);
+      return write(entry);
+    });
+    await outbox.drain();
+    expect(sendingWhenAcknowledged).toBe(true);
+    expect(outbox.isSending("prompt")).toBe(false);
   });
 
   it("pauses delivery during editing and sends the saved text with its attachments", async () => {

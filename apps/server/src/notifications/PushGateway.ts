@@ -3,8 +3,8 @@ import type {
   PushRegisterInput,
   PushRevokeInput,
   PushDeliveryPayload,
-} from "@supacode/contracts/push";
-import { pushRequestHeaders } from "@supacode/shared/pushRequest";
+} from "@supaterm/contracts/push";
+import { pushRequestHeaders } from "@supaterm/shared/pushRequest";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -26,7 +26,7 @@ const DeliveryReceipt = Schema.Struct({
   retryable: Schema.Boolean,
   invalidToken: Schema.Boolean,
 });
-export type { PushDeliveryPayload } from "@supacode/contracts/push";
+export type { PushDeliveryPayload } from "@supaterm/contracts/push";
 type EnrollmentPayload = Pick<
   typeof PushRegisterInput.Type,
   "token" | "topic" | "environment" | "revocationToken"
@@ -62,7 +62,7 @@ export class PushGateway extends Context.Service<
       payload: PushDeliveryPayload,
     ) => GatewayEffect<typeof DeliveryReceipt.Type>;
   }
->()("supacode/notifications/PushGateway") {}
+>()("supaterm/notifications/PushGateway") {}
 
 const make = Effect.gen(function* () {
   const client = yield* HttpClient.HttpClient;

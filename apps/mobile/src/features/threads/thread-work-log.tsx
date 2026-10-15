@@ -1,4 +1,4 @@
-import type { ToolGroupImage } from "@supacode/client-runtime/work-log/presentation";
+import type { ToolGroupImage } from "@supaterm/client-runtime/work-log/presentation";
 import { ThreadMarkdownImage } from "./ThreadMarkdownImage";
 import { SubagentStatusDot } from "./SubagentStatusDot";
 import { ThreadSubagentGroup } from "./thread-subagent-group";
@@ -18,7 +18,7 @@ import {
 import {
   getQuestionAnswerPreview,
   hasQuestionAnswer,
-} from "@supacode/client-runtime/work-log/user-input";
+} from "@supaterm/client-runtime/work-log/user-input";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { type AppSymbolName, SymbolView } from "../../components/AppSymbol";
@@ -46,15 +46,16 @@ import {
   type RunId,
   type ThreadId,
   type ToolActivityIcon,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { scopeThreadRef } from "@supacode/client-runtime/environment";
+import { scopeThreadRef } from "@supaterm/client-runtime/environment";
 import { environmentThreadDetails, threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { toolActivityFaviconUrl } from "@supacode/shared/favicon";
+import { toolActivityFaviconUrl } from "@supaterm/shared/favicon";
 
 import { AppText as Text } from "../../components/AppText";
-import { SupacodeMark } from "../../components/SupacodeMark";
+import { SupatermMark } from "../../components/SupatermMark";
+import { BrowserAppIcon } from "../../components/BrowserAppIcon";
 import { cn } from "../../lib/cn";
 import { THREAD_WORK_ROW_MIN_HEIGHT, type deriveThreadWorkLogSizing } from "../../lib/layout";
 import {
@@ -70,9 +71,9 @@ import {
 import {
   resolveWorkEntryToolPresentation,
   type ToolGroupSummaryKind,
-} from "@supacode/client-runtime/work-log/presentation";
-import { resolveWorkGroupScrollAnchor } from "@supacode/client-runtime/work-log/scroll-anchor";
-import { notificationChildThreadId } from "@supacode/client-runtime/state/thread-execution";
+} from "@supaterm/client-runtime/work-log/presentation";
+import { resolveWorkGroupScrollAnchor } from "@supaterm/client-runtime/work-log/scroll-anchor";
+import { notificationChildThreadId } from "@supaterm/client-runtime/state/thread-execution";
 import type { MarkdownImageRenderer } from "../../native/SelectableMarkdownText";
 import type { FilePreviewSource } from "../../components/FilePreviewModal";
 import Animated, {
@@ -92,7 +93,13 @@ const SHIMMER_WIDTH = 72;
 const SHIMMER_SWEEP_MS = 1_350;
 const SHIMMER_PAUSE_MS = 1_450;
 const SHIMMER_ICON_AND_GAP_WIDTH = 30;
-type WorkContentIcon = AppSymbolName | "browser" | "device" | "supacode" | "pull-request";
+type WorkContentIcon =
+  | AppSymbolName
+  | "browser"
+  | "computer"
+  | "device"
+  | "supaterm"
+  | "pull-request";
 
 function WorkLogIcon(props: {
   readonly icon: WorkContentIcon;
@@ -101,10 +108,18 @@ function WorkLogIcon(props: {
   readonly highlighted?: boolean;
 }) {
   const colorClassName = props.highlighted ? "accent-foreground" : props.colorClassName;
-  if (props.icon === "supacode") {
+  if (props.icon === "supaterm") {
     return (
-      <SupacodeMark
+      <SupatermMark
         height={10}
+        {...(colorClassName ? { colorClassName } : { color: props.color })}
+      />
+    );
+  }
+  if (props.icon === "computer") {
+    return (
+      <BrowserAppIcon
+        size={14}
         {...(colorClassName ? { colorClassName } : { color: props.color })}
       />
     );
@@ -311,7 +326,7 @@ export function ShimmeringWorkContent(props: {
   );
 }
 
-function workRowSymbolName(icon: ThreadFeedActivity["icon"]): AppSymbolName {
+function workRowSymbolName(icon: ThreadFeedActivity["icon"]): WorkContentIcon {
   switch (icon) {
     case "agent":
       return { ios: "sparkles", android: "auto_awesome" };
@@ -324,7 +339,9 @@ function workRowSymbolName(icon: ThreadFeedActivity["icon"]): AppSymbolName {
     case "command":
       return { ios: "terminal", android: "terminal" };
     case "computer":
-      return { ios: "desktopcomputer", android: "desktop_windows" };
+      return "computer";
+    case "code":
+      return "chevron.left.forwardslash.chevron.right";
     case "edit":
       return { ios: "square.and.pencil", android: "edit" };
     case "eye":
@@ -768,7 +785,7 @@ function WorkspacePreparationRetryButton(props: {
       style={{ opacity: busy ? 0.5 : 1 }}
     >
       <SymbolView name="arrow.clockwise" size={13} tintColorClassName="accent-icon" />
-      <Text className="font-supacode-medium text-sm text-foreground">Retry</Text>
+      <Text className="font-supaterm-medium text-sm text-foreground">Retry</Text>
     </Pressable>
   );
 }
@@ -826,14 +843,14 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
             <Text
               className={
                 warning
-                  ? "min-w-0 flex-1 font-supacode-medium text-sm text-warning-foreground"
-                  : "min-w-0 flex-1 font-supacode-medium text-sm text-adaptive-rose-600-400"
+                  ? "min-w-0 flex-1 font-supaterm-medium text-sm text-warning-foreground"
+                  : "min-w-0 flex-1 font-supaterm-medium text-sm text-adaptive-rose-600-400"
               }
             >
               {label}
             </Text>
             {props.copied ? (
-              <Text className="pr-1 font-supacode-medium text-3xs text-adaptive-emerald-600-400">
+              <Text className="pr-1 font-supaterm-medium text-3xs text-adaptive-emerald-600-400">
                 Copied
               </Text>
             ) : null}
@@ -986,7 +1003,7 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
 
         <View className="shrink-0 flex-row items-center gap-px">
           {props.copied ? (
-            <Text className="pr-1 font-supacode-medium text-3xs text-adaptive-emerald-600-400">
+            <Text className="pr-1 font-supaterm-medium text-3xs text-adaptive-emerald-600-400">
               Copied
             </Text>
           ) : null}
@@ -1025,6 +1042,7 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
             renderImage={props.renderImage}
             renderReasoning={props.renderReasoning}
             onPressPreview={props.onPressPreview}
+            themeAppearance={props.themeAppearance}
           />
         )}
       </MotionPresence>
@@ -1042,9 +1060,9 @@ export function ThreadWorkGroupToggle(props: {
   readonly iconSubtleColor: import("react-native").ColorValue;
   readonly summary: string;
   readonly summaryKind: ToolGroupSummaryKind;
-  readonly summaryToolIcon?: "browser" | "device" | "supacode" | "pull-request" | "brain";
+  readonly summaryToolIcon?: "browser" | "device" | "supaterm" | "pull-request" | "brain";
   readonly themeAppearance: "light" | "dark";
-  readonly toolSurface?: import("@supacode/contracts").ToolActivitySurface;
+  readonly toolSurface?: import("@supaterm/contracts").ToolActivitySurface;
   readonly toolIcon?: ToolActivityIcon;
   readonly hasFailure: boolean;
   readonly shimmer: boolean;
@@ -1198,7 +1216,7 @@ export const ThreadAgentSpawnCard = memo(function ThreadAgentSpawnCard(props: {
           <View className="min-w-0 flex-1 gap-0.5">
             <Text
               key={props.rowSizing.textSizeKey}
-              className="font-supacode-medium text-sm text-foreground"
+              className="font-supaterm-medium text-sm text-foreground"
               numberOfLines={1}
             >
               {summary.title}

@@ -30,13 +30,13 @@ import {
   type ProviderDriverKind,
   type ServerProvider,
   type ServerProviderModel,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 
 import {
   type CustomModelDefinition,
   readCustomModelEntries,
   toCustomModelSetting,
-} from "@supacode/shared/model";
+} from "@supaterm/shared/model";
 import { cn } from "../../lib/utils";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { normalizeProviderAccentColor } from "../../providerInstances";
@@ -53,7 +53,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type {
   ProviderClientDefinition,
   ProviderEnvironmentField,
-} from "@supacode/provider-core/client";
+} from "@supaterm/provider-core/client";
 import { deriveProviderSettingsFields, ProviderSettingsForm } from "./ProviderSettingsForm";
 import { ProviderModelsSection } from "./ProviderModelsSection";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
@@ -182,13 +182,22 @@ export function deriveProviderModelsForDisplay(input: {
     ),
   );
   const serverModels = input.liveModels?.filter((model) => !model.isCustom) ?? [];
-  const customModels = input.customModels.map((entry) => ({
-    slug: entry.slug,
-    name: entry.name,
-    isCustom: true,
-    capabilities:
-      entry.capabilities ?? liveCustomModelsBySlug.get(entry.slug)?.capabilities ?? null,
-  }));
+  const serverSlugs = new Set(serverModels.map((model) => model.slug));
+  // A custom entry with a built-in slug only renames that built-in on the
+  // server, so the built-in row already shows it.
+  const customModels = input.customModels.flatMap((entry) =>
+    serverSlugs.has(entry.slug)
+      ? []
+      : [
+          {
+            slug: entry.slug,
+            name: entry.name,
+            isCustom: true,
+            capabilities:
+              entry.capabilities ?? liveCustomModelsBySlug.get(entry.slug)?.capabilities ?? null,
+          },
+        ],
+  );
   return [...serverModels, ...customModels];
 }
 

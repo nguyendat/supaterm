@@ -7,6 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   attachmentFileExtension,
+  chatAttachmentStableKey,
   createAttachmentId,
   createDeterministicAttachmentId,
   createPendingAttachmentId,
@@ -28,6 +29,27 @@ describe("attachmentStore", () => {
     expect(first).toBe(retry);
     expect(next).not.toBe(first);
     expect(first && parseThreadSegmentFromAttachmentId(first)).toBe("thread-1");
+  });
+
+  it("gives a queued edit's new image its own id instead of an earlier image's", () => {
+    const imageA = new Uint8Array([1, 2, 3]);
+    const imageB = new Uint8Array([4, 5, 6]);
+    const sent = createDeterministicAttachmentId(
+      "thread-1",
+      chatAttachmentStableKey("message-1", 0, imageA),
+    );
+    const retried = createDeterministicAttachmentId(
+      "thread-1",
+      chatAttachmentStableKey("message-1", 0, imageA),
+    );
+    // Editing the queued message keeps its id, and the new upload is first in its batch.
+    const edited = createDeterministicAttachmentId(
+      "thread-1",
+      chatAttachmentStableKey("message-1", 0, imageB),
+    );
+
+    expect(retried).toBe(sent);
+    expect(edited).not.toBe(sent);
   });
 
   it("keeps deterministic ids distinct when sanitized thread segments collide", () => {
@@ -100,7 +122,7 @@ describe("attachmentStore", () => {
 
   it("resolves attachment path by id using the extension that exists on disk", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "supacode-attachment-store-"),
+      NodePath.join(NodeOS.tmpdir(), "supaterm-attachment-store-"),
     );
     try {
       const attachmentId = "thread-1-attachment";
@@ -119,7 +141,7 @@ describe("attachmentStore", () => {
 
   it("returns null when no attachment file exists for the id", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "supacode-attachment-store-"),
+      NodePath.join(NodeOS.tmpdir(), "supaterm-attachment-store-"),
     );
     try {
       const resolved = resolveAttachmentPathById({
@@ -134,7 +156,7 @@ describe("attachmentStore", () => {
 
   it("resolves generic attachments without scanning the attachment directory", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "supacode-file-attachment-"),
+      NodePath.join(NodeOS.tmpdir(), "supaterm-file-attachment-"),
     );
     try {
       const attachmentId = "thread-1-00000000-0000-4000-8000-000000000001-zip";
@@ -149,7 +171,7 @@ describe("attachmentStore", () => {
 
   it("plans pending attachment claims with direct filename lookups", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "supacode-attachment-claim-"),
+      NodePath.join(NodeOS.tmpdir(), "supaterm-attachment-claim-"),
     );
     try {
       const uuid = "00000000-0000-4000-8000-000000000001";
@@ -178,7 +200,7 @@ describe("attachmentStore", () => {
 
   it("rejects thread-owned attachments even when thread segments collide", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "supacode-attachment-ownership-"),
+      NodePath.join(NodeOS.tmpdir(), "supaterm-attachment-ownership-"),
     );
     try {
       const attachmentId = "a-b-00000000-0000-4000-8000-000000000003";
@@ -195,7 +217,7 @@ describe("attachmentStore", () => {
 
   it("removes expired pending and partial files without touching thread attachments", () => {
     const attachmentsDir = NodeFS.mkdtempSync(
-      NodePath.join(NodeOS.tmpdir(), "supacode-attachment-sweep-"),
+      NodePath.join(NodeOS.tmpdir(), "supaterm-attachment-sweep-"),
     );
     try {
       const now = 1_800_000_000_000;
@@ -226,7 +248,7 @@ describe("threadHtmlRenderAttachmentIds", () => {
     const own = createAttachmentId("thread-a", "html")!;
     const other = createAttachmentId("thread-b", "html")!;
     const render = (attachmentId: string, extra = {}) => ({
-      toolName: "mcp__supacode__html_render",
+      toolName: "mcp__supaterm__html_render",
       output: [
         {
           type: "text",
@@ -239,7 +261,7 @@ describe("threadHtmlRenderAttachmentIds", () => {
         render(own),
         render(other),
         render(createAttachmentId("thread-a", "html")!, { isError: true }),
-        { toolName: "mcp__supacode__html_preview", output: render(own).output },
+        { toolName: "mcp__supaterm__html_preview", output: render(own).output },
       ]),
     ).toEqual([own]);
   });
@@ -251,7 +273,7 @@ describe("threadHtmlRenderAttachmentIds", () => {
         {
           toolName: "weather.get_weather",
           output: {
-            supacodeMcpApp: {
+            supatermMcpApp: {
               attachmentId: app,
               server: "weather",
               tool: "get_weather",

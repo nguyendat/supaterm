@@ -11,12 +11,12 @@ import {
   ThreadId,
   TurnItemId,
   type OrchestrationV2DomainEvent,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import {
   DEFAULT_PUSH_PREFERENCES,
   PushNotificationError,
   type PushDeliveryPayload,
-} from "@supacode/contracts/push";
+} from "@supaterm/contracts/push";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -428,6 +428,62 @@ it.effect("reclassifies completion when the final background item ends", () =>
         ],
       });
       assert.strictEqual((yield* sql`SELECT * FROM push_notifications`).length, 1);
+    }).pipe(Effect.provide(testLayer())),
+  ),
+);
+
+it.effect("reclassifies completion when the final workflow watch stops", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      yield* seedSessions;
+      yield* activate;
+      const { sink, completed, now } = yield* createThread;
+      const thread = yield* (yield* ProjectionStore.ProjectionStoreV2).getThread(threadId);
+      const sql = yield* SqlClient.SqlClient;
+      yield* sink.write({
+        events: [
+          {
+            id: EventId.make("push-workflow-watch-start"),
+            type: "thread.workflow-run-watch-synced",
+            threadId,
+            occurredAt: now,
+            payload: {
+              ...thread,
+              workflowRunWatches: [
+                {
+                  host: "github.com",
+                  repository: "acme/app",
+                  runId: 42,
+                  name: "Build",
+                  url: null,
+                  startedAt: DateTime.formatIso(now),
+                },
+              ],
+            },
+          },
+          completed,
+        ],
+      });
+      assert.strictEqual((yield* sql`SELECT * FROM push_notifications`).length, 0);
+      const stopped = yield* sink.write({
+        events: [
+          {
+            id: EventId.make("push-workflow-watch-stop"),
+            type: "thread.workflow-run-watch-synced",
+            threadId,
+            occurredAt: now,
+            payload: { ...thread, workflowRunWatches: [] },
+          },
+        ],
+      });
+      const notifications = yield* sql<{
+        kind: string;
+        event_sequence: number;
+      }>`SELECT kind, event_sequence FROM push_notifications`;
+      assert.strictEqual(notifications.length, 1);
+      assert.strictEqual(notifications[0]?.kind, "completion");
+      assert.strictEqual(notifications[0]?.event_sequence, stopped[0]?.sequence);
+      assert.strictEqual((yield* sql`SELECT * FROM push_deliveries`).length, 1);
     }).pipe(Effect.provide(testLayer())),
   ),
 );

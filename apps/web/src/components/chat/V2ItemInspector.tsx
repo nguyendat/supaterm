@@ -3,16 +3,17 @@ import type {
   OrchestrationV2ProjectedTurnItem,
   RunId,
   ThreadId,
-} from "@supacode/contracts";
-import { withOccurrenceKeys } from "@supacode/shared/occurrenceKeys";
+} from "@supaterm/contracts";
+import { withOccurrenceKeys } from "@supaterm/shared/occurrenceKeys";
 import {
   toolCallLines,
   turnItemDetailRevision,
   turnItemNeedsDetailFetch,
   turnItemOutputImages,
   turnItemOutputText,
-} from "@supacode/client-runtime/work-log/item-detail";
-import { formatDiffCount } from "@supacode/client-runtime/diff-count";
+} from "@supaterm/client-runtime/work-log/item-detail";
+import { formatDiffCount } from "@supaterm/client-runtime/diff-count";
+import { isJavaScriptReplTool } from "@supaterm/shared/toolActivity";
 import { ExternalLinkIcon, GitBranchIcon } from "lucide-react";
 import { memo, Suspense, use, useMemo } from "react";
 
@@ -40,13 +41,22 @@ interface V2ItemInspectorProps {
   readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
 }
 
-function JsonTokens({ text }: { readonly text: string }) {
+function SyntaxTokens({
+  text,
+  language,
+}: {
+  readonly text: string;
+  readonly language: "json" | "typescript";
+}) {
   const { resolvedTheme } = useTheme();
-  const highlighter = use(getSyntaxHighlighterPromise("json"));
+  const highlighter = use(getSyntaxHighlighterPromise(language));
   const { tokens } = useMemo(
     () =>
-      highlighter.codeToTokens(text, { lang: "json", theme: resolveDiffThemeName(resolvedTheme) }),
-    [highlighter, text, resolvedTheme],
+      highlighter.codeToTokens(text, {
+        lang: language,
+        theme: resolveDiffThemeName(resolvedTheme),
+      }),
+    [highlighter, text, language, resolvedTheme],
   );
   return tokens.flatMap((line, lineIndex) => [
     lineIndex > 0 ? "\n" : "",
@@ -64,9 +74,11 @@ const monoClassName =
 function StructuredValue({
   value,
   highlightJson = false,
+  language,
 }: {
   readonly value: unknown;
   readonly highlightJson?: boolean;
+  readonly language?: "typescript";
 }) {
   const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
   const isJson = useMemo(() => {
@@ -81,10 +93,10 @@ function StructuredValue({
   if (!text) return null;
   return (
     <pre className={cn("max-h-80 overflow-auto text-muted-foreground", monoClassName)}>
-      {isJson ? (
+      {language || isJson ? (
         <RenderErrorBoundary fallback={text}>
           <Suspense fallback={text}>
-            <JsonTokens text={text} />
+            <SyntaxTokens text={text} language={language ?? "json"} />
           </Suspense>
         </RenderErrorBoundary>
       ) : (
@@ -191,6 +203,7 @@ function ToolCallBody(
   props: ToolOutputState & {
     readonly command?: string;
     readonly args?: unknown;
+    readonly toolName?: string | null;
     readonly exitCode?: number | undefined;
   },
 ) {
@@ -203,7 +216,11 @@ function ToolCallBody(
           {call.args.map(([key, value]) => (
             <div key={key}>
               <span className="text-muted-foreground">{key} </span>
-              {value}
+              {key === "code" && isJavaScriptReplTool(props.toolName) ? (
+                <StructuredValue value={value} language="typescript" />
+              ) : (
+                value
+              )}
             </div>
           ))}
         </div>
@@ -349,7 +366,12 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
       ) : null}
 
       {item.type === "dynamic_tool" ? (
-        <ToolCallBody args={item.input} {...outputState} onImageExpand={props.onImageExpand} />
+        <ToolCallBody
+          toolName={item.toolName}
+          args={item.input}
+          {...outputState}
+          onImageExpand={props.onImageExpand}
+        />
       ) : null}
 
       {item.type === "approval_request" ? <StructuredValue value={item.prompt} /> : null}

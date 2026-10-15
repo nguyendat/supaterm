@@ -7,9 +7,9 @@ import {
   agentScopeCommand,
   type AgentScopeShape,
   type AgentSystemdScope,
-} from "@supacode/shared/AgentScope";
-import * as HostProcess from "@supacode/shared/HostProcess";
-import { resolveCommandPath } from "@supacode/shared/shell";
+} from "@supaterm/shared/AgentScope";
+import * as HostProcess from "@supaterm/shared/HostProcess";
+import { resolveCommandPath } from "@supaterm/shared/shell";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -22,7 +22,7 @@ import * as ProcessRunner from "../processRunner.ts";
  * server's own unit, so the server's CPUWeight and IOWeight compete with the
  * agents directly.
  */
-const AGENT_SLICE = "app-supacode-agents.slice";
+const AGENT_SLICE = "app-supaterm-agents.slice";
 
 const GiB = 1024 ** 3;
 
@@ -106,7 +106,6 @@ export const make = Effect.gen(function* () {
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, path),
       Effect.provideService(HostProcess.Platform, platform),
-      Effect.option,
     );
 
   const run = (command: string, args: ReadonlyArray<string>) =>
@@ -120,9 +119,9 @@ export const make = Effect.gen(function* () {
       if (runtimeDir === undefined || runtimeDir.length === 0) return undefined;
       const systemdRun = yield* resolve("systemd-run", hostEnvironment);
       const systemctl = yield* resolve("systemctl", hostEnvironment);
-      if (systemdRun._tag === "None" || systemctl._tag === "None") return undefined;
+      if (systemdRun === null || systemctl === null) return undefined;
       const probe = (options: ReadonlyArray<string>) =>
-        run(systemdRun.value, [
+        run(systemdRun, [
           "--user",
           "--scope",
           "--quiet",
@@ -146,7 +145,7 @@ export const make = Effect.gen(function* () {
         return undefined;
       }
       const limits = agentSliceMemoryLimits(NodeOS.totalmem());
-      const limited = yield* run(systemctl.value, [
+      const limited = yield* run(systemctl, [
         "--user",
         "set-property",
         "--runtime",
@@ -165,8 +164,8 @@ export const make = Effect.gen(function* () {
         oomPolicy: scopeOptions.length > 0,
       });
       return {
-        systemdRun: systemdRun.value,
-        systemctl: systemctl.value,
+        systemdRun,
+        systemctl,
         runtimeDir,
         scopeOptions,
       };
@@ -304,10 +303,10 @@ export const make = Effect.gen(function* () {
     }) {
       const resolved = yield* resolve(command, env ?? hostEnvironment);
       // Leave unresolved commands alone so the spawn reports the missing binary.
-      if (resolved._tag === "None") return { command, args };
+      if (resolved === null) return { command, args };
       const scope = yield* systemd;
-      if (scope === undefined) return agentScopeCommand({ command: resolved.value, args });
-      const unit = `supacode-${name}-${NodeCrypto.randomUUID().slice(0, 8)}.scope`;
+      if (scope === undefined) return agentScopeCommand({ command: resolved, args });
+      const unit = `supaterm-${name}-${NodeCrypto.randomUUID().slice(0, 8)}.scope`;
       if (threadId !== undefined || sessionId !== undefined)
         yield* track(scope.systemctl, scopeKey(threadId ?? "", sessionId), unit);
       const systemdScope: AgentSystemdScope = {
@@ -320,7 +319,7 @@ export const make = Effect.gen(function* () {
             ? [...scope.scopeOptions, "--collect"]
             : scope.scopeOptions,
       };
-      return agentScopeCommand({ command: resolved.value, args, scope: systemdScope });
+      return agentScopeCommand({ command: resolved, args, scope: systemdScope });
     }),
     oomKilled,
     clear,

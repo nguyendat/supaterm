@@ -1,14 +1,15 @@
-import { SourceControlProviderKind } from "@supacode/contracts";
+import { SourceControlProviderKind } from "@supaterm/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   EnvironmentId,
   ProjectId,
   CommandId,
   SourceControlDiscoveryResult,
-} from "@supacode/contracts";
+} from "@supaterm/contracts";
 import * as Option from "effect/Option";
 
 import {
+  availableScratchWorkspaceRoot,
   buildAddProjectRemoteSourceReadiness,
   buildProjectCreateCommand,
   canCreateProjectInEnvironment,
@@ -25,6 +26,56 @@ import {
   sortAddProjectProviderSources,
 } from "./projects.ts";
 import type { EnvironmentProject } from "../state/models.ts";
+import { v2Project } from "../state/orchestrationV2TestFixtures.ts";
+
+describe("scratch project availability", () => {
+  const environmentId = EnvironmentId.make("local");
+  const project = { ...v2Project, environmentId, workspaceRoot: "/scratch" };
+  const input = {
+    environmentId,
+    serverConfig: { scratchWorkspaceRoot: "/scratch/" },
+    projects: [project],
+  };
+
+  it.each(["connected", "available", "offline", "connecting", "reconnecting", "error"] as const)(
+    "keeps an existing scratch project selectable while %s",
+    (connectionPhase) => {
+      expect(availableScratchWorkspaceRoot({ ...input, connectionPhase })).toBe("/scratch/");
+    },
+  );
+
+  it("requires a connection to create the scratch project for the first time", () => {
+    expect(
+      availableScratchWorkspaceRoot({ ...input, projects: [], connectionPhase: "offline" }),
+    ).toBeNull();
+    expect(
+      availableScratchWorkspaceRoot({ ...input, projects: [], connectionPhase: "connected" }),
+    ).toBe("/scratch/");
+  });
+
+  it("does not use another environment's scratch project", () => {
+    expect(
+      availableScratchWorkspaceRoot({
+        ...input,
+        environmentId: EnvironmentId.make("other"),
+        connectionPhase: "offline",
+      }),
+    ).toBeNull();
+  });
+
+  it("requires the configured scratch root rather than a matching project title", () => {
+    expect(
+      availableScratchWorkspaceRoot({
+        ...input,
+        projects: [{ ...project, title: "No project", workspaceRoot: "/other" }],
+        connectionPhase: "offline",
+      }),
+    ).toBeNull();
+    expect(
+      availableScratchWorkspaceRoot({ ...input, serverConfig: null, connectionPhase: "offline" }),
+    ).toBeNull();
+  });
+});
 
 describe("add project shared logic", () => {
   it("only allows project creation in connected environments", () => {

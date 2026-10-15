@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { DEFAULT_PUSH_PREFERENCES, type PushNotificationKind } from "@supacode/contracts/push";
+import { DEFAULT_PUSH_PREFERENCES, type PushNotificationKind } from "@supaterm/contracts/push";
 import { useCallback, useEffect, useState } from "react";
 import * as Notifications from "expo-notifications";
 import { Alert, AppState, Linking, Platform } from "react-native";

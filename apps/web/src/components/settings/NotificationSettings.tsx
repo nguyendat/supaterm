@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { normalizePushGatewayUrl } from "@supacode/contracts/push";
+import { normalizePushGatewayUrl } from "@supaterm/contracts/push";
 
 import {
   hasDesktopNotifications,

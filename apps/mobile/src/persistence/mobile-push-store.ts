@@ -1,4 +1,4 @@
-import { EnvironmentId } from "@supacode/contracts";
+import { EnvironmentId } from "@supaterm/contracts";
 import {
   DEFAULT_PUSH_PREFERENCES,
   PushNotificationData,
@@ -6,8 +6,8 @@ import {
   PushPreferences,
   PushRegistration,
   PushSecret,
-} from "@supacode/contracts/push";
-import { encodeBase64 } from "@supacode/shared/relay/protocol";
+} from "@supaterm/contracts/push";
+import { encodeBase64 } from "@supaterm/shared/relay/protocol";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -78,7 +78,7 @@ export class MobilePushStore extends Context.Service<
       tap: typeof PushNotificationData.Type,
     ) => Effect.Effect<void, MobilePushStoreError>;
   }
->()("supacode/mobile/MobilePushStore") {}
+>()("@supaterm/mobile/persistence/MobilePushStore") {}
 
 const make = Effect.gen(function* () {
   const storage = yield* MobileSecureStorage.MobileSecureStorage;

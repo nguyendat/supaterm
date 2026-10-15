@@ -64,12 +64,12 @@ export function BrowserSurfaceSlot(props: {
     updateRef.current = update;
     update();
     const observed: Element[] = [element];
-    // Inline panels animate their outer width while keeping the content at
-    // full width. The slot moves without resizing, so measure on shell resizes too.
-    const panel = element.closest('[data-preview-panel-mode="inline"]');
+    // Collapsible panels animate their outer width while keeping the content at
+    // full width. The slot moves without resizing, so measure on panel resizes too.
+    const panel = element.closest("[data-panel]");
     if (panel) observed.push(panel);
 
-    observed.push(...document.querySelectorAll('[data-slot="sidebar-gap"]'));
+    observed.push(...document.querySelectorAll("[data-sidebar-panel]"));
     const stopObserving = observeResize(observed, update);
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);

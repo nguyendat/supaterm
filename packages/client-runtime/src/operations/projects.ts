@@ -7,9 +7,9 @@ import type {
   ServerConfig,
   SourceControlDiscoveryResult,
   SourceControlRepositoryInfo,
-} from "@supacode/contracts";
-import { SourceControlProviderKind } from "@supacode/contracts";
-import { newProjectFolderName } from "@supacode/shared/path";
+} from "@supaterm/contracts";
+import { SourceControlProviderKind } from "@supaterm/contracts";
+import { newProjectFolderName } from "@supaterm/shared/path";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Order from "effect/Order";
@@ -36,16 +36,21 @@ export function canCreateProjectInEnvironment(
   return connectionPhase === "connected";
 }
 
-/**
- * The Scratch folder an environment offers threads without a project right
- * now, or null while it is not connected or has none.
- */
-export function availableScratchWorkspaceRoot(
-  connectionPhase: EnvironmentConnectionPhase | null | undefined,
-  serverConfig: Pick<ServerConfig, "scratchWorkspaceRoot"> | null | undefined,
-): string | null {
-  return canCreateProjectInEnvironment(connectionPhase)
-    ? (serverConfig?.scratchWorkspaceRoot ?? null)
+export function availableScratchWorkspaceRoot(input: {
+  readonly environmentId: EnvironmentId;
+  readonly connectionPhase: EnvironmentConnectionPhase | null | undefined;
+  readonly serverConfig: Pick<ServerConfig, "scratchWorkspaceRoot"> | null | undefined;
+  readonly projects: ReadonlyArray<EnvironmentProject>;
+}): string | null {
+  const workspaceRoot = input.serverConfig?.scratchWorkspaceRoot;
+  if (!workspaceRoot) return null;
+  if (canCreateProjectInEnvironment(input.connectionPhase)) return workspaceRoot;
+  return findExistingAddProject({
+    projects: input.projects,
+    environmentId: input.environmentId,
+    path: workspaceRoot,
+  }) !== null
+    ? workspaceRoot
     : null;
 }
 

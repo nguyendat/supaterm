@@ -38,9 +38,15 @@ it("restores goal and unread completion labels when connected", () => {
   ).toBe("Done");
 });
 
-it("uses the working color for waiting rows", () => {
-  const working = resolveThreadListV2RowStatusLabel({ ...state, status: "working" });
-  const waiting = resolveThreadListV2RowStatusLabel({ ...state, status: "waiting" });
+it.each(["text-drawer-foreground-muted", "text-foreground-muted"])(
+  "uses %s for waiting rows",
+  (mutedClassName) => {
+    const waiting = resolveThreadListV2RowStatusLabel({
+      ...state,
+      status: "waiting",
+      mutedClassName,
+    });
 
-  expect(waiting?.className).toBe(working?.className);
-});
+    expect(waiting?.className).toBe(mutedClassName);
+  },
+);

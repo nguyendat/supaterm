@@ -1,14 +1,14 @@
-import { WS_METHODS, type EnvironmentId } from "@supacode/contracts";
+import { WS_METHODS, type EnvironmentId } from "@supaterm/contracts";
 import type {
   PushEnrollmentData,
   PushNotificationData,
   PushRegistration,
-} from "@supacode/contracts/push";
+} from "@supaterm/contracts/push";
 import {
   createEnvironmentRpcCommand,
   squashAtomCommandFailure,
   type AtomCommand,
-} from "@supacode/client-runtime/state/runtime";
+} from "@supaterm/client-runtime/state/runtime";
 import { Atom } from "effect/reactivity";
 
 import { connectionAtomRuntime } from "../connection/runtime";
