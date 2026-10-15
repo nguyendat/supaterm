@@ -28,6 +28,10 @@ import { SubscriptionUsageCoordinator } from "./widgets/SubscriptionUsageCoordin
 import { VoiceInputProvider } from "./features/voice-input/VoiceInputProvider";
 import { GlobalVoiceInputControl } from "./features/voice-input/GlobalVoiceInputControl";
 import { NativeLayoutMetricsProvider } from "./native/native-layout-metrics";
+import {
+  markReactMounted,
+  registerBackgroundRefreshSpike,
+} from "./connection/background-refresh-spike";
 
 import "../global.css";
 
@@ -60,6 +64,10 @@ function SplashScreenCoordinator() {
 
 export default function App() {
   useUiRuntimeMemoryWarningGc();
+  markReactMounted();
+  useEffect(() => {
+    void registerBackgroundRefreshSpike().catch((error) => console.log(`[bgspike] ${error}`));
+  }, []);
 
   return (
     <RegistryContext.Provider value={appAtomRegistry}>

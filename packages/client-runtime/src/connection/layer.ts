@@ -20,6 +20,7 @@ export function layerWithOptions(options: RpcSession.RpcSessionOptions) {
     layerRegistry,
     layerOnboarding,
     ConnectionResolver.layer,
+    layerDriver,
   );
   const layerConnectionStartup = Layer.effectDiscard(
     Effect.gen(function* () {

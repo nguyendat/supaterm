@@ -1,0 +1,13 @@
+diff --git a/build/TaskManager.js b/build/TaskManager.js
+index ec1f6fadac3a843820d51084876c5bef4363a945..a800fdd19e7544e38ac90d22b94876fe0feaebf1 100644
+--- a/build/TaskManager.js
++++ b/build/TaskManager.js
+@@ -6,7 +6,7 @@ import ExpoTaskManager from './ExpoTaskManager';
+ // doesn't log a warning. On Android, TaskService registers a headless task
+ // in native code to keep JS timers alive during background task execution.
+ if (Platform.OS === 'android') {
+-    AppRegistry.registerHeadlessTask('expo-task-manager', ()=>async ()=>{});
++    AppRegistry.registerHeadlessTask('expo-task-manager', ()=>()=>new Promise(()=>{}));
+ }
+ const tasks = new Map();
+ function _validate(taskName) {
