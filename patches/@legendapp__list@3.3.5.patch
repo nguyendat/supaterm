@@ -1528,7 +1528,8 @@ index 914d2dafaafa001c9ab6791a0a0581659295e333..12e5a35d7cbfb26bfb062fb43dbde7bd
        measurements.push({
          containerId,
          itemKey,
-@@ -5270,14 +5271,37 @@ function Separator({ ItemSeparatorComponent, leadingItem }) {
+@@ -5269,15 +5270,38 @@ function Separator({ ItemSeparatorComponent, leadingItem }) {
+ 
  // src/hooks/createResizeObserver.ts
  var globalResizeObserver = null;
 +var resizeObserverRects = /* @__PURE__ */ new WeakMap();
@@ -1680,7 +1681,8 @@ index 95465f2ab89ce41a10553f58af83618f7310e83c..cd4e6d86a453df3bb0f7e87f9c2dd2fc
        measurements.push({
          containerId,
          itemKey,
-@@ -5249,14 +5250,37 @@ function Separator({ ItemSeparatorComponent, leadingItem }) {
+@@ -5248,15 +5249,38 @@ function Separator({ ItemSeparatorComponent, leadingItem }) {
+ 
  // src/hooks/createResizeObserver.ts
  var globalResizeObserver = null;
 +var resizeObserverRects = /* @__PURE__ */ new WeakMap();
@@ -1854,7 +1856,8 @@ index 914d2dafaafa001c9ab6791a0a0581659295e333..c11834b88db56a53d4c6577d3e7fd3c8
        measurements.push({
          containerId,
          itemKey,
-@@ -5270,14 +5278,37 @@ function Separator({ ItemSeparatorComponent, leadingItem }) {
+@@ -5269,15 +5277,38 @@ function Separator({ ItemSeparatorComponent, leadingItem }) {
+ 
  // src/hooks/createResizeObserver.ts
  var globalResizeObserver = null;
 +var resizeObserverRects = /* @__PURE__ */ new WeakMap();
@@ -2039,7 +2042,8 @@ index 95465f2ab89ce41a10553f58af83618f7310e83c..f7bd4847eb63c7658b8c070e60006744
        measurements.push({
          containerId,
          itemKey,
-@@ -5249,14 +5257,37 @@ function Separator({ ItemSeparatorComponent, leadingItem }) {
+@@ -5248,15 +5256,38 @@ function Separator({ ItemSeparatorComponent, leadingItem }) {
+ 
  // src/hooks/createResizeObserver.ts
  var globalResizeObserver = null;
 +var resizeObserverRects = /* @__PURE__ */ new WeakMap();
@@ -2181,7 +2185,7 @@ index 95465f2ab89ce41a10553f58af83618f7310e83c..f7bd4847eb63c7658b8c070e60006744
        data: state.props.data,
        elementAtIndex: (index) => {
 diff --git a/reanimated.d.ts b/reanimated.d.ts
-index e5043320700b12f34f4c0babbc341f85ca8135c1..00a6141d68002b7610d21f0ee97e18f8e1ff72c3 100644
+index e5043320700b12f34f4c0babbc341f85ca8135c1..a656b80e1016cbb8286f019f1db1742a40c9b704 100644
 --- a/reanimated.d.ts
 +++ b/reanimated.d.ts
 @@ -10,7 +10,7 @@ interface MaintainVisibleContentPositionNormalized<ItemT = any> {
@@ -2222,17 +2226,19 @@ index e5043320700b12f34f4c0babbc341f85ca8135c1..00a6141d68002b7610d21f0ee97e18f8
      isAtEnd?: SharedValue<boolean>;
      isAtStart?: SharedValue<boolean>;
      isNearEnd?: SharedValue<boolean>;
-@@ -755,6 +763,8 @@ interface AnimatedLegendListSharedValues {
+@@ -755,6 +763,10 @@ interface AnimatedLegendListSharedValues {
  }
  interface AnimatedLegendListPropsBase<ItemT> extends Omit<PropsBase<ItemT>, KeysToOmit | "refScrollView"> {
      animatedProps?: ComponentProps<typeof Reanimated.ScrollView>["animatedProps"];
 +    /** Animated style for the item layer; leaves the native scroll viewport stationary. */
 +    itemsContainerStyle?: ComponentProps<typeof Reanimated.View>["style"];
++    /** Layout transition for the item layer, e.g. to animate its offset when alignItemsAtEnd padding changes. */
++    itemsContainerLayout?: ComponentProps<typeof Reanimated.View>["layout"];
      refScrollView?: React.Ref<AnimatedScrollView>;
      sharedValues?: AnimatedLegendListSharedValues;
      /**
 diff --git a/reanimated.js b/reanimated.js
-index f1265fad74189591b5aae86cf2e3a31f9c0fdb02..48e82c2573688632251a0d2176cf9b95387a880a 100644
+index f1265fad74189591b5aae86cf2e3a31f9c0fdb02..b3d8f62b9c8bffa583b7b81d6cd508d6ff4ee829 100644
 --- a/reanimated.js
 +++ b/reanimated.js
 @@ -115,8 +115,10 @@ var ReanimatedPositionView = typedMemo(function ReanimatedPositionViewComponent(
@@ -2284,18 +2290,18 @@ index f1265fad74189591b5aae86cf2e3a31f9c0fdb02..48e82c2573688632251a0d2176cf9b95
  });
 +// Transform-only custom transitions commit scroll bounds in the same React mount.
 +var ReanimatedStaticSizeView = typedMemo(function ReanimatedStaticSizeViewComponent(props) {
-+  const { horizontal, signalName, style, children, layoutTransition, containerStyle, ...rest } = props;
++  const { horizontal, signalName, style, children, layoutTransition, containerStyle, containerLayout, ...rest } = props;
 +  const [size = 0] = useArr$([signalName]);
-+  const Container = containerStyle ? Reanimated.View : reactNative$1.View;
++  const Container = containerStyle || containerLayout ? Reanimated__default.default.View : reactNative$1.View;
 +  return /* @__PURE__ */ React__namespace.createElement(
 +    Container,
-+    { ...rest, style: [style, horizontal ? { width: size } : { height: size }, containerStyle] },
++    { ...rest, layout: containerLayout, style: [style, horizontal ? { width: size } : { height: size }, containerStyle] },
 +    children
 +  );
 +});
 +var ReanimatedSizeView = typedMemo(function ReanimatedSizeViewComponent(props) {
 +  const ctx = useStateContext();
-+  const { horizontal, signalName, style, children, containerStyle, ...rest } = props;
++  const { horizontal, signalName, style, children, containerStyle, containerLayout, ...rest } = props;
 +  const [logicalSize = 0] = useArr$(signalName === "totalSize" ? [signalName] : [signalName, "totalSize"]);
 +  const baseSize = Reanimated.useSharedValue(logicalSize);
 +  const animatedDelta = Reanimated.useSharedValue(0);
@@ -2380,7 +2386,7 @@ index f1265fad74189591b5aae86cf2e3a31f9c0fdb02..48e82c2573688632251a0d2176cf9b95
 +      }));
 +    })(logicalSize, previousLogicalSize, wasAnimating, run, epoch);
 +  }, [baseSize, animatedDelta, canAnimate, completeAnimation, ctx.state, logicalSize, renderEpoch, signalName, transition]);
-+  return /* @__PURE__ */ React__namespace.createElement(Reanimated__default.default.View, { ...rest, style: [style, animatedStyle, containerStyle] }, children);
++  return /* @__PURE__ */ React__namespace.createElement(Reanimated__default.default.View, { ...rest, layout: containerLayout, style: [style, animatedStyle, containerStyle] }, children);
 +});
  function setSharedValueValue(sharedValue, value) {
    if (!sharedValue) {
@@ -2409,21 +2415,22 @@ index f1265fad74189591b5aae86cf2e3a31f9c0fdb02..48e82c2573688632251a0d2176cf9b95
    React__namespace.forwardRef(function LegendListForwardedRef2(props, ref) {
      var _a, _b;
 -    const { itemLayoutAnimation, recycleItems, refLegendList, renderScrollComponent, sharedValues, ...rest } = props;
-+    const { itemLayoutAnimation, itemsContainerStyle, recycleItems, refLegendList, renderScrollComponent, sharedValues, ...rest } = props;
++    const { itemLayoutAnimation, itemsContainerLayout, itemsContainerStyle, recycleItems, refLegendList, renderScrollComponent, sharedValues, ...rest } = props;
      const refFn = React.useCallback(
        (r) => {
          refLegendList(r);
-@@ -229,7 +355,9 @@ var LegendListForwardedRef = typedMemo(
+@@ -229,7 +355,10 @@ var LegendListForwardedRef = typedMemo(
        [scrollOffset]
      );
      const itemLayoutAnimationRef = useLatestRef(itemLayoutAnimation);
 +    const itemsContainerStyleRef = useLatestRef(itemsContainerStyle);
++    const itemsContainerLayoutRef = useLatestRef(itemsContainerLayout);
      const hasItemLayoutAnimation = !!itemLayoutAnimation;
-+    const hasItemsContainerStyle = !!itemsContainerStyle;
++    const hasItemsContainerStyle = !!itemsContainerStyle || !!itemsContainerLayout;
      const positionComponentInternal = React__namespace.useMemo(() => {
        if (!hasItemLayoutAnimation) {
          return void 0;
-@@ -245,10 +373,26 @@ var LegendListForwardedRef = typedMemo(
+@@ -245,10 +374,27 @@ var LegendListForwardedRef = typedMemo(
          );
        };
      }, [hasItemLayoutAnimation, recycleItems]);
@@ -2438,7 +2445,8 @@ index f1265fad74189591b5aae86cf2e3a31f9c0fdb02..48e82c2573688632251a0d2176cf9b95
 +        return /* @__PURE__ */ React__namespace.createElement(SizeView, {
 +          ...sizeProps,
 +          layoutTransition: transition,
-+          containerStyle: sizeProps.signalName === "totalSize" ? itemsContainerStyleRef.current : void 0
++          containerStyle: sizeProps.signalName === "totalSize" ? itemsContainerStyleRef.current : void 0,
++          containerLayout: sizeProps.signalName === "totalSize" ? itemsContainerLayoutRef.current : void 0
 +        });
 +      };
 +    }, [hasItemLayoutAnimation, hasItemsContainerStyle]);
@@ -2451,7 +2459,7 @@ index f1265fad74189591b5aae86cf2e3a31f9c0fdb02..48e82c2573688632251a0d2176cf9b95
          renderScrollComponent: renderReanimatedScrollComponent,
          ...IsNewArchitecture ? { stickyPositionComponentInternal } : {}
 diff --git a/reanimated.mjs b/reanimated.mjs
-index 29a00d5dc084fd408a0e0a0a4d64e856d0ed1525..929bb1fc63585d03a7a7176168caeeeb2ea34bf4 100644
+index 29a00d5dc084fd408a0e0a0a4d64e856d0ed1525..0eef4bf8814dc2a79b515e6f59485bff8c684313 100644
 --- a/reanimated.mjs
 +++ b/reanimated.mjs
 @@ -1,7 +1,7 @@
@@ -2512,18 +2520,18 @@ index 29a00d5dc084fd408a0e0a0a4d64e856d0ed1525..929bb1fc63585d03a7a7176168caeeeb
  });
 +// Transform-only custom transitions commit scroll bounds in the same React mount.
 +var ReanimatedStaticSizeView = typedMemo(function ReanimatedStaticSizeViewComponent(props) {
-+  const { horizontal, signalName, style, children, layoutTransition, containerStyle, ...rest } = props;
++  const { horizontal, signalName, style, children, layoutTransition, containerStyle, containerLayout, ...rest } = props;
 +  const [size = 0] = useArr$([signalName]);
-+  const Container = containerStyle ? Reanimated.View : View;
++  const Container = containerStyle || containerLayout ? Reanimated.View : View;
 +  return /* @__PURE__ */ React.createElement(
 +    Container,
-+    { ...rest, style: [style, horizontal ? { width: size } : { height: size }, containerStyle] },
++    { ...rest, layout: containerLayout, style: [style, horizontal ? { width: size } : { height: size }, containerStyle] },
 +    children
 +  );
 +});
 +var ReanimatedSizeView = typedMemo(function ReanimatedSizeViewComponent(props) {
 +  const ctx = useStateContext();
-+  const { horizontal, signalName, style, children, containerStyle, ...rest } = props;
++  const { horizontal, signalName, style, children, containerStyle, containerLayout, ...rest } = props;
 +  const [logicalSize = 0] = useArr$(signalName === "totalSize" ? [signalName] : [signalName, "totalSize"]);
 +  const baseSize = useSharedValue(logicalSize);
 +  const animatedDelta = useSharedValue(0);
@@ -2608,7 +2616,7 @@ index 29a00d5dc084fd408a0e0a0a4d64e856d0ed1525..929bb1fc63585d03a7a7176168caeeeb
 +      }));
 +    })(logicalSize, previousLogicalSize, wasAnimating, run, epoch);
 +  }, [baseSize, animatedDelta, canAnimate, completeAnimation, ctx.state, logicalSize, renderEpoch, signalName, transition]);
-+  return /* @__PURE__ */ React.createElement(Reanimated.View, { ...rest, style: [style, animatedStyle, containerStyle] }, children);
++  return /* @__PURE__ */ React.createElement(Reanimated.View, { ...rest, layout: containerLayout, style: [style, animatedStyle, containerStyle] }, children);
 +});
  function setSharedValueValue(sharedValue, value) {
    if (!sharedValue) {
@@ -2637,21 +2645,22 @@ index 29a00d5dc084fd408a0e0a0a4d64e856d0ed1525..929bb1fc63585d03a7a7176168caeeeb
    React.forwardRef(function LegendListForwardedRef2(props, ref) {
      var _a, _b;
 -    const { itemLayoutAnimation, recycleItems, refLegendList, renderScrollComponent, sharedValues, ...rest } = props;
-+    const { itemLayoutAnimation, itemsContainerStyle, recycleItems, refLegendList, renderScrollComponent, sharedValues, ...rest } = props;
++    const { itemLayoutAnimation, itemsContainerLayout, itemsContainerStyle, recycleItems, refLegendList, renderScrollComponent, sharedValues, ...rest } = props;
      const refFn = useCallback(
        (r) => {
          refLegendList(r);
-@@ -205,7 +331,9 @@ var LegendListForwardedRef = typedMemo(
+@@ -205,7 +331,10 @@ var LegendListForwardedRef = typedMemo(
        [scrollOffset]
      );
      const itemLayoutAnimationRef = useLatestRef(itemLayoutAnimation);
 +    const itemsContainerStyleRef = useLatestRef(itemsContainerStyle);
++    const itemsContainerLayoutRef = useLatestRef(itemsContainerLayout);
      const hasItemLayoutAnimation = !!itemLayoutAnimation;
-+    const hasItemsContainerStyle = !!itemsContainerStyle;
++    const hasItemsContainerStyle = !!itemsContainerStyle || !!itemsContainerLayout;
      const positionComponentInternal = React.useMemo(() => {
        if (!hasItemLayoutAnimation) {
          return void 0;
-@@ -221,10 +349,26 @@ var LegendListForwardedRef = typedMemo(
+@@ -221,10 +350,27 @@ var LegendListForwardedRef = typedMemo(
          );
        };
      }, [hasItemLayoutAnimation, recycleItems]);
@@ -2666,7 +2675,8 @@ index 29a00d5dc084fd408a0e0a0a4d64e856d0ed1525..929bb1fc63585d03a7a7176168caeeeb
 +        return /* @__PURE__ */ React.createElement(SizeView, {
 +          ...sizeProps,
 +          layoutTransition: transition,
-+          containerStyle: sizeProps.signalName === "totalSize" ? itemsContainerStyleRef.current : void 0
++          containerStyle: sizeProps.signalName === "totalSize" ? itemsContainerStyleRef.current : void 0,
++          containerLayout: sizeProps.signalName === "totalSize" ? itemsContainerLayoutRef.current : void 0
 +        });
 +      };
 +    }, [hasItemLayoutAnimation, hasItemsContainerStyle]);

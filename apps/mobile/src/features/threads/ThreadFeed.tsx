@@ -112,7 +112,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
   Easing,
   FadeIn,
-  FadeInUp,
   FadeOut,
   ReduceMotion,
   useAnimatedStyle,
@@ -199,6 +198,7 @@ import {
   WORK_GROUP_TOGGLE_HEIGHT,
 } from "./thread-work-log";
 import { appendPendingThreadMessages, type PendingThreadFeedEntry } from "./pending-thread-feed";
+import { useListBottomAligned, useThreadFeedArrivals } from "./use-thread-feed-arrivals";
 import type { QueuedThreadMessage } from "../../state/thread-outbox-model";
 import {
   resolveThreadFeedFixedItemSize,
@@ -264,18 +264,11 @@ const TURN_FOLD_HEIGHT = 42; // min-h-11 (38.5) + mb-1 (3.5), with the mobile 14
 // assistant rows. Images size their frame from these before their own layout.
 const USER_BUBBLE_HORIZONTAL_PADDING = 3.5 * 3.5;
 const ASSISTANT_ROW_HORIZONTAL_PADDING = 3.5;
-const THREAD_FEED_DISCLOSURE_ENTER_TRANSITION = FadeIn.duration(MOTION_ENTER_DURATION_MS)
+const THREAD_FEED_ROW_ENTER_TRANSITION = FadeIn.duration(MOTION_ENTER_DURATION_MS)
   .easing(Easing.bezier(0.32, 0.72, 0, 1))
   .reduceMotion(ReduceMotion.Never);
 
-// Entering animations must only play for rows born just now — LegendList
-// remounts rows when they scroll back into view, and replaying an entrance for
-// old content would be its own kind of jank.
-const FRESH_ENTRY_WINDOW_MS = 3_000;
-function isFreshTimestamp(input: string): boolean {
-  const timestamp = Date.parse(input);
-  return Number.isFinite(timestamp) && Date.now() - timestamp < FRESH_ENTRY_WINDOW_MS;
-}
+const THREAD_FEED_DRAW_DISTANCE = 500;
 
 export type ThreadFeedHistoryControls = ThreadHistoryControls;
 
@@ -1010,7 +1003,6 @@ function renderFeedEntry(
     | "workspaceRoot"
   > & {
     readonly copiedRowId: string | null;
-    readonly motionEnabled: boolean;
     readonly expandedWorkRows: Record<string, boolean>;
     readonly workRowSizing: ReturnType<typeof deriveThreadWorkLogSizing>;
     readonly workGroupScrollPositions: Map<string, ThreadWorkGroupScrollPosition>;
@@ -1181,7 +1173,6 @@ function renderFeedEntry(
       !message.streaming;
 
     if (isUser) {
-      const enterAnimated = props.motionEnabled && isFreshTimestamp(message.createdAt);
       const intentBadge = resolveUserMessageIntentBadge(message.inputIntent);
       const referenceIds = new Set(
         collectComposerContextReferences(message.text).map((reference) => reference.contextId),
@@ -1197,10 +1188,7 @@ function renderFeedEntry(
         (attachment) => isImageAttachment(attachment) || !inlineAttachmentIds.has(attachment.id),
       );
       return (
-        <Animated.View
-          className="mb-5 items-end"
-          {...(enterAnimated ? { entering: FadeInUp.duration(220) } : {})}
-        >
+        <View className="mb-5 items-end">
           {presentation.attribution === "automation" ? (
             <Text className="mb-1 pr-1 font-supaterm-medium text-2xs text-foreground-muted opacity-60">
               Sent by automation
@@ -1382,7 +1370,7 @@ function renderFeedEntry(
               />
             ) : null}
           </View>
-        </Animated.View>
+        </View>
       );
     }
 
@@ -1396,16 +1384,14 @@ function renderFeedEntry(
     // bubbles: wide markdown blocks cause children to be positioned at
     // intrinsic width before the container is clamped, overlapping the
     // timestamp/copy button row. Pinning the width removes that pass.
-    const enterAnimated = props.motionEnabled && isFreshTimestamp(message.createdAt);
     return (
-      <Animated.View
+      <View
         className={cn(
           showAssistantMeta && !(message.runId && props.failedRunIds.has(message.runId))
             ? "mb-5 px-1"
             : "mb-1 px-1",
           hasWideBlock && "w-full",
         )}
-        {...(enterAnimated ? { entering: FadeIn.duration(220) } : {})}
       >
         {renderedText.trim().length > 0 ? (
           <MarkdownImageAvailableWidthContext value={props.markdownContentWidth}>
@@ -1466,7 +1452,7 @@ function renderFeedEntry(
             </Text>
           </View>
         ) : null}
-      </Animated.View>
+      </View>
     );
   }
 
@@ -1749,6 +1735,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   // only when the list actually returns to the end (or on send / thread switch).
   const [endFollowEnabled, setEndFollowEnabled] = useState(true);
   const endFollowEnabledRef = useRef(true);
+  // Scrolling down, LegendList keeps half its draw distance rendered above the viewport.
+  const arrivals = useThreadFeedArrivals(THREAD_FEED_DRAW_DISTANCE / 2);
   // A "user scroll session" spans from drag start through the end of its
   // momentum; scroll events only break follow inside that session, so MVCP
   // compensations and programmatic scrolls never strand a follower.
@@ -2121,7 +2109,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     // Pause before the first scroll event. Otherwise a stream update can run
     // maintainScrollAtEnd between touch-down and the drag leaving its threshold.
     transitionEndFollow({ type: "user-scroll-begin" });
-  }, [clearUserScrollSettle, transitionEndFollow]);
+    arrivals.disarm();
+  }, [arrivals, clearUserScrollSettle, transitionEndFollow]);
   const finishUserScroll = useCallback(
     (releaseIsAtEnd?: boolean) => {
       clearUserScrollSettle();
@@ -2318,6 +2307,36 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     );
   }, [feedLoading, feedOpacity, reduceMotion]);
   const feedRevealStyle = useAnimatedStyle(() => ({ opacity: feedOpacity.value }));
+  // LegendList assigns rows to containers in its own layout effect and renders
+  // them in the sync pass after this commit, so arrivals are recorded first.
+  useLayoutEffect(() => {
+    const arrived = arrivals.record({
+      threadKey: feedThreadKey,
+      listMountKey,
+      rows: presentedFeed.map((entry) => ({
+        key: entry.id,
+        identity: entry.type === "work-toggle" ? entry.groupId : entry.id,
+      })),
+      visible: !feedLoading,
+      animate:
+        !reduceMotion && !isKeyboardMotionSuppressed() && disclosureAnchorKeyRef.current === null,
+    });
+    // A first send's anchor scrolls itself, animated, until the next send replaces it.
+    const anchored =
+      props.anchorMessageId !== null &&
+      !props.queuedMessages.some((message) => arrived.includes(message.messageId));
+    if (arrived.length > 0 && endFollowEnabledRef.current && !anchored) arrivals.glide();
+  }, [
+    arrivals,
+    feedLoading,
+    feedThreadKey,
+    listMountKey,
+    presentedFeed,
+    props.anchorMessageId,
+    props.queuedMessages,
+    reduceMotion,
+  ]);
+  const bottomAligned = useListBottomAligned(listRef, listMountKey);
   const seededListMountKeyRef = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (seededListMountKeyRef.current === listMountKey) return;
@@ -2431,8 +2450,9 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
           ? performance.now() + MOTION_ENTER_DURATION_MS
           : 0;
       setDisclosureToggleSettling(true);
+      arrivals.disarm();
     },
-    [reduceMotion],
+    [arrivals, reduceMotion],
   );
 
   // Start the quiet-frame countdown after React has committed the disclosure.
@@ -2614,17 +2634,21 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     if (hasHtmlRenders) props.listRef.current?.clearCaches({ mode: "sizes" });
   }, [contentWidth, hasHtmlRenders, props.listRef]);
 
-  // Disclosures can mount existing offscreen rows as well as new work rows.
-  // Fade those in immediately; never retain removed rows over replacements.
+  // Disclosures can mount existing offscreen rows as well as new work rows, and
+  // arrivals mount rows the reader has not seen. Fade those in immediately;
+  // never retain removed rows over replacements.
+  const shouldRowFadeIn = useCallback(
+    (key: string) =>
+      (disclosureToggleSettling || arrivals.isFresh(key)) &&
+      !reduceMotion &&
+      !isKeyboardMotionSuppressed(),
+    [arrivals, disclosureToggleSettling, reduceMotion],
+  );
   const renderItem = useCallback(
     (info: { item: PendingThreadFeedEntry; index: number }) => (
       <Animated.View
         key={info.item.type === "work-toggle" ? info.item.groupId : info.item.id}
-        entering={
-          disclosureToggleSettling && !reduceMotion && !isKeyboardMotionSuppressed()
-            ? THREAD_FEED_DISCLOSURE_ENTER_TRANSITION
-            : undefined
-        }
+        entering={shouldRowFadeIn(info.item.id) ? THREAD_FEED_ROW_ENTER_TRANSITION : undefined}
       >
         <MessageImageGalleryScope
           entry={info.item}
@@ -2640,7 +2664,6 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
               onUseArtifactTemplate: props.onUseArtifactTemplate,
               threadId: props.threadId,
               copiedRowId,
-              motionEnabled: !reduceMotion && !isKeyboardMotionSuppressed(),
               expandedWorkRows,
               workRowSizing,
               workGroupScrollPositions,
@@ -2689,8 +2712,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       props.dispatchingMessageId,
       props.onEditPendingMessage,
       copiedRowId,
-      disclosureToggleSettling,
-      reduceMotion,
+      shouldRowFadeIn,
       expandedWorkRows,
       workRowSizing,
       workGroupScrollPositions,
@@ -2842,7 +2864,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             onItemSizeChanged={handleItemSizeChanged}
             // Measure rows well before they scroll into view so estimate→actual
             // corrections land offscreen instead of under the user's finger.
-            drawDistance={500}
+            drawDistance={THREAD_FEED_DRAW_DISTANCE}
             keyboardShouldPersistTaps="always"
             keyboardDismissMode="none"
             keyboardLiftBehavior="whenAtEnd"
@@ -2867,6 +2889,11 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             // composer instead of under the header. No effect on threads that
             // overflow the viewport (the padding clamps to zero).
             alignItemsAtEnd
+            sharedValues={arrivals.sharedValues}
+            itemsContainerStyle={arrivals.itemsContainerStyle}
+            // Only a bottom-aligned feed moves its item layer; a long one keeps the
+            // per-frame layout transition machinery off its streaming updates.
+            itemsContainerLayout={bottomAligned ? arrivals.itemsContainerLayout : undefined}
             initialScrollAtEnd
             onScroll={handleScroll}
             onStartReached={handleHistoryPrefetch}
