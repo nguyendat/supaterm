@@ -583,7 +583,9 @@ export function EnvironmentProviderSettings({
   // Older servers decode an unknown providerInstances key away, so sending
   // a project override patch would silently do nothing. Hide the switch
   // instead of offering a control that can never take effect.
-  const supportsProjectProviderOverrides = useServerConfigs().has(environmentId);
+  const serverConfigs = useServerConfigs();
+  const serverConfig = serverConfigs.get(environmentId) ?? null;
+  const supportsProjectProviderOverrides = serverConfigs.has(environmentId);
   const refreshServerProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
   });
@@ -983,14 +985,13 @@ export function EnvironmentProviderSettings({
               readOnly={readOnly}
               onEnable={() => updateProviderInstance(row, { ...row.instance, enabled: true })}
             />
-          ) : mode === "editor" &&
-            row.driver === "codex" &&
-            readCodexSetupMode(row.instance.config) === "managed" ? (
+          ) : mode === "editor" && row.driver === "codex" ? (
             <CodexSetupSection
               environmentId={environmentId}
               instanceId={row.instanceId}
               provider={liveProvider}
               mode={readCodexSetupMode(row.instance.config)}
+              serverConfig={serverConfig}
               enabled={resolveProviderInstanceEnabled(row.instance)}
               readOnly={readOnly}
               onModeChange={(setupMode) =>

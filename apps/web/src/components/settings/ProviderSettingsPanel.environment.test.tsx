@@ -333,6 +333,20 @@ describe("EnvironmentProviderSettings routing", () => {
     });
   });
 
+  it("keeps existing Codex CLI login controls visible in settings", () => {
+    atoms.providers = [provider()];
+    const panel = renderPanel({ targetInstanceId: codexId });
+    const editor = visitElements(
+      panel,
+      (element) => element.props.instanceId === codexId && element.props.mode === "editor",
+    );
+
+    expect(editor).not.toBeNull();
+    expect(
+      (editor?.props.setup as ReactElement<Record<string, unknown>> | undefined)?.props.mode,
+    ).toBe("existing");
+  });
+
   it("opens the requested provider instance instead of the first provider", () => {
     settingsState.value = {
       ...DEFAULT_UNIFIED_SETTINGS,

@@ -1,6 +1,6 @@
 import * as Option from "effect/Option";
 import { isLocalProviderAuthConnection } from "./CodexSetupSection.logic";
-import { AuthProvidersManageScope } from "@supaterm/contracts";
+import { AuthProvidersManageScope, AuthTerminalOperateScope } from "@supaterm/contracts";
 import { useEnvironmentScope, usePreparedConnection } from "../../state/session";
 import {
   isAtomCommandInterrupted,
@@ -12,6 +12,7 @@ import type {
   ChatGptTransferredProfile,
   EnvironmentId,
   ProviderInstanceId,
+  ServerConfig,
   ServerProvider,
 } from "@supaterm/contracts";
 import { codexAuthHandoffUrl } from "@supaterm/shared/codexAuthHandoff";
@@ -34,8 +35,12 @@ import { OpenAI } from "../Icons";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SettingsRow } from "./settingsLayout";
 import { AddCodexAccountDialog } from "./AddCodexAccountDialog";
-import { getOnboardingProviderState } from "../../onboarding/providerReadiness.logic";
+import {
+  getOnboardingProviderState,
+  resolveOnboardingProviderLoginCommand,
+} from "../../onboarding/providerReadiness.logic";
 import { getProviderSummary } from "./providerStatus";
+import { ProviderSetupTerminal } from "../ProviderSetupTerminal";
 
 const noop = () => undefined;
 
@@ -43,6 +48,7 @@ interface CodexSetupSectionProps {
   readonly environmentId: EnvironmentId;
   readonly instanceId: ProviderInstanceId;
   readonly provider: ServerProvider | undefined;
+  readonly serverConfig?: ServerConfig | null;
   readonly mode: "managed" | "existing";
   readonly enabled: boolean;
   readonly readOnly?: boolean;
@@ -122,7 +128,9 @@ export function CodexSetupSection(props: CodexSetupSectionProps) {
           ) : null
         }
       />
-    ) : props.mode === "existing" ? null : props.provider?.setup === undefined ? (
+    ) : props.mode === "existing" ? (
+      <ExistingCodexSetup {...props} />
+    ) : props.provider?.setup === undefined ? (
       props.presentation === "onboarding" ? (
         <CodexWelcomeCard
           title={props.displayName || props.provider?.displayName || "Codex"}
@@ -153,6 +161,94 @@ export function CodexSetupSection(props: CodexSetupSectionProps) {
       />
     );
   return content;
+}
+
+function ExistingCodexSetup(props: CodexSetupSectionProps) {
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const canOperateTerminal = useEnvironmentScope(props.environmentId, AuthTerminalOperateScope);
+  const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
+    reportFailure: false,
+  });
+  const providerState = getOnboardingProviderState(props.provider);
+  const providerSummary = getProviderSummary(props.provider);
+  const serverConfig = props.serverConfig;
+  const canSignIn =
+    !props.readOnly &&
+    canOperateTerminal &&
+    serverConfig !== null &&
+    serverConfig !== undefined &&
+    props.provider?.installed === true;
+  const loginCommand =
+    props.provider && serverConfig
+      ? resolveOnboardingProviderLoginCommand(
+          props.provider,
+          serverConfig.settings,
+          serverConfig.environment.platform.os,
+        )
+      : null;
+  const closeTerminal = () => {
+    setTerminalOpen(false);
+    void refreshProviders({ environmentId: props.environmentId, input: {} });
+  };
+  const description =
+    providerState === "ready"
+      ? "Connected with your existing Codex CLI login."
+      : providerState === "checking"
+        ? "Checking your Codex CLI..."
+        : props.provider?.installed
+          ? (providerSummary.detail ?? providerSummary.headline)
+          : "Install Codex CLI on this environment before signing in.";
+
+  return (
+    <section aria-label="Codex setup" className="divide-y divide-border/50">
+      <SettingsRow
+        title="Codex CLI login"
+        description={description}
+        control={
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {providerState === "ready" ? (
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success-foreground">
+                <CheckIcon className="size-3.5" />
+                Ready
+              </span>
+            ) : providerState === "checking" ? (
+              <span className="text-xs text-muted-foreground">Checking...</span>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!canSignIn || terminalOpen}
+                onClick={() => setTerminalOpen(true)}
+              >
+                Sign in
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="ghost-muted"
+              disabled={props.readOnly || terminalOpen}
+              onClick={() => props.onModeChange("managed")}
+            >
+              Continue with ChatGPT
+            </Button>
+          </div>
+        }
+      />
+      {terminalOpen && serverConfig && loginCommand ? (
+        <div className="px-3 pb-3 sm:px-4">
+          <ProviderSetupTerminal
+            environmentId={props.environmentId}
+            providerInstanceId={props.instanceId}
+            cwd={serverConfig.cwd}
+            command={loginCommand}
+            terminalLabel="Sign in to Codex"
+            keybindings={serverConfig.keybindings}
+            onClose={closeTerminal}
+          />
+        </div>
+      ) : null}
+    </section>
+  );
 }
 
 /** All add-Codex entry points use the same managed account setup. */
