@@ -2,7 +2,7 @@ import { expect, it } from "vite-plus/test";
 import { resolveThreadListV2RowStatusLabel } from "./thread-list-row-status";
 
 const state = {
-  environmentConnected: true,
+  environmentConnectionVisible: true,
   isUnread: false,
   goalActive: false,
   mutedClassName: "text-drawer-foreground-muted",
@@ -21,7 +21,7 @@ it.each([
     resolveThreadListV2RowStatusLabel({
       ...state,
       status,
-      environmentConnected: false,
+      environmentConnectionVisible: false,
       isUnread: true,
       goalActive: true,
     }),

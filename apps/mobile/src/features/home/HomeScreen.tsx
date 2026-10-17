@@ -1,4 +1,5 @@
 import { useThreadListV2Layout } from "../threads/use-thread-list-v2-layout";
+import { useDelayedEnvironmentConnections } from "../../connection/use-delayed-environment-connections";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
 import { type LegendListRef } from "@legendapp/list/react-native";
@@ -542,6 +543,7 @@ export function HomeScreen(props: HomeScreenProps) {
     }, []),
   );
   const listEnvironments = useAtomValue(threadListEnvironmentsAtom);
+  const delayedConnectedEnvironmentIds = useDelayedEnvironmentConnections(props.environments);
   const { providersByEnvironmentId, machineByEnvironmentId, loadedEnvironmentIds } =
     listEnvironments;
   const resolveProviderInstance = useThreadRowProviderInstanceResolver(providersByEnvironmentId);
@@ -749,6 +751,7 @@ export function HomeScreen(props: HomeScreenProps) {
               ? (props.savedConnectionsById[thread.environmentId]?.environmentLabel ?? null)
               : null
           }
+          environmentConnectionVisible={delayedConnectedEnvironmentIds.has(thread.environmentId)}
           environmentMachine={machineByEnvironmentId.get(thread.environmentId)}
           searchMatch={threadSearchMatchByKey.get(
             threadSearchMatchKey({
@@ -820,6 +823,7 @@ export function HomeScreen(props: HomeScreenProps) {
       toggleWorkingShelf,
       v2ProjectTitleByProjectKey,
       props.searchQuery,
+      delayedConnectedEnvironmentIds,
     ],
   );
   const v2KeyExtractor = useCallback((item: ThreadListV2ListItem) => item.key, []);
@@ -850,6 +854,7 @@ export function HomeScreen(props: HomeScreenProps) {
       searchQuery: props.searchQuery,
       selectedThreadKey,
       threadSearchMatchByKey,
+      delayedConnectedEnvironmentIds,
     }),
     [
       projectByKey,
@@ -859,6 +864,7 @@ export function HomeScreen(props: HomeScreenProps) {
       listEnvironments,
       threadSearchMatchByKey,
       v2ProjectTitleByProjectKey,
+      delayedConnectedEnvironmentIds,
     ],
   );
 

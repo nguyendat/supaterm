@@ -12,8 +12,6 @@ import { RowPressable } from "../../components/ui/RowPressable";
 import { CustomSnoozeSheet } from "./CustomSnoozeSheet";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { threadArrangementOpenAtom } from "../../state/thread-order";
-import { useAtomValue } from "@effect/atom-react";
-import { isEnvironmentConnected } from "@supaterm/client-runtime/connection";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -29,7 +27,6 @@ import { Pressable, useWindowDimensions, View } from "react-native";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 
 import type { ThreadListProvider } from "../../state/thread-list-environments";
-import { environmentPresentations } from "../../state/presentation";
 import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { Menu } from "../../components/ui/Menu";
@@ -564,6 +561,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly providers: ReadonlyArray<ThreadListProvider> | undefined;
   readonly providerInstance: ThreadRowProviderInstance | null;
   readonly environmentLabel: string | null;
+  readonly environmentConnectionVisible: boolean;
   readonly environmentMachine?: EnvironmentMachineKind;
   readonly pane?: "screen" | "sidebar";
   readonly showTrailingDivider?: boolean;
@@ -616,13 +614,10 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     onPinThread,
     onUnpinThread,
     onSetThreadAutoMarkDone,
+    environmentConnectionVisible,
   } = props;
   const snoozedRow = props.snoozed === true;
   const pinnedRow = props.pinned === true;
-  const environmentConnected = useAtomValue(
-    environmentPresentations.presentationAtom(thread.environmentId),
-    isEnvironmentConnected,
-  );
   const dormant = useSwipeRowDormant(props.activationKey);
 
   const { providerDrivers, providerIconUrl } = useMemo(() => {
@@ -658,7 +653,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const status = resolveThreadListV2Status(thread);
   const isUnread = status === "ready" && threadHasUnseenCompletion(thread);
   const rowStatusLabel = resolveThreadListV2RowStatusLabel({
-    environmentConnected,
+    environmentConnectionVisible,
     status,
     isUnread,
     goalActive: thread.goal?.status === "active",
@@ -667,10 +662,10 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       : rowAppearance.mutedForegroundClassName,
   });
   const durationStartedAt =
-    environmentConnected && (status === "working" || status === "waiting")
+    environmentConnectionVisible && (status === "working" || status === "waiting")
       ? resolveThreadListDurationStartedAt(thread)
       : null;
-  const statusAppearance = environmentConnected
+  const statusAppearance = environmentConnectionVisible
     ? (STATUS_LABEL_BY_STATUS[status] ?? (isUnread ? READY_STATUS_LABEL : undefined))
     : undefined;
   const statusLabel =
@@ -687,7 +682,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                   ? selectedThreadRowColors.iconTintClassName
                   : rowAppearance.mutedIconTintClassName)),
         };
-  const recede = environmentConnected && shouldRecedeThreadRow({ status, selected });
+  const recede = environmentConnectionVisible && shouldRecedeThreadRow({ status, selected });
   // The timestamp is precomputed on the list item (same stamps the done
   // tail sorts by) so a minute tick only re-renders rows that draw it.
   const timeLabel = props.timeLabel;
@@ -1234,13 +1229,15 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         style={rowAppearance.cardStyle}
       >
         {sidebarPane ? (
-          <View className={cn(!environmentConnected && "opacity-50")}>{fadedCardContent}</View>
+          <View className={cn(!environmentConnectionVisible && "opacity-50")}>
+            {fadedCardContent}
+          </View>
         ) : (
           <View>
             <View
               className={cn(
                 THREAD_LIST_V2_ROW_CONTENT_CLASS_NAME,
-                !environmentConnected && "opacity-50",
+                !environmentConnectionVisible && "opacity-50",
               )}
             >
               {fadedCardContent}
@@ -1272,7 +1269,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           className={cn(
             "min-h-[44px] flex-row items-center gap-2.5 py-2",
             sidebarPane ? "px-3" : "px-5",
-            !environmentConnected && "opacity-50",
+            !environmentConnectionVisible && "opacity-50",
           )}
         >
           {props.project ? (
@@ -1319,7 +1316,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             )}
             style={{ fontFamily: MONO_FONT }}
           >
-            {!environmentConnected
+            {!environmentConnectionVisible
               ? statusLabel?.label
               : snoozedRow && props.snoozeWakeLabelText !== undefined
                 ? props.snoozeWakeLabelText

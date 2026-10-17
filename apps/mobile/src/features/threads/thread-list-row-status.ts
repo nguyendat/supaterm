@@ -12,13 +12,15 @@ const STATUS_LABEL_BY_STATUS: Partial<
 
 /** Cached work status becomes live again only after its environment connects. */
 export function resolveThreadListV2RowStatusLabel(input: {
-  readonly environmentConnected: boolean;
+  readonly environmentConnectionVisible: boolean;
   readonly status: ThreadListV2Status;
   readonly isUnread: boolean;
   readonly goalActive: boolean;
   readonly mutedClassName: string;
 }): { label: string; className: string } | undefined {
-  if (!input.environmentConnected) return { label: "Connecting", className: input.mutedClassName };
+  if (!input.environmentConnectionVisible) {
+    return { label: "Connecting", className: input.mutedClassName };
+  }
   if (input.status === "waiting") return { label: "Waiting", className: input.mutedClassName };
   const label = STATUS_LABEL_BY_STATUS[input.status];
   // A native /goal keeps the agent going across turns until it is met.

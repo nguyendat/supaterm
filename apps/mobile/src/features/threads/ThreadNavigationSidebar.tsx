@@ -43,6 +43,7 @@ import { threadListEnvironmentsAtom } from "../../state/server";
 import { usePendingNewTasks } from "../../state/use-pending-new-tasks";
 import { useQueuedThreadKeys } from "../../state/use-thread-outbox";
 import { useWorkspaceState } from "../../state/workspace";
+import { useDelayedEnvironmentConnections } from "../../connection/use-delayed-environment-connections";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { useHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands";
 import { useThreadJumpShortcuts } from "../keyboard/threadKeyboardShortcuts";
@@ -159,6 +160,7 @@ function ThreadNavigationSidebarPane(
   const projects = useProjects();
   const threads = useNavigationThreadShells();
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
+  const delayedConnectedEnvironmentIds = useDelayedEnvironmentConnections(workspaceEnvironments);
   const { savedConnectionsById } = useSavedRemoteConnections();
   const searchInputRef = useRef<TextInputInstance>(null);
   const searchBarRef = useRef<SearchBarCommands>(null);
@@ -547,6 +549,7 @@ function ThreadNavigationSidebarPane(
       savedConnectionsById,
       listEnvironments,
       threadSearchMatchByKey,
+      delayedConnectedEnvironmentIds,
     }),
     [
       props.selectedThreadKey,
@@ -555,6 +558,7 @@ function ThreadNavigationSidebarPane(
       savedConnectionsById,
       listEnvironments,
       threadSearchMatchByKey,
+      delayedConnectedEnvironmentIds,
     ],
   );
   useThreadJumpShortcuts(listItems, handleSelectThread);
@@ -639,6 +643,9 @@ function ThreadNavigationSidebarPane(
                   ? (savedConnectionsById[thread.environmentId]?.environmentLabel ?? null)
                   : null
               }
+              environmentConnectionVisible={delayedConnectedEnvironmentIds.has(
+                thread.environmentId,
+              )}
               environmentMachine={machineByEnvironmentId.get(thread.environmentId)}
               searchMatch={threadSearchMatchByKey.get(
                 threadSearchMatchKey({
@@ -776,6 +783,7 @@ function ThreadNavigationSidebarPane(
       unpinThread,
       reopenThread,
       unsnoozeThread,
+      delayedConnectedEnvironmentIds,
     ],
   );
   const renderListItem = useCallback(
