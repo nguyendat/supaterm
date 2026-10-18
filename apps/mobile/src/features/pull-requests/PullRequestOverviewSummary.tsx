@@ -1,4 +1,6 @@
 import { Chip } from "../../components/ui/Chip";
+import { Button } from "../../components/ui/Button";
+import { AppText as Text } from "../../components/ui/AppText";
 import { PullRequestSectionHeading } from "./PullRequestSectionHeading";
 import type { PullRequestListEntry } from "@supaterm/contracts";
 import { View } from "react-native";
@@ -8,14 +10,20 @@ import type { PullRequestParams } from "./usePullRequestDiff";
 import type { PullRequestStackState } from "./usePullRequestStack";
 import { pullRequestListReviewStatus } from "./pullRequestList";
 
-export function PullRequestOverviewLoading({
+export function PullRequestOverviewSummary({
   summary,
   params,
   stack,
+  loading,
+  connected,
+  onRetry,
 }: {
   readonly summary: PullRequestListEntry;
   readonly params: PullRequestParams;
   readonly stack: PullRequestStackState;
+  readonly loading: boolean;
+  readonly connected: boolean;
+  readonly onRetry: () => void;
 }) {
   const review = pullRequestListReviewStatus(summary);
   const conflicting = summary.mergeability === "conflicting";
@@ -23,8 +31,8 @@ export function PullRequestOverviewLoading({
   return (
     <View
       className="gap-5"
-      accessibilityLabel="Loading pull request details"
-      accessibilityState={{ busy: true }}
+      accessibilityLabel={loading ? "Loading pull request details" : "Pull request summary"}
+      accessibilityState={{ busy: loading }}
     >
       <PullRequestStackCard params={params} state={stack} />
       <PullRequestCardGroup>
@@ -54,7 +62,7 @@ export function PullRequestOverviewLoading({
                 : "accent-icon-muted"
           }
         >
-          <View className="h-3 w-16 rounded bg-subtle-strong" />
+          {loading ? <View className="h-3 w-16 rounded bg-subtle-strong" /> : null}
         </PullRequestCardRow>
         <PullRequestCardRow
           compact
@@ -62,7 +70,7 @@ export function PullRequestOverviewLoading({
           icon={review?.icon ?? "bubble.left"}
           tint={review?.tint}
         >
-          <View className="h-3 w-20 rounded bg-subtle-strong" />
+          {loading ? <View className="h-3 w-20 rounded bg-subtle-strong" /> : null}
         </PullRequestCardRow>
         <PullRequestCardRow
           compact
@@ -84,9 +92,11 @@ export function PullRequestOverviewLoading({
                 : undefined
           }
         />
-        <View className="border-t border-border-subtle p-3">
-          <View className="h-11 rounded-xl bg-subtle-strong" />
-        </View>
+        {loading ? (
+          <View className="border-t border-border-subtle p-3">
+            <View className="h-11 rounded-xl bg-subtle-strong" />
+          </View>
+        ) : null}
       </PullRequestCardGroup>
       {summary.labels.length ? (
         <View className="flex-row flex-wrap gap-2">
@@ -97,11 +107,22 @@ export function PullRequestOverviewLoading({
       ) : null}
       <View className="gap-3">
         <PullRequestSectionHeading>Description</PullRequestSectionHeading>
-        <View className="gap-3 py-1">
-          <View className="h-4 w-full rounded bg-subtle-strong" />
-          <View className="h-4 w-full rounded bg-subtle-strong" />
-          <View className="h-4 w-3/4 rounded bg-subtle-strong" />
-        </View>
+        {loading ? (
+          <View className="gap-3 py-1">
+            <View className="h-4 w-full rounded bg-subtle-strong" />
+            <View className="h-4 w-full rounded bg-subtle-strong" />
+            <View className="h-4 w-3/4 rounded bg-subtle-strong" />
+          </View>
+        ) : (
+          <View className="items-start gap-3">
+            <Text className="text-sm text-foreground-muted">
+              {connected
+                ? "Couldn't load this description. Try again."
+                : "This description isn't saved on this device. Reconnect to load it."}
+            </Text>
+            {connected ? <Button label="Retry" onPress={onRetry} /> : null}
+          </View>
+        )}
       </View>
     </View>
   );

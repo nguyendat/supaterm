@@ -35,7 +35,7 @@ import { useFocusEffect, useNavigation, type StaticScreenProps } from "@react-na
 import { useAtomRefresh } from "@effect/atom-react";
 
 import { type PullRequestDetail, type PullRequestListEntry } from "@supaterm/contracts";
-import { PullRequestOverviewLoading } from "./PullRequestOverviewLoading";
+import { PullRequestOverviewSummary } from "./PullRequestOverviewSummary";
 import { pullRequestStatus } from "./pullRequestStatus";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -142,6 +142,7 @@ function usePullRequestActivityRows(params: PullRequestParams, filter: ActivityF
 function PullRequestIdentity(props: {
   readonly pr: PullRequestDetail | PullRequestListEntry;
   readonly params: PullRequestParams;
+  readonly loading: boolean;
 }) {
   const { pr } = props;
   const status = pullRequestStatus(pr);
@@ -161,9 +162,9 @@ function PullRequestIdentity(props: {
           <Text className="text-2xs text-foreground-muted">
             {pr.changedFiles} {pr.changedFiles === 1 ? "file" : "files"}
           </Text>
-        ) : (
+        ) : props.loading ? (
           <View className="h-3 w-12 rounded bg-subtle-strong" />
-        )}
+        ) : null}
       </View>
       <Text selectable className="text-xl font-supaterm-bold leading-7">
         {pr.title}
@@ -307,6 +308,7 @@ export function PullRequestRouteScreen({ route }: StaticScreenProps<PullRequestP
   const { refresh: refreshDetail } = result;
   useFocusEffect(useCallback(() => refreshDetail(), [refreshDetail]));
   const pr = result.data;
+  const detailLoading = connected && result.isPending;
   const summary = params.initialSummary;
   const identity = pr ?? summary;
   const permissions = usePullRequestPermissions(params, pr);
@@ -559,10 +561,13 @@ export function PullRequestRouteScreen({ route }: StaticScreenProps<PullRequestP
                                   }}
                                 />
                               ) : summary ? (
-                                <PullRequestOverviewLoading
+                                <PullRequestOverviewSummary
                                   summary={summary}
                                   params={params}
                                   stack={stack}
+                                  loading={detailLoading}
+                                  connected={connected}
+                                  onRetry={refreshDetail}
                                 />
                               ) : null}
                               <View
@@ -650,7 +655,11 @@ export function PullRequestRouteScreen({ route }: StaticScreenProps<PullRequestP
                             setHeaderHeight(event.nativeEvent.layout.height);
                           }}
                         >
-                          <PullRequestIdentity pr={identity} params={params} />
+                          <PullRequestIdentity
+                            pr={identity}
+                            params={params}
+                            loading={detailLoading}
+                          />
                           <SegmentedControl
                             className={Platform.OS === "android" ? undefined : "bg-grouped-card"}
                             options={[
