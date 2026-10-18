@@ -37,6 +37,7 @@ import {
   type AuthPairingCredentialResult,
   type AdvertisedEndpoint,
   type DesktopDiscoveredSshHost,
+  type DesktopEmbeddedTailscaleStatus,
   type DesktopSshEnvironmentTarget,
   type DesktopServerExposureState,
   type DesktopWslState,
@@ -439,7 +440,9 @@ function selectPairingEndpoint(
 }
 
 function isTailscaleHttpsEndpoint(endpoint: AdvertisedEndpoint): boolean {
-  return endpoint.id.startsWith("tailscale-magicdns:");
+  return (
+    endpoint.id.startsWith("tailscale-magicdns:") || endpoint.id.startsWith("tailscale-embedded:")
+  );
 }
 
 function endpointDefaultPreferenceKey(endpoint: AdvertisedEndpoint): string {
@@ -1758,6 +1761,10 @@ export function ConnectionsSettings() {
   const [isUpdatingDesktopServerExposure, setIsUpdatingDesktopServerExposure] = useState(false);
   const [isDesktopServerExposureDialogOpen, setIsDesktopServerExposureDialogOpen] = useState(false);
   const [isUpdatingTailscaleServe, setIsUpdatingTailscaleServe] = useState(false);
+  const [isUpdatingEmbeddedTailscale, setIsUpdatingEmbeddedTailscale] = useState(false);
+  const [embeddedTailscaleDialogOpen, setEmbeddedTailscaleDialogOpen] = useState(false);
+  const [embeddedTailscaleHostname, setEmbeddedTailscaleHostname] = useState("");
+  const [embeddedTailscaleTags, setEmbeddedTailscaleTags] = useState("");
   const [isUpdatingWslBackend, setIsUpdatingWslBackend] = useState(false);
   const [desktopWslMutationError, setDesktopWslMutationError] = useState<string | null>(null);
   type PendingWslChange =
@@ -1805,6 +1812,48 @@ export function ConnectionsSettings() {
   const desktopNetworkAccess = useEnvironmentQuery(
     canManageLocalBackend && desktopBridge ? desktopNetworkAccessStateAtom : null,
   );
+  const [embeddedTailscaleStatus, setEmbeddedTailscaleStatus] =
+    useState<DesktopEmbeddedTailscaleStatus | null>(null);
+  const openedEmbeddedAuthUrlRef = useRef<string | null>(null);
+  const refreshEmbeddedTailscaleStatus = useCallback(async () => {
+    if (!desktopBridge || !canManageLocalBackend) {
+      setEmbeddedTailscaleStatus(null);
+      return;
+    }
+    try {
+      setEmbeddedTailscaleStatus(await desktopBridge.getEmbeddedTailscaleStatus());
+    } catch {
+      setEmbeddedTailscaleStatus(null);
+    }
+  }, [canManageLocalBackend, desktopBridge]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void refreshEmbeddedTailscaleStatus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [refreshEmbeddedTailscaleStatus]);
+  useEffect(() => {
+    if (
+      embeddedTailscaleStatus?.state !== "starting" &&
+      embeddedTailscaleStatus?.state !== "needs-login"
+    ) {
+      return;
+    }
+    const interval = window.setInterval(() => void refreshEmbeddedTailscaleStatus(), 750);
+    return () => window.clearInterval(interval);
+  }, [embeddedTailscaleStatus?.state, refreshEmbeddedTailscaleStatus]);
+  useEffect(() => {
+    const authUrl = embeddedTailscaleStatus?.authUrl;
+    if (
+      !desktopBridge ||
+      embeddedTailscaleStatus?.state !== "needs-login" ||
+      authUrl === null ||
+      authUrl === undefined ||
+      openedEmbeddedAuthUrlRef.current === authUrl
+    ) {
+      return;
+    }
+    openedEmbeddedAuthUrlRef.current = authUrl;
+    void desktopBridge.openExternal(authUrl);
+  }, [desktopBridge, embeddedTailscaleStatus]);
   const isSshDiscoveryActive =
     desktopBridge !== undefined && addBackendDialogOpen && savedBackendMode === "ssh";
   const desktopSshHosts = useEnvironmentQuery(
@@ -2013,6 +2062,88 @@ export function ConnectionsSettings() {
   const handleStartTailscaleServeDisable = useCallback((_endpoint: AdvertisedEndpoint) => {
     setDisableTailscaleServeDialogOpen(true);
   }, []);
+
+  const handleSignInEmbeddedTailscale = useCallback(async () => {
+    if (
+      !desktopBridge ||
+      primaryEnvironmentId === null ||
+      !readEnvironmentScope(primaryEnvironmentId, AuthEnvironmentMaintainScope)
+    ) {
+      return;
+    }
+    setIsUpdatingEmbeddedTailscale(true);
+    try {
+      const status = await desktopBridge.signInEmbeddedTailscale({
+        hostname: embeddedTailscaleHostname,
+        tags: embeddedTailscaleTags
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter((tag) => tag.length > 0),
+      });
+      setEmbeddedTailscaleStatus(status);
+      setEmbeddedTailscaleDialogOpen(false);
+      if (status.authUrl) {
+        openedEmbeddedAuthUrlRef.current = status.authUrl;
+        await desktopBridge.openExternal(status.authUrl);
+      }
+      refreshDesktopNetworkAccessState();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to start Tailscale sign-in.";
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not start Tailscale",
+          description: message,
+        }),
+      );
+    } finally {
+      setIsUpdatingEmbeddedTailscale(false);
+    }
+  }, [desktopBridge, embeddedTailscaleHostname, embeddedTailscaleTags, primaryEnvironmentId]);
+
+  const handleToggleEmbeddedTailscale = useCallback(
+    async (enabled: boolean) => {
+      if (!desktopBridge) return;
+      setIsUpdatingEmbeddedTailscale(true);
+      try {
+        setEmbeddedTailscaleStatus(await desktopBridge.setEmbeddedTailscaleServeEnabled(enabled));
+        refreshDesktopNetworkAccessState();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to update Tailscale.";
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not update Tailscale",
+            description: message,
+          }),
+        );
+      } finally {
+        setIsUpdatingEmbeddedTailscale(false);
+      }
+    },
+    [desktopBridge],
+  );
+
+  const handleSignOutEmbeddedTailscale = useCallback(async () => {
+    if (!desktopBridge) return;
+    setIsUpdatingEmbeddedTailscale(true);
+    try {
+      setEmbeddedTailscaleStatus(await desktopBridge.signOutEmbeddedTailscale());
+      openedEmbeddedAuthUrlRef.current = null;
+      refreshDesktopNetworkAccessState();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to sign out of Tailscale.";
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not sign out of Tailscale",
+          description: message,
+        }),
+      );
+    } finally {
+      setIsUpdatingEmbeddedTailscale(false);
+    }
+  }, [desktopBridge]);
 
   const handleRevokeDesktopPairingLink = useCallback(
     async (id: string) => {
@@ -2361,10 +2492,13 @@ export function ConnectionsSettings() {
   );
 
   const visibleDesktopPairingLinks = desktopPairingLinks;
-  const tailscaleHttpsEndpoint = useMemo(
-    () => desktopAdvertisedEndpoints.find(isTailscaleHttpsEndpoint) ?? null,
+  const tailscaleHttpsEndpoints = useMemo(
+    () => desktopAdvertisedEndpoints.filter(isTailscaleHttpsEndpoint),
     [desktopAdvertisedEndpoints],
   );
+  const legacyTailscaleHttpsEndpoint =
+    tailscaleHttpsEndpoints.find((endpoint) => !endpoint.id.startsWith("tailscale-embedded:")) ??
+    null;
   const visibleDesktopNetworkAdvertisedEndpoints = useMemo(
     () =>
       isLocalBackendNetworkAccessible
@@ -2382,10 +2516,10 @@ export function ConnectionsSettings() {
   const visibleDesktopAdvertisedEndpoints = useMemo(
     () => [
       ...visibleDesktopNetworkAdvertisedEndpoints,
-      ...(tailscaleHttpsEndpoint ? [tailscaleHttpsEndpoint] : []),
+      ...tailscaleHttpsEndpoints,
       ...(relayEndpoint ? [relayEndpoint] : []),
     ],
-    [tailscaleHttpsEndpoint, visibleDesktopNetworkAdvertisedEndpoints, relayEndpoint],
+    [tailscaleHttpsEndpoints, visibleDesktopNetworkAdvertisedEndpoints, relayEndpoint],
   );
   const pairingHints = useMemo(
     () => ({
@@ -2409,16 +2543,13 @@ export function ConnectionsSettings() {
     () =>
       defaultDesktopNetworkAdvertisedEndpoint ??
       selectPairingEndpoint(
-        [
-          ...(tailscaleHttpsEndpoint ? [tailscaleHttpsEndpoint] : []),
-          ...(relayEndpoint ? [relayEndpoint] : []),
-        ],
+        [...tailscaleHttpsEndpoints, ...(relayEndpoint ? [relayEndpoint] : [])],
         defaultAdvertisedEndpointKey,
       ),
     [
       defaultAdvertisedEndpointKey,
       defaultDesktopNetworkAdvertisedEndpoint,
-      tailscaleHttpsEndpoint,
+      tailscaleHttpsEndpoints,
       relayEndpoint,
     ],
   );
@@ -2973,34 +3104,152 @@ export function ConnectionsSettings() {
     );
   };
 
-  const renderTailscaleRow = () => (
+  const renderLegacyTailscaleRow = (endpoint: AdvertisedEndpoint) => (
     <SettingsRow
-      title={searchableSetting("tailscale-https").title}
+      title="Tailscale Serve"
       description={
-        tailscaleHttpsEndpoint
-          ? tailscaleHttpsEndpoint.status === "available"
-            ? tailscaleHttpsEndpoint.httpBaseUrl
-            : "Use Tailscale Serve to expose this backend through a MagicDNS HTTPS URL."
-          : missingTailscaleEndpointDescription(desktopServerExposureState)
+        endpoint.status === "available"
+          ? endpoint.httpBaseUrl
+          : "Use the installed Tailscale CLI to expose this backend through a MagicDNS HTTPS URL."
       }
       control={
-        tailscaleHttpsEndpoint ? (
-          <Switch
-            checked={tailscaleHttpsEndpoint.status === "available"}
-            disabled={isUpdatingTailscaleServe}
-            onCheckedChange={(checked) => {
-              if (checked) {
-                handleStartTailscaleServeSetup(tailscaleHttpsEndpoint);
-                return;
-              }
-              handleStartTailscaleServeDisable(tailscaleHttpsEndpoint);
-            }}
-            aria-label="Enable Tailscale HTTPS"
-          />
-        ) : null
+        <Switch
+          checked={endpoint.status === "available"}
+          disabled={isUpdatingTailscaleServe}
+          onCheckedChange={(checked) => {
+            if (checked) {
+              handleStartTailscaleServeSetup(endpoint);
+              return;
+            }
+            handleStartTailscaleServeDisable(endpoint);
+          }}
+          aria-label="Enable Tailscale Serve"
+        />
       }
     />
   );
+
+  const renderTailscaleRow = () => {
+    if (desktopBridge && embeddedTailscaleStatus !== null) {
+      const status = embeddedTailscaleStatus;
+      if (status.state === "running") {
+        return (
+          <>
+            <SettingsRow
+              title="Tailscale"
+              description={status.endpointUrl ?? "Connected to your tailnet."}
+              control={
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={status.serveEnabled}
+                    disabled={isUpdatingEmbeddedTailscale}
+                    onCheckedChange={(checked) => void handleToggleEmbeddedTailscale(checked)}
+                    aria-label="Serve Supaterm over Tailscale"
+                  />
+                  <Button
+                    size="xs"
+                    variant="ghost-muted"
+                    disabled={isUpdatingEmbeddedTailscale}
+                    onClick={() => void handleSignOutEmbeddedTailscale()}
+                  >
+                    Sign out
+                  </Button>
+                </div>
+              }
+            />
+            <SettingsRow
+              title="Tailscale account access"
+              description={
+                status.ownerLoginName
+                  ? `Only ${status.ownerLoginName} can reach this Supaterm node.`
+                  : "Only your Tailscale account can reach this Supaterm node."
+              }
+              control={<span className="text-sm text-muted-foreground">Enabled</span>}
+            />
+            {legacyTailscaleHttpsEndpoint
+              ? renderLegacyTailscaleRow(legacyTailscaleHttpsEndpoint)
+              : null}
+          </>
+        );
+      }
+      if (status.state === "needs-login") {
+        return (
+          <>
+            <SettingsRow
+              title="Sign in to Tailscale"
+              description="Finish sign-in in your browser to expose Supaterm over your tailnet."
+              status={
+                status.error ? <span className="text-destructive">{status.error}</span> : null
+              }
+              control={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={isUpdatingEmbeddedTailscale || !status.authUrl}
+                  onClick={() => {
+                    if (status.authUrl) void desktopBridge.openExternal(status.authUrl);
+                  }}
+                >
+                  Open sign-in
+                </Button>
+              }
+            />
+            {legacyTailscaleHttpsEndpoint
+              ? renderLegacyTailscaleRow(legacyTailscaleHttpsEndpoint)
+              : null}
+          </>
+        );
+      }
+      if (status.state === "starting") {
+        return (
+          <>
+            <SettingsRow
+              title="Starting Tailscale"
+              description="Preparing a private Supaterm endpoint. Local network access is not required."
+              control={<Spinner size="sm" />}
+            />
+            {legacyTailscaleHttpsEndpoint
+              ? renderLegacyTailscaleRow(legacyTailscaleHttpsEndpoint)
+              : null}
+          </>
+        );
+      }
+      return (
+        <>
+          <SettingsRow
+            title="Tailscale"
+            description="Connect Supaterm to your tailnet without enabling local network access."
+            status={status.error ? <span className="text-destructive">{status.error}</span> : null}
+            control={
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={isUpdatingEmbeddedTailscale}
+                onClick={() => {
+                  setEmbeddedTailscaleHostname(status.hostname ?? "");
+                  setEmbeddedTailscaleDialogOpen(true);
+                }}
+              >
+                Sign in
+              </Button>
+            }
+          />
+          {legacyTailscaleHttpsEndpoint
+            ? renderLegacyTailscaleRow(legacyTailscaleHttpsEndpoint)
+            : null}
+        </>
+      );
+    }
+
+    return legacyTailscaleHttpsEndpoint ? (
+      renderLegacyTailscaleRow(legacyTailscaleHttpsEndpoint)
+    ) : (
+      <SettingsRow
+        title={searchableSetting("tailscale-https").title}
+        description={missingTailscaleEndpointDescription(desktopServerExposureState)}
+      />
+    );
+  };
   const renderAuthorizedClients = (presentation: AccessSectionPresentation) => (
     <>
       {desktopAccessManagementError ? (
@@ -3332,6 +3581,64 @@ export function ConnectionsSettings() {
               </AlertDialogFooter>
             </AlertDialogPopup>
           </AlertDialog>
+          <Dialog
+            open={embeddedTailscaleDialogOpen && canManageLocalBackend}
+            onOpenChange={(open) => {
+              if (!isUpdatingEmbeddedTailscale) setEmbeddedTailscaleDialogOpen(open);
+            }}
+          >
+            <DialogPopup className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Sign in to Tailscale</DialogTitle>
+                <DialogDescription>
+                  Choose a hostname and optional tags for this Mac. Supaterm will open Tailscale’s
+                  browser sign-in page; local network access is not required.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogPanel>
+                <div className="space-y-4">
+                  <label className="block">
+                    <span className="text-sm font-medium text-foreground">Preferred hostname</span>
+                    <Input
+                      className="mt-2"
+                      placeholder="This Mac’s hostname"
+                      value={embeddedTailscaleHostname}
+                      onChange={(event) => setEmbeddedTailscaleHostname(event.target.value)}
+                      disabled={isUpdatingEmbeddedTailscale}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-medium text-foreground">Tags</span>
+                    <Input
+                      className="mt-2"
+                      placeholder="tag:name, tag:another"
+                      value={embeddedTailscaleTags}
+                      onChange={(event) => setEmbeddedTailscaleTags(event.target.value)}
+                      disabled={isUpdatingEmbeddedTailscale}
+                    />
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      Optional. Separate multiple tags with commas.
+                    </span>
+                  </label>
+                </div>
+              </DialogPanel>
+              <DialogFooter>
+                <DialogClose
+                  disabled={isUpdatingEmbeddedTailscale}
+                  render={<Button variant="outline" disabled={isUpdatingEmbeddedTailscale} />}
+                >
+                  Cancel
+                </DialogClose>
+                <Button
+                  onClick={() => void handleSignInEmbeddedTailscale()}
+                  disabled={isUpdatingEmbeddedTailscale}
+                >
+                  {isUpdatingEmbeddedTailscale ? <Spinner size="sm" /> : null}
+                  {isUpdatingEmbeddedTailscale ? "Opening sign-in…" : "Sign in"}
+                </Button>
+              </DialogFooter>
+            </DialogPopup>
+          </Dialog>
           <AlertDialog
             open={isWslConfirmDialogOpen && canManageLocalBackend}
             onOpenChange={(open) => {

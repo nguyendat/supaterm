@@ -133,6 +133,20 @@ export function resourceMonitorExecutableName(platform: typeof BuildPlatform.Typ
   return platform === "win" ? "supaterm-resource-monitor.exe" : "supaterm-resource-monitor";
 }
 
+function embeddedTailscaleGoTargets(
+  platform: typeof BuildPlatform.Type,
+  arch: typeof BuildArch.Type,
+): ReadonlyArray<{ readonly goos: string; readonly goarch: string }> {
+  const goos = platform === "mac" ? "darwin" : platform === "linux" ? "linux" : "windows";
+  const architectures =
+    arch === "universal" ? ["arm64", "amd64"] : [arch === "arm64" ? "arm64" : "amd64"];
+  return architectures.map((goarch) => ({ goos, goarch }));
+}
+
+export function embeddedTailscaleExecutableName(platform: typeof BuildPlatform.Type): string {
+  return platform === "win" ? "supaterm-tailscale-embedded.exe" : "supaterm-tailscale-embedded";
+}
+
 const PLATFORM_CONFIG: Record<typeof BuildPlatform.Type, PlatformConfig> = {
   mac: {
     cliFlag: "--mac",
@@ -593,6 +607,19 @@ export class MissingDesktopBuildInputError extends Schema.TaggedError<MissingDes
   }
 }
 
+export class EmbeddedTailscaleBuildOutputMissingError extends Schema.TaggedError<EmbeddedTailscaleBuildOutputMissingError>()(
+  "EmbeddedTailscaleBuildOutputMissingError",
+  {
+    binaryPath: Schema.String,
+    goos: Schema.String,
+    goarch: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `The embedded Tailscale helper was not produced at ${this.binaryPath} for ${this.goos}/${this.goarch}.`;
+  }
+}
+
 export class DesktopBuildDistDirectoryMissingError extends Schema.TaggedError<DesktopBuildDistDirectoryMissingError>()(
   "DesktopBuildDistDirectoryMissingError",
   {
@@ -661,6 +688,7 @@ const WindowsPackagedPayloadValidationReason = Schema.Literals([
   "sidecar-invalid",
   "unpacked-native-missing",
   "resource-monitor-missing",
+  "tailscale-embedded-missing",
   "wsl-runtime-missing",
   "wsl-runtime-invalid",
   "file-limit-exceeded",
@@ -686,6 +714,9 @@ export class WindowsPackagedPayloadValidationError extends Schema.TaggedError<Wi
     }
     if (this.reason === "resource-monitor-missing") {
       return "Windows packaged payload is missing the resource monitor executable.";
+    }
+    if (this.reason === "tailscale-embedded-missing") {
+      return "Windows packaged payload is missing the embedded Tailscale helper.";
     }
     if (this.reason === "wsl-runtime-missing") {
       return "Windows packaged payload is missing the WSL runtime archive or SHA-256 sidecar.";
@@ -912,6 +943,8 @@ export const DESKTOP_FILE_EXCLUSIONS = [
   "!apps/desktop/resources/browser-secret/**/*",
   "!apps/desktop/prod-resources/browser-secret",
   "!apps/desktop/prod-resources/browser-secret/**/*",
+  "!apps/desktop/prod-resources/tailscale-embedded",
+  "!apps/desktop/prod-resources/tailscale-embedded/**/*",
   // Windows stages the server sidecar below prod-resources so electron-builder
   // can copy it using project-relative extraResources matchers. Keep those
   // staging inputs out of app.asar; they are emitted once at resources/.
@@ -1027,6 +1060,10 @@ export const DESKTOP_EXTRA_RESOURCES = [
   {
     from: "apps/desktop/prod-resources/resource-monitor",
     to: "resource-monitor",
+  },
+  {
+    from: "apps/desktop/prod-resources/tailscale-embedded",
+    to: "tailscale-embedded",
   },
 ] as const;
 export const LINUX_CAPTURE_EXTRA_RESOURCES = [
@@ -1916,6 +1953,80 @@ export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* 
   }
 });
 
+export const stageEmbeddedTailscale = Effect.fn("stageEmbeddedTailscale")(function* (input: {
+  readonly repoRoot: string;
+  readonly stageResourcesDir: string;
+  readonly platform: typeof BuildPlatform.Type;
+  readonly arch: typeof BuildArch.Type;
+  readonly verbose: boolean;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const targets = embeddedTailscaleGoTargets(input.platform, input.arch);
+  const sourceDir = path.join(input.repoRoot, "native/tailscale-embedded");
+  const executableName = embeddedTailscaleExecutableName(input.platform);
+  const builtBinaries: string[] = [];
+
+  for (const target of targets) {
+    const binaryPath = path.join(
+      sourceDir,
+      "target",
+      `${target.goos}-${target.goarch}`,
+      executableName,
+    );
+    yield* fs.makeDirectory(path.dirname(binaryPath), { recursive: true });
+    const spawnCommand = yield* resolveSpawnCommand("go", [
+      "build",
+      "-mod=readonly",
+      "-trimpath",
+      "-ldflags=-s -w",
+      "-o",
+      binaryPath,
+      ".",
+    ]);
+    yield* runCommand(
+      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+        cwd: sourceDir,
+        shell: spawnCommand.shell,
+        env: {
+          ...process.env,
+          GOOS: target.goos,
+          GOARCH: target.goarch,
+          CGO_ENABLED: "0",
+        },
+      }),
+      {
+        label: `go build embedded Tailscale helper (${target.goos}/${target.goarch})`,
+        verbose: input.verbose,
+      },
+    );
+    if (!(yield* fs.exists(binaryPath))) {
+      return yield* new EmbeddedTailscaleBuildOutputMissingError({
+        binaryPath,
+        goos: target.goos,
+        goarch: target.goarch,
+      });
+    }
+    builtBinaries.push(binaryPath);
+  }
+
+  const destinationDirectory = path.join(input.stageResourcesDir, "tailscale-embedded");
+  const destinationPath = path.join(destinationDirectory, executableName);
+  yield* fs.remove(destinationDirectory, { recursive: true, force: true }).pipe(Effect.ignore);
+  yield* fs.makeDirectory(destinationDirectory, { recursive: true });
+  if (builtBinaries.length === 1) {
+    yield* fs.copyFile(builtBinaries[0]!, destinationPath);
+  } else {
+    yield* runCommand(
+      ChildProcess.make("lipo", ["-create", ...builtBinaries, "-output", destinationPath]),
+      { label: "lipo embedded Tailscale helper universal binary", verbose: input.verbose },
+    );
+  }
+  if (input.platform !== "win") {
+    yield* fs.chmod(destinationPath, 0o755);
+  }
+});
+
 export const stageBrowserSecret = Effect.fn("stageBrowserSecret")(function* (input: {
   readonly repoRoot: string;
   readonly stageResourcesDir: string;
@@ -2431,7 +2542,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       // Smart App Control validates unpacked native addons independently from
       // the signed desktop executable. Extend release signing to every native
       // Windows library that Electron or the server sidecar loads at runtime.
-      signExts: [".node", ".dll"],
+      signExts: [".node", ".dll", ".exe"],
       // Resource editing applies the product metadata and icon independently
       // of code signing. Disabling it for local unsigned builds leaves the
       // packaged executable with Electron's stock icon.
@@ -2869,6 +2980,19 @@ export const validateWindowsPackagedPayload = Effect.fn(
     });
   }
 
+  const embeddedTailscalePath = path.join(
+    resourcesDir,
+    "tailscale-embedded",
+    "supaterm-tailscale-embedded.exe",
+  );
+  if (!(yield* isFile(embeddedTailscalePath))) {
+    return yield* new WindowsPackagedPayloadValidationError({
+      reason: "tailscale-embedded-missing",
+      packagedAppDir,
+      missingFiles: ["tailscale-embedded/supaterm-tailscale-embedded.exe"],
+    });
+  }
+
   const wslArchivePath = path.join(resourcesDir, WSL_RUNTIME_ARCHIVE_NAME);
   const wslArchiveHashPath = path.join(resourcesDir, WSL_RUNTIME_ARCHIVE_HASH_NAME);
   const [hasWslArchive, hasWslArchiveHash] = yield* Effect.all([
@@ -3219,6 +3343,13 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
   }
   yield* stageResourceMonitor({
+    repoRoot,
+    stageResourcesDir,
+    platform: options.platform,
+    arch: options.arch,
+    verbose: options.verbose,
+  });
+  yield* stageEmbeddedTailscale({
     repoRoot,
     stageResourcesDir,
     platform: options.platform,

@@ -1,5 +1,7 @@
 import {
   AdvertisedEndpoint,
+  DesktopEmbeddedTailscaleSignInInputSchema,
+  DesktopEmbeddedTailscaleStatusSchema,
   DesktopServerExposureModeSchema,
   DesktopServerExposureStateSchema,
 } from "@supaterm/contracts";
@@ -7,6 +9,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import * as DesktopLifecycle from "../../app/DesktopLifecycle.ts";
+import * as DesktopEmbeddedTailscale from "../../backend/DesktopEmbeddedTailscale.ts";
 import * as DesktopServerExposure from "../../backend/DesktopServerExposure.ts";
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
@@ -55,6 +58,48 @@ export const setTailscaleServeEnabled = DesktopIpc.makeIpcMethod({
       );
     }
     return change.state;
+  }),
+});
+
+export const getEmbeddedTailscaleStatus = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.GET_EMBEDDED_TAILSCALE_STATUS_CHANNEL,
+  payload: Schema.Void,
+  result: DesktopEmbeddedTailscaleStatusSchema,
+  handler: Effect.fn("desktop.ipc.embeddedTailscale.getStatus")(function* () {
+    const embeddedTailscale = yield* DesktopEmbeddedTailscale.DesktopEmbeddedTailscale;
+    return yield* embeddedTailscale.getStatus;
+  }),
+});
+
+export const signInEmbeddedTailscale = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.SIGN_IN_EMBEDDED_TAILSCALE_CHANNEL,
+  payload: DesktopEmbeddedTailscaleSignInInputSchema,
+  result: DesktopEmbeddedTailscaleStatusSchema,
+  handler: Effect.fn("desktop.ipc.embeddedTailscale.signIn")(function* (input) {
+    const embeddedTailscale = yield* DesktopEmbeddedTailscale.DesktopEmbeddedTailscale;
+    const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
+    const backendConfig = yield* serverExposure.backendConfig;
+    return yield* embeddedTailscale.signIn(input, backendConfig.port);
+  }),
+});
+
+export const setEmbeddedTailscaleServeEnabled = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.SET_EMBEDDED_TAILSCALE_SERVE_ENABLED_CHANNEL,
+  payload: Schema.Boolean,
+  result: DesktopEmbeddedTailscaleStatusSchema,
+  handler: Effect.fn("desktop.ipc.embeddedTailscale.setServeEnabled")(function* (enabled) {
+    const embeddedTailscale = yield* DesktopEmbeddedTailscale.DesktopEmbeddedTailscale;
+    return yield* embeddedTailscale.setServeEnabled(enabled);
+  }),
+});
+
+export const signOutEmbeddedTailscale = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.SIGN_OUT_EMBEDDED_TAILSCALE_CHANNEL,
+  payload: Schema.Void,
+  result: DesktopEmbeddedTailscaleStatusSchema,
+  handler: Effect.fn("desktop.ipc.embeddedTailscale.signOut")(function* () {
+    const embeddedTailscale = yield* DesktopEmbeddedTailscale.DesktopEmbeddedTailscale;
+    return yield* embeddedTailscale.signOut;
   }),
 });
 

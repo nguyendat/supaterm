@@ -27,6 +27,7 @@ import * as DesktopObservability from "./DesktopObservability.ts";
 import * as DesktopPreReadyPlatform from "./DesktopPreReadyPlatform.ts";
 import * as DesktopShutdown from "./DesktopShutdown.ts";
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
+import * as DesktopEmbeddedTailscale from "../backend/DesktopEmbeddedTailscale.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
 import * as DesktopState from "./DesktopState.ts";
@@ -190,6 +191,7 @@ const bootstrap = Effect.gen(function* () {
   const pool = yield* DesktopBackendPool.DesktopBackendPool;
   const primaryBackend = yield* pool.primary;
   const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
+  const embeddedTailscale = yield* DesktopEmbeddedTailscale.DesktopEmbeddedTailscale;
   const wslBackend = yield* DesktopWslBackend.DesktopWslBackend;
 
   if (environment.isDevelopment && Option.isNone(environment.configuredBackendPort)) {
@@ -236,6 +238,10 @@ const bootstrap = Effect.gen(function* () {
       yield* desktopWindow.showConnectingSplash;
     }
     yield* primaryBackend.start;
+    yield* embeddedTailscale.configureFromSettings({ port: backendPort }).pipe(
+      Effect.tapError((error) => logStartupError("embedded Tailscale startup failed", { error })),
+      Effect.ignore,
+    );
     yield* logBootstrapInfo("bootstrap backend start requested");
     yield* appActivation.start.pipe(
       Effect.tap(() => logBootstrapInfo("desktop app control socket ready")),

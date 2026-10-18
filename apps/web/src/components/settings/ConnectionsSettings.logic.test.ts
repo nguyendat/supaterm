@@ -254,10 +254,12 @@ describe("canRevokeOtherClients", () => {
 });
 
 describe("missingTailscaleEndpointDescription", () => {
-  it("explains that detection waits for Network access when the probe was skipped", () => {
+  it("explains that embedded Tailscale does not require Network access", () => {
     expect(
       missingTailscaleEndpointDescription({ mode: "local-only", tailscaleServeEnabled: false }),
-    ).toBe("Turn on Network access to detect Tailscale.");
+    ).toBe(
+      "Sign in to Tailscale to expose Supaterm over your tailnet. Local network access is not required.",
+    );
   });
 
   it.each([
@@ -265,7 +267,7 @@ describe("missingTailscaleEndpointDescription", () => {
     { mode: "local-only", tailscaleServeEnabled: true },
   ] as const)("asks to start Tailscale when it was probed and not found (%o)", (state) => {
     expect(missingTailscaleEndpointDescription(state)).toBe(
-      "Start Tailscale to set up HTTPS access through MagicDNS.",
+      "Sign in to Tailscale or start Tailscale Serve to set up HTTPS access through MagicDNS.",
     );
   });
 });

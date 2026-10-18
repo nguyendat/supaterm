@@ -492,6 +492,49 @@ export const DesktopServerExposureStateSchema = Schema.Struct({
   tailscaleServePort: Schema.Number,
 });
 
+export const DesktopEmbeddedTailscaleStateSchema = Schema.Literals([
+  "signed-out",
+  "starting",
+  "needs-login",
+  "running",
+  "error",
+]);
+export type DesktopEmbeddedTailscaleState = typeof DesktopEmbeddedTailscaleStateSchema.Type;
+
+export interface DesktopEmbeddedTailscaleStatus {
+  readonly state: DesktopEmbeddedTailscaleState;
+  readonly authUrl: string | null;
+  readonly hostname: string | null;
+  readonly dnsName: string | null;
+  readonly endpointUrl: string | null;
+  readonly ownerLoginName: string | null;
+  readonly tailscaleIps: readonly string[];
+  readonly serveEnabled: boolean;
+  readonly limitToAccount: boolean;
+  readonly error: string | null;
+}
+
+export const DesktopEmbeddedTailscaleStatusSchema = Schema.Struct({
+  state: DesktopEmbeddedTailscaleStateSchema,
+  authUrl: Schema.NullOr(Schema.String),
+  hostname: Schema.NullOr(Schema.String),
+  dnsName: Schema.NullOr(Schema.String),
+  endpointUrl: Schema.NullOr(Schema.String),
+  ownerLoginName: Schema.NullOr(Schema.String),
+  tailscaleIps: Schema.Array(Schema.String),
+  serveEnabled: Schema.Boolean,
+  limitToAccount: Schema.Boolean,
+  error: Schema.NullOr(Schema.String),
+});
+
+export const DesktopEmbeddedTailscaleSignInInputSchema = Schema.Struct({
+  hostname: Schema.String.check(Schema.isMaxLength(63)),
+  tags: Schema.Array(Schema.String.check(Schema.isMaxLength(128))).check(Schema.isMaxLength(16)),
+});
+
+export type DesktopEmbeddedTailscaleSignInInput =
+  typeof DesktopEmbeddedTailscaleSignInInputSchema.Type;
+
 export function shouldDetectTailscaleEndpoints(
   state: Pick<DesktopServerExposureState, "mode" | "tailscaleServeEnabled">,
 ): boolean {
@@ -1100,6 +1143,12 @@ export interface DesktopBridge {
     readonly enabled: boolean;
     readonly port?: number;
   }) => Promise<DesktopServerExposureState>;
+  getEmbeddedTailscaleStatus: () => Promise<DesktopEmbeddedTailscaleStatus>;
+  signInEmbeddedTailscale: (
+    input: DesktopEmbeddedTailscaleSignInInput,
+  ) => Promise<DesktopEmbeddedTailscaleStatus>;
+  setEmbeddedTailscaleServeEnabled: (enabled: boolean) => Promise<DesktopEmbeddedTailscaleStatus>;
+  signOutEmbeddedTailscale: () => Promise<DesktopEmbeddedTailscaleStatus>;
   getAdvertisedEndpoints: () => Promise<readonly AdvertisedEndpoint[]>;
   getWslState: () => Promise<DesktopWslState>;
   setWslBackendEnabled: (enabled: boolean) => Promise<DesktopWslState>;

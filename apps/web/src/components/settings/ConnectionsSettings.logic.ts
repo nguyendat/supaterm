@@ -90,8 +90,8 @@ export function missingTailscaleEndpointDescription(
   state: Pick<DesktopServerExposureState, "mode" | "tailscaleServeEnabled"> | null,
 ): string {
   return state && !shouldDetectTailscaleEndpoints(state)
-    ? "Turn on Network access to detect Tailscale."
-    : "Start Tailscale to set up HTTPS access through MagicDNS.";
+    ? "Sign in to Tailscale to expose Supaterm over your tailnet. Local network access is not required."
+    : "Sign in to Tailscale or start Tailscale Serve to set up HTTPS access through MagicDNS.";
 }
 
 export function isWslSettingsRowVisible(input: {

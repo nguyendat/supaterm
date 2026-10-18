@@ -67,6 +67,11 @@ export const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-st
 export const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
 export const SET_TAILSCALE_SERVE_ENABLED_CHANNEL = "desktop:set-tailscale-serve-enabled";
 export const GET_ADVERTISED_ENDPOINTS_CHANNEL = "desktop:get-advertised-endpoints";
+export const GET_EMBEDDED_TAILSCALE_STATUS_CHANNEL = "desktop:get-embedded-tailscale-status";
+export const SIGN_IN_EMBEDDED_TAILSCALE_CHANNEL = "desktop:sign-in-embedded-tailscale";
+export const SET_EMBEDDED_TAILSCALE_SERVE_ENABLED_CHANNEL =
+  "desktop:set-embedded-tailscale-serve-enabled";
+export const SIGN_OUT_EMBEDDED_TAILSCALE_CHANNEL = "desktop:sign-out-embedded-tailscale";
 export const GET_WSL_STATE_CHANNEL = "desktop:get-wsl-state";
 export const SET_WSL_BACKEND_ENABLED_CHANNEL = "desktop:set-wsl-backend-enabled";
 export const SET_WSL_DISTRO_CHANNEL = "desktop:set-wsl-distro";

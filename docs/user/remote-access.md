@@ -167,9 +167,17 @@ set to **Manual only** remains excluded. Mobile keeps its manual environment sel
 
 ### Tailscale HTTPS
 
-Join both devices to the same tailnet. In the desktop app, enable **Tailscale
-HTTPS** in **Settings → Connections**. If Network access is off, turn it on
-first. Turn Tailscale HTTPS off there to remove that route.
+Join both devices to the same tailnet. In the desktop app, open **Settings →
+Connections** and choose **Sign in to Tailscale**. Supaterm opens the Tailscale
+sign-in page, embeds the Tailscale connection in the desktop app, and adds the
+machine's HTTPS tailnet address after sign-in. The generated hostname ends in
+`-supaterm`. This route works while **Network access** is off because it does
+not use the host's local-network listener. Turn off the Tailscale switch or
+sign out there to remove the route.
+
+The desktop flow limits the endpoint to the Tailscale account that signed in.
+Supaterm pairing permissions still apply to clients that connect through the
+tailnet address.
 
 To start a command-line server with Tailscale HTTPS:
 

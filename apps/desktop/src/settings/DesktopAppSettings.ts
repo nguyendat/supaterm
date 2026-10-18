@@ -33,6 +33,10 @@ export interface DesktopSettings {
   readonly serverExposureMode: DesktopServerExposureMode;
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
+  readonly embeddedTailscaleEnabled: boolean;
+  readonly embeddedTailscaleHostname: string | null;
+  readonly embeddedTailscaleTags: readonly string[];
+  readonly embeddedTailscaleServeEnabled: boolean;
   readonly updateChannel: DesktopUpdateChannel;
   readonly updateChannelConfiguredByUser: boolean;
   readonly wslBackendEnabled: boolean;
@@ -72,6 +76,10 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   serverExposureMode: "local-only",
   tailscaleServeEnabled: false,
   tailscaleServePort: DEFAULT_TAILSCALE_SERVE_PORT,
+  embeddedTailscaleEnabled: false,
+  embeddedTailscaleHostname: null,
+  embeddedTailscaleTags: [],
+  embeddedTailscaleServeEnabled: true,
   updateChannel: "latest",
   updateChannelConfiguredByUser: false,
   wslBackendEnabled: false,
@@ -94,6 +102,10 @@ const DesktopSettingsDocument = Schema.Struct({
   serverExposureMode: Schema.optionalKey(DesktopServerExposureModeSchema),
   tailscaleServeEnabled: Schema.optionalKey(Schema.Boolean),
   tailscaleServePort: Schema.optionalKey(Schema.Number),
+  embeddedTailscaleEnabled: Schema.optionalKey(Schema.Boolean),
+  embeddedTailscaleHostname: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  embeddedTailscaleTags: Schema.optionalKey(Schema.Array(Schema.String)),
+  embeddedTailscaleServeEnabled: Schema.optionalKey(Schema.Boolean),
   updateChannel: Schema.optionalKey(DesktopUpdateChannelSchema),
   updateChannelConfiguredByUser: Schema.optionalKey(Schema.Boolean),
   wslBackendEnabled: Schema.optionalKey(Schema.Boolean),
@@ -157,6 +169,12 @@ export class DesktopAppSettings extends Context.Service<
       readonly enabled: boolean;
       readonly port: Option.Option<number>;
     }) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
+    readonly setEmbeddedTailscale: (input: {
+      readonly enabled: boolean;
+      readonly hostname?: string | null;
+      readonly tags?: readonly string[];
+      readonly serveEnabled?: boolean;
+    }) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
     readonly setUpdateChannel: (
       channel: DesktopUpdateChannel,
     ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
@@ -217,6 +235,10 @@ function normalizeDesktopSettingsDocument(
       parsed.serverExposureMode === "network-accessible" ? "network-accessible" : "local-only",
     tailscaleServeEnabled: parsed.tailscaleServeEnabled === true,
     tailscaleServePort: normalizeTailscaleServePort(parsed.tailscaleServePort),
+    embeddedTailscaleEnabled: parsed.embeddedTailscaleEnabled === true,
+    embeddedTailscaleHostname: parsed.embeddedTailscaleHostname ?? null,
+    embeddedTailscaleTags: parsed.embeddedTailscaleTags ?? [],
+    embeddedTailscaleServeEnabled: parsed.embeddedTailscaleServeEnabled !== false,
     updateChannel: updateChannelConfiguredByUser
       ? Option.getOrElse(parsedUpdateChannel, () => defaultSettings.updateChannel)
       : defaultSettings.updateChannel,
@@ -254,6 +276,18 @@ function toDesktopSettingsDocument(
   }
   if (settings.tailscaleServePort !== defaults.tailscaleServePort) {
     document.tailscaleServePort = settings.tailscaleServePort;
+  }
+  if (settings.embeddedTailscaleEnabled !== defaults.embeddedTailscaleEnabled) {
+    document.embeddedTailscaleEnabled = settings.embeddedTailscaleEnabled === true;
+  }
+  if (settings.embeddedTailscaleHostname !== defaults.embeddedTailscaleHostname) {
+    document.embeddedTailscaleHostname = settings.embeddedTailscaleHostname ?? null;
+  }
+  if ((settings.embeddedTailscaleTags ?? []).length > 0) {
+    document.embeddedTailscaleTags = settings.embeddedTailscaleTags ?? [];
+  }
+  if (settings.embeddedTailscaleServeEnabled !== defaults.embeddedTailscaleServeEnabled) {
+    document.embeddedTailscaleServeEnabled = settings.embeddedTailscaleServeEnabled !== false;
   }
   if (settings.updateChannel !== defaults.updateChannel) {
     document.updateChannel = settings.updateChannel;
@@ -317,6 +351,41 @@ function setTailscaleServe(
         tailscaleServeEnabled: input.enabled,
         tailscaleServePort: port,
       };
+}
+
+function setEmbeddedTailscale(
+  settings: DesktopSettings,
+  input: {
+    readonly enabled: boolean;
+    readonly hostname?: string | null;
+    readonly tags?: readonly string[];
+    readonly serveEnabled?: boolean;
+  },
+): DesktopSettings {
+  const hostname =
+    input.hostname === undefined ? settings.embeddedTailscaleHostname : input.hostname;
+  const currentTags = settings.embeddedTailscaleTags ?? [];
+  const tags = input.tags === undefined ? currentTags : [...input.tags];
+  if (
+    (settings.embeddedTailscaleEnabled === true) === input.enabled &&
+    settings.embeddedTailscaleHostname === hostname &&
+    currentTags.length === tags.length &&
+    currentTags.every((tag, index) => tag === tags[index]) &&
+    (input.serveEnabled === undefined ||
+      (settings.embeddedTailscaleServeEnabled !== false) === input.serveEnabled)
+  ) {
+    return settings;
+  }
+  return {
+    ...settings,
+    embeddedTailscaleEnabled: input.enabled,
+    embeddedTailscaleHostname: hostname ?? null,
+    embeddedTailscaleTags: tags,
+    embeddedTailscaleServeEnabled:
+      input.serveEnabled === undefined
+        ? settings.embeddedTailscaleServeEnabled !== false
+        : input.serveEnabled,
+  };
 }
 
 function setUpdateChannel(
@@ -536,6 +605,10 @@ export const make = Effect.gen(function* () {
       persist((settings) => setTailscaleServe(settings, input)).pipe(
         Effect.withSpan("desktop.settings.setTailscaleServe", { attributes: input }),
       ),
+    setEmbeddedTailscale: (input) =>
+      persist((settings) => setEmbeddedTailscale(settings, input)).pipe(
+        Effect.withSpan("desktop.settings.setEmbeddedTailscale", { attributes: input }),
+      ),
     setUpdateChannel: (channel) =>
       persist((settings) => setUpdateChannel(settings, channel)).pipe(
         Effect.withSpan("desktop.settings.setUpdateChannel", { attributes: { channel } }),
@@ -594,6 +667,8 @@ export const layerTest = (initialSettings: DesktopSettings = DEFAULT_DESKTOP_SET
         setServerExposureMode: (mode) =>
           update((settings) => setServerExposureMode(settings, mode)),
         setTailscaleServe: (input) => update((settings) => setTailscaleServe(settings, input)),
+        setEmbeddedTailscale: (input) =>
+          update((settings) => setEmbeddedTailscale(settings, input)),
         setUpdateChannel: (channel) => update((settings) => setUpdateChannel(settings, channel)),
         setWslBackendEnabled: (enabled) =>
           update((settings) => setWslBackendEnabled(settings, enabled)),

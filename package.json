@@ -27,6 +27,7 @@
     "build:marketing": "vp run --filter @supaterm/marketing build",
     "build:desktop": "vp run --filter @supaterm/desktop --filter supaterm build",
     "build:resource-monitor": "cargo build --locked --release --manifest-path native/resource-monitor/Cargo.toml",
+    "build:tailscale-embedded": "go -C native/tailscale-embedded build -mod=readonly -trimpath -ldflags=\"-s -w\" -o target/debug/supaterm-tailscale-embedded .",
     "typecheck": "vp run -r --concurrency-limit 2 typecheck",
     "tc": "vp run -r --concurrency-limit 2 typecheck",
     "lint": "vp lint --report-unused-disable-directives",

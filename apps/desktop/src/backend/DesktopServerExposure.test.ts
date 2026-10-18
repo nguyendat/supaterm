@@ -258,6 +258,7 @@ describe("DesktopServerExposure", () => {
       setMainWindowBounds: () => Effect.die("unexpected main window bounds update"),
       setServerExposureMode: () => Effect.fail(settingsFailure),
       setTailscaleServe: () => Effect.fail(settingsFailure),
+      setEmbeddedTailscale: () => Effect.fail(settingsFailure),
       setUpdateChannel: () => Effect.die("unexpected update channel change"),
       setWslBackendEnabled: () => Effect.die("unexpected WSL backend toggle"),
       setWslDistro: () => Effect.die("unexpected WSL distro change"),

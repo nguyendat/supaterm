@@ -52,6 +52,7 @@ import * as DesktopLinuxUrlHandler from "./app/DesktopLinuxUrlHandler.ts";
 import * as DesktopShutdown from "./app/DesktopShutdown.ts";
 import * as DesktopObservability from "./app/DesktopObservability.ts";
 import * as DesktopServerExposure from "./backend/DesktopServerExposure.ts";
+import * as DesktopEmbeddedTailscale from "./backend/DesktopEmbeddedTailscale.ts";
 import * as DesktopClientSettings from "./settings/DesktopClientSettings.ts";
 import * as DesktopSnapShot from "./snapShot/DesktopSnapShot.ts";
 import * as DesktopAppSettings from "./settings/DesktopAppSettings.ts";
@@ -151,6 +152,10 @@ const layerDesktopSsh = layerDesktopSshEnvironment.pipe(
   Layer.provideMerge(DesktopSshPasswordPrompts.layer()),
 );
 
+const layerDesktopEmbeddedTailscale = DesktopEmbeddedTailscale.layer.pipe(
+  Layer.provideMerge(layerDesktopFoundation),
+);
+
 const layerDesktopServerExposure = DesktopServerExposure.layer.pipe(
   Layer.provideMerge(DesktopNetworkInterfaces.layer),
   Layer.provideMerge(layerDesktopFoundation),
@@ -168,6 +173,7 @@ const layerDesktopPreview = PreviewManager.layer.pipe(
 
 const layerDesktopWindow = DesktopWindow.layer.pipe(
   Layer.provideMerge(layerDesktopServerExposure),
+  Layer.provideMerge(layerDesktopEmbeddedTailscale),
   Layer.provideMerge(layerDesktopPreview),
 );
 
@@ -213,6 +219,7 @@ const layerDesktopApplication = Layer.mergeAll(
   Layer.provideMerge(DesktopUpdates.layer),
   Layer.provideMerge(layerDesktopWslBackend),
   Layer.provideMerge(layerDesktopLocalEnvironmentAuth),
+  Layer.provideMerge(layerDesktopEmbeddedTailscale),
 );
 
 const desktopDeepLinksLayer = DesktopDeepLinks.layer.pipe(

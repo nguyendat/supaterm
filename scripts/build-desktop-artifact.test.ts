@@ -200,6 +200,11 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
     path.join(resourcesDir, "resource-monitor/supaterm-resource-monitor.exe"),
     "monitor",
   );
+  yield* fs.makeDirectory(path.join(resourcesDir, "tailscale-embedded"), { recursive: true });
+  yield* fs.writeFileString(
+    path.join(resourcesDir, "tailscale-embedded/supaterm-tailscale-embedded.exe"),
+    "tailscale",
+  );
   const appExecutableName = "supaterm.exe";
   yield* fs.writeFileString(path.join(packagedAppDir, appExecutableName), "electron");
   yield* fs.writeFileString(path.join(packagedAppDir, "chrome_crashpad_handler.exe"), "crashpad");
@@ -533,6 +538,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "!apps/desktop/resources/browser-secret/**/*",
       "!apps/desktop/prod-resources/browser-secret",
       "!apps/desktop/prod-resources/browser-secret/**/*",
+      "!apps/desktop/prod-resources/tailscale-embedded",
+      "!apps/desktop/prod-resources/tailscale-embedded/**/*",
       "!apps/desktop/prod-resources/windows-server",
       "!apps/desktop/prod-resources/windows-server/**/*",
       "!apps/desktop/prod-resources/wsl-runtime.tar.gz",
@@ -1634,6 +1641,35 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     ),
   );
 
+  it.effect("rejects a Windows payload missing the embedded Tailscale helper", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const fixture = yield* makeWindowsPayloadFixture({ copyUnpackedNatives: true });
+        yield* fs.remove(
+          path.join(
+            fixture.packagedAppDir,
+            "resources/tailscale-embedded/supaterm-tailscale-embedded.exe",
+          ),
+        );
+
+        const error = yield* validateWindowsPackagedPayload({
+          stageDistDir: fixture.stageDistDir,
+          appExecutableName: fixture.appExecutableName,
+          targetArch: "x64",
+          appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
+        }).pipe(Effect.flip);
+
+        assert.instanceOf(error, WindowsPackagedPayloadValidationError);
+        assert.equal(error.reason, "tailscale-embedded-missing");
+        assert.deepStrictEqual(error.missingFiles, [
+          "tailscale-embedded/supaterm-tailscale-embedded.exe",
+        ]);
+      }),
+    ),
+  );
+
   it.effect("rejects directories in place of packaged executable files", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1873,7 +1909,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
       const win = config.win as Record<string, unknown>;
       assert.equal(win.icon, "icon.ico");
-      assert.deepStrictEqual(win.signExts, [".node", ".dll"]);
+      assert.deepStrictEqual(win.signExts, [".node", ".dll", ".exe"]);
       assert.equal(win.signAndEditExecutable, true);
       assert.notProperty(win, "azureSignOptions");
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
@@ -1888,6 +1924,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       {
         from: "apps/desktop/prod-resources/resource-monitor",
         to: "resource-monitor",
+      },
+      {
+        from: "apps/desktop/prod-resources/tailscale-embedded",
+        to: "tailscale-embedded",
       },
     ]);
     assert.deepStrictEqual(resolveResourceMonitorRustTargets("mac", "universal"), [

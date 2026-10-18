@@ -139,6 +139,11 @@ jobs:
       # repository's 10 GB Actions cache.
       - name: Setup Mise
         uses: ./.github/actions/setup-mise
+      - name: Setup Go
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+        with:
+          go-version-file: native/tailscale-embedded/go.mod
+          cache-dependency-path: native/tailscale-embedded/go.sum
       # pnpm checks the lockfile and policy before reusing this result. A missing
       # artifact leaves the cache empty, so installation runs the checks again.
       - name: Download dependency verification

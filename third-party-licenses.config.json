@@ -1,6 +1,17 @@
 {
   "customNotices": [
     {
+      "bundles": ["desktop"],
+      "license": "BSD-3-Clause",
+      "name": "Tailscale tsnet",
+      "noticeFiles": [
+        "native/tailscale-embedded/LICENSE",
+        "native/tailscale-embedded/tailscale-licenses.md"
+      ],
+      "sourceUrl": "https://github.com/tailscale/tailscale",
+      "version": "1.104.1"
+    },
+    {
       "bundles": ["assets", "desktop", "web", "mobile"],
       "license": "MIT",
       "name": "Catppuccin themes",

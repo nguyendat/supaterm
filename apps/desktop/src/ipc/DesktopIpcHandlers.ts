@@ -16,9 +16,13 @@ import {
 } from "./methods/localEnvironment.ts";
 import {
   getAdvertisedEndpoints,
+  getEmbeddedTailscaleStatus,
   getServerExposureState,
+  setEmbeddedTailscaleServeEnabled,
   setServerExposureMode,
   setTailscaleServeEnabled,
+  signInEmbeddedTailscale,
+  signOutEmbeddedTailscale,
 } from "./methods/serverExposure.ts";
 import {
   bootstrapSshBearerSession,
@@ -131,6 +135,10 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(getServerExposureState);
   yield* ipc.handle(setServerExposureMode);
   yield* ipc.handle(setTailscaleServeEnabled);
+  yield* ipc.handle(getEmbeddedTailscaleStatus);
+  yield* ipc.handle(signInEmbeddedTailscale);
+  yield* ipc.handle(setEmbeddedTailscaleServeEnabled);
+  yield* ipc.handle(signOutEmbeddedTailscale);
   yield* ipc.handle(getAdvertisedEndpoints);
 
   yield* ipc.handle(getWslState);

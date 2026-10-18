@@ -24,6 +24,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
+import * as DesktopEmbeddedTailscale from "./DesktopEmbeddedTailscale.ts";
 import * as DesktopNetworkInterfaces from "./DesktopNetworkInterfaces.ts";
 import { resolveTailscaleAdvertisedEndpoints } from "./tailscaleEndpointProvider.ts";
 
@@ -543,24 +544,30 @@ export const make = Effect.gen(function* () {
       customHttpsEndpointUrls: config.desktopHttpsEndpointUrls,
     });
 
-    // Don't spawn the Tailscale CLI when the user hasn't opted into any
-    // network exposure. The spawn itself triggers a macOS "Other apps"
-    // TCC prompt on Mac App Store Tailscale builds.
-    if (!shouldDetectTailscaleEndpoints(state)) {
-      return coreEndpoints;
-    }
-
-    const tailscaleEndpoints = yield* resolveTailscaleAdvertisedEndpoints({
-      port: state.port,
-      serveEnabled: state.tailscaleServeEnabled,
-      servePort: state.tailscaleServePort,
-      networkInterfaces: currentNetworkInterfaces,
-      readMagicDnsName: cachedReadMagicDnsName,
-    }).pipe(
-      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
-      Effect.provideService(HttpClient.HttpClient, httpClient),
+    const tailscaleEndpoints =
+      shouldDetectTailscaleEndpoints(state) || state.tailscaleServeEnabled
+        ? yield* resolveTailscaleAdvertisedEndpoints({
+            port: state.port,
+            serveEnabled: state.tailscaleServeEnabled,
+            servePort: state.tailscaleServePort,
+            networkInterfaces: currentNetworkInterfaces,
+            readMagicDnsName: cachedReadMagicDnsName,
+          }).pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+            Effect.provideService(HttpClient.HttpClient, httpClient),
+          )
+        : [];
+    const embeddedTailscale = yield* Effect.serviceOption(
+      DesktopEmbeddedTailscale.DesktopEmbeddedTailscale,
     );
-    return [...coreEndpoints, ...tailscaleEndpoints];
+    const embeddedEndpoint = Option.match(embeddedTailscale, {
+      onNone: () => Effect.succeed(null),
+      onSome: (service) => service.getAdvertisedEndpoint,
+    });
+    const embeddedTailscaleEndpoint = yield* embeddedEndpoint;
+    return embeddedTailscaleEndpoint === null
+      ? [...coreEndpoints, ...tailscaleEndpoints]
+      : [...coreEndpoints, ...tailscaleEndpoints, embeddedTailscaleEndpoint];
   }).pipe(Effect.withSpan("desktop.serverExposure.getAdvertisedEndpoints"));
 
   return DesktopServerExposure.of({
