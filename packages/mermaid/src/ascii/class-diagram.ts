@@ -1,3 +1,4 @@
+import { diagramLines } from "../diagram.ts";
 import { parseClassDiagram } from "../class/parser.ts";
 import type { ClassNode, ClassMember, RelationshipType } from "../class/types.ts";
 import type { AsciiConfig } from "./types.ts";
@@ -72,10 +73,7 @@ interface PlacedClass {
   height: number;
 }
 export function renderClassAscii(text: string, config: AsciiConfig): string {
-  const lines = text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !l.startsWith("%%"));
+  const lines = diagramLines(text);
   const diagram = parseClassDiagram(lines);
   config.budget?.check();
   if (diagram.classes.length === 0) return "";

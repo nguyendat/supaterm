@@ -189,7 +189,7 @@ function maxMemberWidth(members: ClassMember[]): number {
   }
   return maxW;
 }
-export function memberToString(m: ClassMember): string {
+function memberToString(m: ClassMember): string {
   const vis = m.visibility ? `${m.visibility} ` : "";
   const name = m.isMethod ? `${m.name}(${m.params || ""})` : m.name;
   const type = m.type ? `: ${m.type}` : "";

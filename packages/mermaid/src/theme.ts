@@ -8,7 +8,7 @@ export interface DiagramColors {
   surface?: string;
   border?: string;
 }
-export const MIX = {
+const MIX = {
   text: 100,
   textSec: 60,
   textMuted: 40,
@@ -23,18 +23,18 @@ export const MIX = {
 } as const;
 export function buildStyleBlock(font: string, hasMonoFont: boolean): string {
   const derivedVars = `
-    --_text:          var(--fg);
-    --_text-sec:      var(--muted, color-mix(in srgb, var(--fg) ${MIX.textSec}%, var(--bg)));
-    --_text-muted:    var(--muted, color-mix(in srgb, var(--fg) ${MIX.textMuted}%, var(--bg)));
-    --_text-faint:    color-mix(in srgb, var(--fg) ${MIX.textFaint}%, var(--bg));
-    --_line:          var(--line, color-mix(in srgb, var(--fg) ${MIX.line}%, var(--bg)));
-    --_arrow:         var(--accent, color-mix(in srgb, var(--fg) ${MIX.arrow}%, var(--bg)));
-    --_node-fill:     var(--surface, color-mix(in srgb, var(--fg) ${MIX.nodeFill}%, var(--bg)));
-    --_node-stroke:   var(--border, color-mix(in srgb, var(--fg) ${MIX.nodeStroke}%, var(--bg)));
-    --_group-fill:    var(--bg);
-    --_group-hdr:     color-mix(in srgb, var(--fg) ${MIX.groupHeader}%, var(--bg));
-    --_inner-stroke:  color-mix(in srgb, var(--fg) ${MIX.innerStroke}%, var(--bg));
-    --_key-badge:     color-mix(in srgb, var(--fg) ${MIX.keyBadge}%, var(--bg));`;
+    --_text:          var(--diagram-fg);
+    --_text-sec:      var(--diagram-muted, color-mix(in srgb, var(--diagram-fg) ${MIX.textSec}%, var(--diagram-bg)));
+    --_text-muted:    var(--diagram-muted, color-mix(in srgb, var(--diagram-fg) ${MIX.textMuted}%, var(--diagram-bg)));
+    --_text-faint:    color-mix(in srgb, var(--diagram-fg) ${MIX.textFaint}%, var(--diagram-bg));
+    --_line:          var(--diagram-line, color-mix(in srgb, var(--diagram-fg) ${MIX.line}%, var(--diagram-bg)));
+    --_arrow:         var(--diagram-accent, color-mix(in srgb, var(--diagram-fg) ${MIX.arrow}%, var(--diagram-bg)));
+    --_node-fill:     var(--diagram-surface, color-mix(in srgb, var(--diagram-fg) ${MIX.nodeFill}%, var(--diagram-bg)));
+    --_node-stroke:   var(--diagram-border, color-mix(in srgb, var(--diagram-fg) ${MIX.nodeStroke}%, var(--diagram-bg)));
+    --_group-fill:    var(--diagram-bg);
+    --_group-hdr:     color-mix(in srgb, var(--diagram-fg) ${MIX.groupHeader}%, var(--diagram-bg));
+    --_inner-stroke:  color-mix(in srgb, var(--diagram-fg) ${MIX.innerStroke}%, var(--diagram-bg));
+    --_key-badge:     color-mix(in srgb, var(--diagram-fg) ${MIX.keyBadge}%, var(--diagram-bg));`;
   return [
     "<style>",
     `  text { font-family: ${font}; }`,
@@ -50,18 +50,18 @@ export function svgOpenTag(
   colors: DiagramColors,
   transparent?: boolean,
 ): string {
-  // Unset enrichment variables reset to initial so same-named variables inherited from the
-  // host page cannot replace their color-mix() fallbacks.
   const vars = [
-    `--bg:${colors.bg}`,
-    `--fg:${colors.fg}`,
-    `--line:${colors.line ?? "initial"}`,
-    `--accent:${colors.accent ?? "initial"}`,
-    `--muted:${colors.muted ?? "initial"}`,
-    `--surface:${colors.surface ?? "initial"}`,
-    `--border:${colors.border ?? "initial"}`,
-  ].join(";");
-  const bgStyle = transparent ? "" : ";background:var(--bg)";
+    `--diagram-bg:${colors.bg}`,
+    `--diagram-fg:${colors.fg}`,
+    colors.line ? `--diagram-line:${colors.line}` : "",
+    colors.accent ? `--diagram-accent:${colors.accent}` : "",
+    colors.muted ? `--diagram-muted:${colors.muted}` : "",
+    colors.surface ? `--diagram-surface:${colors.surface}` : "",
+    colors.border ? `--diagram-border:${colors.border}` : "",
+  ]
+    .filter(Boolean)
+    .join(";");
+  const bgStyle = transparent ? "" : ";background:var(--diagram-bg)";
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" ` +
     `width="${width}" height="${height}" style="${vars}${bgStyle}">`

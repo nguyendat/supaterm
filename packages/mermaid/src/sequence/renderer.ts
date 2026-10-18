@@ -20,7 +20,7 @@ import { renderMultilineText } from "../multiline-utils.ts";
 export function renderSequenceSvg(
   diagram: PositionedSequenceDiagram,
   colors: DiagramColors,
-  font: string = "Inter",
+  font: string,
   transparent: boolean = false,
 ): string {
   const parts: string[] = [];
@@ -238,7 +238,7 @@ function renderNote(note: PositionedNote): string {
   return (
     `<g class="note"${positionAttr}${actorsAttr}>` +
     `\n  <polygon points="${bodyPoints}" ` +
-    `fill="var(--bg)" stroke="var(--_node-stroke)" stroke-width="${STROKE_WIDTHS.innerBox}" />` +
+    `fill="var(--diagram-bg)" stroke="var(--_node-stroke)" stroke-width="${STROKE_WIDTHS.innerBox}" />` +
     `\n  <polygon points="${x + w - foldSize},${y} ${x + w},${y + foldSize} ${x + w - foldSize},${y + foldSize}" ` +
     `fill="var(--_inner-stroke)" stroke="var(--_node-stroke)" stroke-width="${STROKE_WIDTHS.innerBox}" />` +
     `\n  ${renderMultilineText(note.text, x + w / 2, y + h / 2, FONT_SIZES.edgeLabel, `font-size="${FONT_SIZES.edgeLabel}" text-anchor="middle" font-weight="${FONT_WEIGHTS.edgeLabel}" fill="var(--_text-muted)"`)}` +

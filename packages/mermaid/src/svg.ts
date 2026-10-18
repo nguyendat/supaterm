@@ -2,7 +2,7 @@ import { validateSource } from "./budget.ts";
 import { layoutClassDiagramSync } from "./class/layout.ts";
 import { parseClassDiagram } from "./class/parser.ts";
 import { renderClassSvg } from "./class/renderer.ts";
-import { detectDiagramType } from "./diagram-type.ts";
+import { detectDiagramType, diagramLines } from "./diagram.ts";
 import { layoutErDiagramSync } from "./er/layout.ts";
 import { parseErDiagram } from "./er/parser.ts";
 import { renderErSvg } from "./er/renderer.ts";
@@ -26,10 +26,7 @@ export interface SvgRenderOptions {
 
 export function renderMermaidSvg(text: string, { colors, font }: SvgRenderOptions): string {
   validateSource(text);
-  const lines = text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith("%%"));
+  const lines = diagramLines(text);
   switch (detectDiagramType(text)) {
     case "sequence": {
       const diagram = parseSequenceDiagram(lines);

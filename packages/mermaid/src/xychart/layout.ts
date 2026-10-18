@@ -10,6 +10,7 @@ import type {
   LegendItem,
 } from "./types.ts";
 import type { RenderOptions } from "../types.ts";
+import { formatTickValue, getCategoryLabels, getDataCount, niceTickValues } from "./scale.ts";
 import { estimateTextWidth } from "../styles.ts";
 const XY = {
   plotWidth: 600,
@@ -64,7 +65,7 @@ function layoutVertical(chart: XYChart): PositionedXYChart {
   const totalW = left + plotW + right;
   const totalH = top + plotH + bottom;
   const plotArea: PlotArea = { x: left, y: top, width: plotW, height: plotH };
-  const dataCount = getDataCount(chart);
+  const dataCount = Math.max(1, getDataCount(chart));
   const xScale = (i: number) => left + (i + 0.5) * (plotW / dataCount);
   const bandWidth = plotW / dataCount;
   const yScale = (v: number) => {
@@ -133,7 +134,7 @@ function layoutHorizontal(chart: XYChart): PositionedXYChart {
   const hasLegend = chart.series.length > 1;
   const yRange = chart.yAxis.range!;
   const valueTicks = niceTickValues(yRange.min, yRange.max);
-  const dataCount = getDataCount(chart);
+  const dataCount = Math.max(1, getDataCount(chart));
   const catLabels = getCategoryLabels(chart, dataCount);
   const maxCatLabelWidth = Math.max(
     ...catLabels.map((l) => estimateTextWidth(l, XY.axisLabelFontSize, XY.axisLabelFontWeight)),
@@ -271,29 +272,13 @@ function layoutHorizontal(chart: XYChart): PositionedXYChart {
     legend,
   };
 }
-function getDataCount(chart: XYChart): number {
-  if (chart.xAxis.categories) return chart.xAxis.categories.length;
-  for (const s of chart.series) {
-    if (s.data.length > 0) return s.data.length;
-  }
-  return 1;
-}
-function getCategoryLabels(chart: XYChart, count: number): string[] {
-  if (chart.xAxis.categories) return chart.xAxis.categories;
-  if (chart.xAxis.range) {
-    const { min, max } = chart.xAxis.range;
-    const step = count > 1 ? (max - min) / (count - 1) : 0;
-    return Array.from({ length: count }, (_, i) => formatTickValue(min + step * i));
-  }
-  return Array.from({ length: count }, (_, i) => String(i + 1));
-}
 function buildXTicks(
   chart: XYChart,
   xScale: (i: number) => number,
   axisY: number,
   _bandWidth: number,
 ): AxisTick[] {
-  const count = getDataCount(chart);
+  const count = Math.max(1, getDataCount(chart));
   const labels = getCategoryLabels(chart, count);
   return labels.map((label, i) => ({
     label,
@@ -379,28 +364,6 @@ function layoutLines(
     seriesArrayIdx++;
   }
   return lines;
-}
-function niceTickValues(min: number, max: number): number[] {
-  const range = max - min;
-  if (range <= 0) return [min];
-  const rawInterval = range / 6;
-  const magnitude = Math.pow(10, Math.floor(Math.log10(rawInterval)));
-  const residual = rawInterval / magnitude;
-  let niceInterval: number;
-  if (residual <= 1.5) niceInterval = magnitude;
-  else if (residual <= 3) niceInterval = 2 * magnitude;
-  else if (residual <= 7) niceInterval = 5 * magnitude;
-  else niceInterval = 10 * magnitude;
-  const start = Math.ceil(min / niceInterval) * niceInterval;
-  const ticks: number[] = [];
-  for (let v = start; v <= max + niceInterval * 0.001; v += niceInterval) {
-    ticks.push(Math.round(v * 1e10) / 1e10);
-  }
-  return ticks;
-}
-function formatTickValue(v: number): string {
-  if (Number.isInteger(v)) return String(v);
-  return v.toFixed(Math.abs(v) < 10 ? 1 : 0);
 }
 function buildLegendItems(
   chart: XYChart,

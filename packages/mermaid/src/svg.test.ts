@@ -19,9 +19,7 @@ describe("renderMermaidSvg", () => {
       .slice(0, content.indexOf("\n---\n"))
       .replace(/^padding[xy]\s*=\s*\d+\s*$/gim, "");
     const svg = renderMermaidSvg(source, options);
-    expect(svg).toMatch(
-      /^<svg [^>]*style="--bg:var\(--background\);--fg:var\(--foreground\);--line:initial;--accent:initial;--muted:initial;--surface:initial;--border:initial"/,
-    );
+    expect(svg).toContain("--diagram-bg:var(--background);--diagram-fg:var(--foreground)");
     expect(svg).not.toMatch(/@import|url\((?!#)|<script|https?:\/\/(?!www\.w3\.org\/2000\/svg")/);
   });
 
@@ -71,6 +69,14 @@ describe("renderMermaidSvg", () => {
     expect(() => renderMermaidSvg(`sequenceDiagram\n${messages.join("\n")}`, options)).toThrow(
       /messages/,
     );
+  });
+
+  it("bounds chart ticks when the axis range is below floating-point precision", () => {
+    const svg = renderMermaidSvg(
+      "xychart-beta\nx-axis [a, b]\nbar [1152921504606846976, 1152921504606847232]",
+      options,
+    );
+    expect(svg.match(/class="xychart-label"/g)!.length).toBeLessThan(40);
   });
 
   it("returns nothing for diagrams without content", () => {

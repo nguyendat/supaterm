@@ -3,15 +3,14 @@ import { MERMAID_LIMITS } from "@supaterm/mermaid/limits";
 export function createDiagramRenderer(
   render: (source: string) => Promise<string | null>,
   options: {
+    maxOutputChars: number;
     maxPending?: number;
     maxCacheEntries?: number;
     maxCacheBytes?: number;
-    maxOutputChars?: number;
-  } = {},
+  },
 ) {
+  const maxOutputChars = options.maxOutputChars;
   const maxPending = options.maxPending ?? 32;
-  const maxOutputChars =
-    options.maxOutputChars ?? MERMAID_LIMITS.canvasCells * 2 + MERMAID_LIMITS.canvasDimension;
   const maxCacheEntries = options.maxCacheEntries ?? 128;
   const maxCacheBytes = options.maxCacheBytes ?? 2 * 1024 * 1024;
   const cache = new Map<string, { output: string | null; bytes: number }>();

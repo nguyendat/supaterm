@@ -1,12 +1,10 @@
+import { diagramLines } from "../diagram.ts";
 import { parseSequenceDiagram } from "../sequence/parser.ts";
 import type { AsciiConfig } from "./types.ts";
 import { mkCanvas, canvasToString, increaseSize } from "./canvas.ts";
 import { splitLines, maxLineWidth, lineCount } from "./multiline-utils.ts";
 export function renderSequenceAscii(text: string, config: AsciiConfig): string {
-  const lines = text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !l.startsWith("%%"));
+  const lines = diagramLines(text);
   const diagram = parseSequenceDiagram(lines);
   config.budget?.check();
   if (diagram.actors.length === 0) return "";

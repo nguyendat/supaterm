@@ -1,3 +1,4 @@
+import { diagramLines } from "../diagram.ts";
 import { parseErDiagram } from "../er/parser.ts";
 import type { ErDiagram, ErEntity, ErAttribute, Cardinality } from "../er/types.ts";
 import type { AsciiConfig } from "./types.ts";
@@ -84,10 +85,7 @@ function findConnectedComponents(diagram: ErDiagram): Set<string>[] {
   return components;
 }
 export function renderErAscii(text: string, config: AsciiConfig): string {
-  const lines = text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !l.startsWith("%%"));
+  const lines = diagramLines(text);
   const diagram = parseErDiagram(lines);
   config.budget?.check();
   if (diagram.entities.length === 0) return "";

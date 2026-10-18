@@ -1,6 +1,13 @@
+import { diagramLines } from "../diagram.ts";
 import { validateCanvas, type RenderBudget } from "../budget.ts";
 import { parseXYChart } from "../xychart/parser.ts";
 import type { XYChart } from "../xychart/types.ts";
+import {
+  formatTickValue,
+  getCategoryLabels,
+  getDataCount,
+  niceTickValues,
+} from "../xychart/scale.ts";
 import type { AsciiConfig, Canvas } from "./types.ts";
 const PLOT_WIDTH = 60;
 const PLOT_HEIGHT = 20;
@@ -31,10 +38,7 @@ const ASC = {
   cornerBR: "+",
 } as const;
 export function renderXYChartAscii(text: string, config: AsciiConfig): string {
-  const lines = text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !l.startsWith("%%"));
+  const lines = diagramLines(text);
   const chart = parseXYChart(lines);
   config.budget?.check();
   const ch = config.useAscii ? ASC : UNI;
@@ -479,48 +483,4 @@ function canvasToString(canvas: Canvas): string {
   }
   while (lines.at(-1) === "") lines.pop();
   return lines.join("\n");
-}
-function getDataCount(chart: XYChart): number {
-  if (chart.xAxis.categories) return chart.xAxis.categories.length;
-  for (const s of chart.series) {
-    if (s.data.length > 0) return s.data.length;
-  }
-  return 0;
-}
-function getCategoryLabels(chart: XYChart, count: number): string[] {
-  if (chart.xAxis.categories) return chart.xAxis.categories;
-  if (chart.xAxis.range) {
-    const { min, max } = chart.xAxis.range;
-    const step = count > 1 ? (max - min) / (count - 1) : 0;
-    return Array.from({ length: count }, (_, i) => formatTickValue(min + step * i));
-  }
-  return Array.from({ length: count }, (_, i) => String(i + 1));
-}
-function niceTickValues(min: number, max: number): number[] {
-  const range = max - min;
-  if (range <= 0) return [min];
-  const rawInterval = range / 6;
-  const magnitude = Math.pow(10, Math.floor(Math.log10(rawInterval)));
-  const residual = rawInterval / magnitude;
-  let niceInterval: number;
-  if (residual <= 1.5) niceInterval = magnitude;
-  else if (residual <= 3) niceInterval = 2 * magnitude;
-  else if (residual <= 7) niceInterval = 5 * magnitude;
-  else niceInterval = 10 * magnitude;
-  if (!Number.isFinite(niceInterval) || niceInterval <= 0) {
-    throw new RangeError("XY chart tick interval is outside the supported range");
-  }
-  const start = Math.ceil(min / niceInterval) * niceInterval;
-  const ticks: number[] = [];
-  for (let index = 0; index < 32; index++) {
-    const value = start + index * niceInterval;
-    if (value > max + niceInterval * 0.001) break;
-    const rounded = Math.round(value * 1e10) / 1e10;
-    ticks.push(Number.isFinite(rounded) ? rounded : value);
-  }
-  return ticks;
-}
-function formatTickValue(v: number): string {
-  if (Number.isInteger(v)) return String(v);
-  return v.toFixed(Math.abs(v) < 10 ? 1 : 0);
 }

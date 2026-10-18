@@ -19,7 +19,7 @@ const CLS_FONT = {
 export function renderClassSvg(
   diagram: PositionedClassDiagram,
   colors: DiagramColors,
-  font: string = "Inter",
+  font: string,
   transparent: boolean = false,
 ): string {
   const parts: string[] = [];
@@ -43,13 +43,13 @@ export function renderClassSvg(
 function relationshipMarkerDefs(): string {
   return (
     `  <marker id="cls-inherit" markerWidth="12" markerHeight="10" refX="12" refY="5" orient="auto-start-reverse">` +
-    `\n    <polygon points="0 0, 12 5, 0 10" fill="var(--bg)" stroke="var(--_arrow)" stroke-width="1.5" />` +
+    `\n    <polygon points="0 0, 12 5, 0 10" fill="var(--diagram-bg)" stroke="var(--_arrow)" stroke-width="1.5" />` +
     `\n  </marker>` +
     `\n  <marker id="cls-composition" markerWidth="12" markerHeight="10" refX="0" refY="5" orient="auto-start-reverse">` +
     `\n    <polygon points="6 0, 12 5, 6 10, 0 5" fill="var(--_arrow)" stroke="var(--_arrow)" stroke-width="1" />` +
     `\n  </marker>` +
     `\n  <marker id="cls-aggregation" markerWidth="12" markerHeight="10" refX="0" refY="5" orient="auto-start-reverse">` +
-    `\n    <polygon points="6 0, 12 5, 6 10, 0 5" fill="var(--bg)" stroke="var(--_arrow)" stroke-width="1.5" />` +
+    `\n    <polygon points="6 0, 12 5, 6 10, 0 5" fill="var(--diagram-bg)" stroke="var(--_arrow)" stroke-width="1.5" />` +
     `\n  </marker>` +
     `\n  <marker id="cls-arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto-start-reverse">` +
     `\n    <polyline points="0 0, 8 3, 0 6" fill="none" stroke="var(--_arrow)" stroke-width="1.5" />` +

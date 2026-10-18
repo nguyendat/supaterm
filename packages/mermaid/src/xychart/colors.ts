@@ -54,32 +54,11 @@ function hslToHex(h: number, s: number, l: number): string {
       .padStart(2, "0");
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
-function hexToRgb(hex: string): [number, number, number] {
-  const h = hex.replace("#", "");
-  return [
-    parseInt(h.substring(0, 2), 16),
-    parseInt(h.substring(2, 4), 16),
-    parseInt(h.substring(4, 6), 16),
-  ];
-}
-function rgbToHex(r: number, g: number, b: number): string {
-  const toHex = (v: number) =>
-    Math.round(Math.max(0, Math.min(255, v)))
-      .toString(16)
-      .padStart(2, "0");
-  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-}
-export function isValidHex(color: string): boolean {
+function isValidHex(color: string): boolean {
   return /^#[0-9a-fA-F]{6}$/.test(color);
 }
-export function isDarkBackground(bgHex: string): boolean {
+function isDarkBackground(bgHex: string): boolean {
   return hexToHsl(bgHex)[2] < 50;
-}
-export function mixHexColors(bgHex: string, fgHex: string, ratio: number): string {
-  const [br, bg, bb] = hexToRgb(bgHex);
-  const [fr, fg, fb] = hexToRgb(fgHex);
-  const inv = 1 - ratio;
-  return rgbToHex(br * inv + fr * ratio, bg * inv + fg * ratio, bb * inv + fb * ratio);
 }
 export function getSeriesColor(index: number, accentColor: string, bgColor?: string): string {
   if (index === 0) return accentColor;

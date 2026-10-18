@@ -1,6 +1,6 @@
 import { RenderBudget, checkLimit, validateSource } from "../budget.ts";
 import { MERMAID_LIMITS as limits } from "../limits.ts";
-import { detectDiagramType } from "../diagram-type.ts";
+import { detectDiagramType } from "../diagram.ts";
 import { parseMermaid } from "../parser.ts";
 import { convertToAsciiGraph } from "./converter.ts";
 import { createMapping } from "./grid.ts";

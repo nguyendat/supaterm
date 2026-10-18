@@ -5,7 +5,6 @@ const options: SvgRenderOptions = {
     bg: "var(--code-background, var(--background))",
     fg: "var(--code-foreground, var(--foreground))",
     muted: "var(--muted-foreground)",
-    border: "var(--border)",
   },
   font: "var(--font-sans, system-ui, sans-serif)",
 };

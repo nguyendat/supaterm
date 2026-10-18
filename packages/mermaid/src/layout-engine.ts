@@ -1031,7 +1031,3 @@ export function layoutGraphSync(graph: MermaidGraph, options: RenderOptions = {}
   const result = elkLayoutSync(elkGraph);
   return elkToPositioned(result, graph, DEFAULTS.mergeEdges);
 }
-export function convertToElkFormat(graph: MermaidGraph, options: RenderOptions = {}): ElkNode {
-  const opts = { ...DEFAULTS, ...options };
-  return mermaidToElk(graph, opts);
-}

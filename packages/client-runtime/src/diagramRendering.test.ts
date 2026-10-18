@@ -3,12 +3,23 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createDiagramRenderer } from "./diagramRendering.ts";
 
+const maxOutputChars = 1_000;
+
 describe("createDiagramRenderer", () => {
+  it("treats empty or oversized output as unrenderable", async () => {
+    const render = vi.fn(async (source: string) =>
+      source === "huge" ? "x".repeat(maxOutputChars + 1) : "",
+    );
+    const renderer = createDiagramRenderer(render, { maxOutputChars });
+    expect(await renderer.render("huge")).toBeNull();
+    expect(await renderer.render("empty")).toBeNull();
+  });
+
   it("coalesces identical requests and renders different sources in order", async () => {
     const first = Promise.withResolvers<string>();
     const second = Promise.withResolvers<string>();
     const render = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
-    const renderer = createDiagramRenderer(render);
+    const renderer = createDiagramRenderer(render, { maxOutputChars });
     const firstResult = renderer.render("first");
     const duplicateResult = renderer.render("first");
     const secondResult = renderer.render("second");
@@ -28,7 +39,7 @@ describe("createDiagramRenderer", () => {
       if (source === "unsupported") return null;
       return "diagram";
     });
-    const renderer = createDiagramRenderer(render);
+    const renderer = createDiagramRenderer(render, { maxOutputChars });
     const failed = renderer.render("unsupported");
     const good = renderer.render("supported");
     expect(await failed).toBeNull();
@@ -42,7 +53,7 @@ describe("createDiagramRenderer", () => {
       .fn()
       .mockRejectedValueOnce(new Error("Worker unavailable"))
       .mockResolvedValue("diagram");
-    const renderer = createDiagramRenderer(render);
+    const renderer = createDiagramRenderer(render, { maxOutputChars });
     expect(await renderer.render("source")).toBeNull();
     expect(render).toHaveBeenCalledTimes(1);
     expect(await renderer.render("source")).toBe("diagram");
@@ -53,7 +64,7 @@ describe("createDiagramRenderer", () => {
   it("bounds pending work without retaining temporary queue saturation", async () => {
     const first = Promise.withResolvers<string>();
     const render = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue("diagram");
-    const renderer = createDiagramRenderer(render, { maxPending: 1 });
+    const renderer = createDiagramRenderer(render, { maxOutputChars, maxPending: 1 });
     const firstResult = renderer.render("first");
     expect(await renderer.render("second")).toBeNull();
     expect(renderer.render("first")).toBe(firstResult);
@@ -65,7 +76,7 @@ describe("createDiagramRenderer", () => {
 
   it("evicts the least recently read result when the entry limit is reached", async () => {
     const render = vi.fn(async (source: string) => source);
-    const renderer = createDiagramRenderer(render, { maxCacheEntries: 2 });
+    const renderer = createDiagramRenderer(render, { maxOutputChars, maxCacheEntries: 2 });
     await renderer.render("first");
     await renderer.render("second");
     await renderer.render("first");
@@ -78,7 +89,7 @@ describe("createDiagramRenderer", () => {
 
   it("counts source keys and results against the cache memory limit", async () => {
     const render = vi.fn(async (source: string) => source);
-    const renderer = createDiagramRenderer(render, { maxCacheBytes: 16 });
+    const renderer = createDiagramRenderer(render, { maxOutputChars, maxCacheBytes: 16 });
     await renderer.render("aa");
     await renderer.render("bb");
     await renderer.render("cc");
@@ -90,7 +101,7 @@ describe("createDiagramRenderer", () => {
 
   it("rejects oversized source before retaining or dispatching it", async () => {
     const render = vi.fn(async () => "diagram");
-    const renderer = createDiagramRenderer(render);
+    const renderer = createDiagramRenderer(render, { maxOutputChars });
     expect(await renderer.render("x".repeat(MERMAID_LIMITS.sourceChars + 1))).toBeNull();
     expect(render).not.toHaveBeenCalled();
   });

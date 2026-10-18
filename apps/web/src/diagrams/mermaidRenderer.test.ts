@@ -51,7 +51,7 @@ describe("browser diagram rendering", () => {
     expect(worker.terminate).not.toHaveBeenCalled();
   });
 
-  it("terminates timed out work, ignores its late reply, and replaces the worker", async () => {
+  it("terminates timed out work, keeps that source unrendered, and replaces the worker", async () => {
     const renderer = createBrowserDiagramRenderer();
     const first = renderer.render("slow");
     const firstWorker = TestWorker.instances[0]!;
@@ -59,14 +59,15 @@ describe("browser diagram rendering", () => {
     vi.advanceTimersByTime(MERMAID_LIMITS.durationMs * 2);
     expect(await first).toBeNull();
     expect(firstWorker.terminate).toHaveBeenCalledTimes(1);
+    firstWorker.reply({ output: "stale diagram" });
+    expect(await renderer.render("slow")).toBeNull();
     expect(TestWorker.instances).toHaveLength(1);
 
-    const second = renderer.render("slow");
-    firstWorker.reply({ output: "stale diagram" });
+    const next = renderer.render("fast");
     const secondWorker = TestWorker.instances[1]!;
     secondWorker.reply({ ready: true });
     secondWorker.reply({ output: "recovered diagram" });
-    expect(await second).toBe("recovered diagram");
+    expect(await next).toBe("recovered diagram");
   });
 
   it("retains source on renderer errors without restarting healthy workers", async () => {

@@ -1,5 +1,5 @@
 import { createDiagramRenderer } from "@supaterm/client-runtime/diagram-rendering";
-import { MERMAID_LIMITS } from "@supaterm/mermaid/limits";
+import { MERMAID_LIMITS, MERMAID_OUTPUT_CHARS } from "@supaterm/mermaid/limits";
 
 export function createBrowserDiagramRenderer() {
   let worker: Worker | undefined;
@@ -16,43 +16,44 @@ export function createBrowserDiagramRenderer() {
         ));
         let settled = false;
         let sent = false;
-        const finish = (output: string | null, terminate = false) => {
+        const finish = (output: string | null, outcome: "done" | "retry" | "abandon" = "done") => {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
           activeWorker.removeEventListener("message", handleMessage);
           activeWorker.removeEventListener("error", handleError);
           activeWorker.removeEventListener("messageerror", handleMessageError);
-          if (terminate) {
+          if (outcome !== "done") {
             activeWorker.terminate();
             worker = undefined;
             ready = false;
-            reject(new Error("Diagram preview unavailable"));
-          } else {
-            resolve(output);
           }
+          if (outcome === "retry") reject(new Error("Diagram preview unavailable"));
+          else resolve(output);
         };
-        let timer = setTimeout(() => finish(null, true), 15_000);
+        let timer = setTimeout(() => finish(null, "retry"), 15_000);
         const send = () => {
           if (sent) return;
           sent = true;
           clearTimeout(timer);
-          timer = setTimeout(() => finish(null, true), MERMAID_LIMITS.durationMs * 2);
+          // Layout cannot be interrupted, and a source that outlives the deadline would
+          // outlive it again, so it resolves as unrenderable and is remembered.
+          timer = setTimeout(() => finish(null, "abandon"), MERMAID_LIMITS.durationMs * 2);
           try {
             activeWorker.postMessage({ source }, []);
           } catch {
-            finish(null, true);
+            finish(null, "retry");
           }
         };
         const handleMessage = (event: MessageEvent<unknown>) => {
           const data = event.data;
           if (typeof data !== "object" || data === null) {
-            finish(null, true);
+            finish(null, "retry");
             return;
           }
           if (!sent) {
             if (!("ready" in data) || data.ready !== true) {
-              finish(null, true);
+              finish(null, "retry");
               return;
             }
             ready = true;
@@ -62,20 +63,20 @@ export function createBrowserDiagramRenderer() {
           } else if ("error" in data && data.error === true) {
             finish(null);
           } else {
-            finish(null, true);
+            finish(null, "retry");
           }
         };
         const handleError = (event: ErrorEvent) => {
           event.preventDefault();
-          finish(null, true);
+          finish(null, "retry");
         };
-        const handleMessageError = () => finish(null, true);
+        const handleMessageError = () => finish(null, "retry");
         activeWorker.addEventListener("message", handleMessage);
         activeWorker.addEventListener("error", handleError);
         activeWorker.addEventListener("messageerror", handleMessageError);
         if (ready) send();
       }),
-    { maxOutputChars: MERMAID_LIMITS.svgChars },
+    { maxOutputChars: MERMAID_OUTPUT_CHARS.svg, maxCacheBytes: 8 * 1024 * 1024 },
   );
 }
 

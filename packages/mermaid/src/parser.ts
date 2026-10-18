@@ -1,3 +1,4 @@
+import { diagramLines } from "./diagram.ts";
 import { checkLimit, validateSource } from "./budget.ts";
 import { MERMAID_LIMITS as limits } from "./limits.ts";
 import type {
@@ -11,10 +12,7 @@ import type {
 import { normalizeBrTags } from "./multiline-utils.ts";
 export function parseMermaid(text: string): MermaidGraph {
   validateSource(text);
-  const lines = text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !l.startsWith("%%"));
+  const lines = diagramLines(text);
   if (lines.length === 0) {
     throw new Error("Empty mermaid diagram");
   }
@@ -310,6 +308,8 @@ function ensureStateNode(graph: MermaidGraph, compositeStack: MermaidSubgraph[],
     }
   }
 }
+// Styles land in SVG presentation attributes; keeping plain colors and widths stops a value
+// from fetching remote resources through url().
 const STYLE_PROPERTIES = new Set(["fill", "stroke", "stroke-width", "color"]);
 const STYLE_VALUE = /^(?!.*url\s*\()[\w#.%() -]+$/i;
 function parseStyleProps(propsStr: string): Record<string, string> {

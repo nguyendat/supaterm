@@ -8,3 +8,9 @@ export function detectDiagramType(
   if (/^erdiagram\s*$/.test(firstLine)) return "er";
   return "flowchart";
 }
+export function diagramLines(text: string): string[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("%%"));
+}

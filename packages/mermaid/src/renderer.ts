@@ -157,7 +157,7 @@ function renderEdgeLabel(edge: PositionedEdge): string {
     FONT_SIZES.edgeLabel,
     padding,
     `text-anchor="middle" font-size="${FONT_SIZES.edgeLabel}" font-weight="${FONT_WEIGHTS.edgeLabel}" fill="var(--_text-sec)"`,
-    `rx="2" ry="2" fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="1"`,
+    `rx="2" ry="2" fill="var(--diagram-bg)" stroke="var(--_inner-stroke)" stroke-width="1"`,
   );
   return (
     `<g class="edge-label" data-from="${escapeAttr(edge.source)}" data-to="${escapeAttr(edge.target)}" data-label="${escapeAttr(label)}">\n` +

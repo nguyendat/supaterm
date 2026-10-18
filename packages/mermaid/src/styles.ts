@@ -16,7 +16,6 @@ export const FONT_WEIGHTS = {
   edgeLabel: 400,
   groupHeader: 600,
 } as const;
-export const GROUP_HEADER_CONTENT_PAD = 12;
 export const NODE_PADDING = {
   horizontal: 20,
   vertical: 10,

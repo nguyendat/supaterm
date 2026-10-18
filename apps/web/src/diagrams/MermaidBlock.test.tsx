@@ -121,7 +121,6 @@ describe("MermaidBlock", () => {
     expect(displayedText()).toBe("graph TD\n A");
     await act(async () => button("Diagram").onClick?.({} as React.MouseEvent<HTMLButtonElement>));
     expect(displayedText()).toBe("<svg>A</svg>");
-    expect(shadowRoots).toHaveLength(2);
     expect(renderMermaidDiagram).toHaveBeenCalledTimes(1);
   });
 

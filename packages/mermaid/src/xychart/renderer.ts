@@ -29,7 +29,7 @@ const TIP = {
 export function renderXYChartSvg(
   chart: PositionedXYChart,
   colors: DiagramColors,
-  font: string = "Inter",
+  font: string,
   transparent: boolean = false,
   interactive: boolean = false,
 ): string {
@@ -263,11 +263,11 @@ function chartStyles(
   for (const idx of [...colorIndices].sort((a, b) => a - b)) {
     const value =
       idx === 0
-        ? `var(--accent, ${CHART_ACCENT_FALLBACK})`
+        ? `var(--diagram-accent, ${CHART_ACCENT_FALLBACK})`
         : getSeriesColor(idx, accentHex, bgColor);
     colorVarDefs.push(`    --xychart-color-${idx}: ${value};`);
     colorVarDefs.push(
-      `    --xychart-bar-fill-${idx}: color-mix(in srgb, var(--bg) 75%, var(--xychart-color-${idx}) 25%);`,
+      `    --xychart-bar-fill-${idx}: color-mix(in srgb, var(--diagram-bg) 75%, var(--xychart-color-${idx}) 25%);`,
     );
   }
   const seriesRules: string[] = [];
@@ -284,8 +284,8 @@ function chartStyles(
   const tipRules = interactive
     ? `
   .xychart-tip { opacity: 0; pointer-events: none; }
-  .xychart-tip-bg { fill: var(--_text); filter: drop-shadow(0 1px 3px color-mix(in srgb, var(--fg) 20%, transparent)); }
-  .xychart-tip-text { fill: var(--bg); font-size: ${TIP.fontSize}px; font-weight: ${TIP.fontWeight}; }
+  .xychart-tip-bg { fill: var(--_text); filter: drop-shadow(0 1px 3px color-mix(in srgb, var(--diagram-fg) 20%, transparent)); }
+  .xychart-tip-text { fill: var(--diagram-bg); font-size: ${TIP.fontSize}px; font-weight: ${TIP.fontWeight}; }
   .xychart-tip-ptr { fill: var(--_text); }
   .xychart-bar-group:hover .xychart-tip,
   .xychart-dot-group:hover .xychart-tip { opacity: 1; }`
@@ -297,7 +297,7 @@ function chartStyles(
   .xychart-bar { stroke-width: 1.5; }
   .xychart-line { fill: none; stroke-width: ${CHART_FONT.lineWidth}; stroke-linecap: round; stroke-linejoin: round; }
   .xychart-line-shadow { fill: none; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.12; }
-  .xychart-dot { stroke: var(--bg); stroke-width: 2; }
+  .xychart-dot { stroke: var(--diagram-bg); stroke-width: 2; }
   .xychart-label { fill: var(--_text-muted); }
   .xychart-axis-title { fill: var(--_text-sec); }
   .xychart-title { fill: var(--_text); }${colorVarsBlock}

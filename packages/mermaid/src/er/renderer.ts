@@ -25,7 +25,7 @@ const ER_FONT = {
 export function renderErSvg(
   diagram: PositionedErDiagram,
   colors: DiagramColors,
-  font: string = "Inter",
+  font: string,
   transparent: boolean = false,
 ): string {
   const parts: string[] = [];
@@ -152,7 +152,7 @@ function renderRelationshipLabel(rel: PositionedErRelationship): string {
   const bgH = metrics.height + 6;
   return (
     `<rect x="${mid.x - bgW / 2}" y="${mid.y - bgH / 2}" width="${bgW}" height="${bgH}" rx="2" ry="2" ` +
-    `fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />` +
+    `fill="var(--diagram-bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />` +
     `\n${renderMultilineText(rel.label, mid.x, mid.y, FONT_SIZES.edgeLabel, `text-anchor="middle" font-size="${FONT_SIZES.edgeLabel}" font-weight="${FONT_WEIGHTS.edgeLabel}" fill="var(--_text-muted)"`)}`
   );
 }
@@ -236,7 +236,7 @@ function renderCrowsFoot(
     const circleY = point.y - uy * circleOffset;
     parts.push(
       `<circle cx="${circleX}" cy="${circleY}" r="4" ` +
-        `fill="var(--bg)" stroke="var(--_line)" stroke-width="${sw}" />`,
+        `fill="var(--diagram-bg)" stroke="var(--_line)" stroke-width="${sw}" />`,
     );
   }
   return parts.join("\n");
