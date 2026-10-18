@@ -492,6 +492,12 @@ export const DesktopServerExposureStateSchema = Schema.Struct({
   tailscaleServePort: Schema.Number,
 });
 
+export function shouldDetectTailscaleEndpoints(
+  state: Pick<DesktopServerExposureState, "mode" | "tailscaleServeEnabled">,
+): boolean {
+  return state.mode === "network-accessible" || state.tailscaleServeEnabled;
+}
+
 export interface PickFolderOptions {
   initialPath?: string | null;
   targetEnvironmentId?: string;

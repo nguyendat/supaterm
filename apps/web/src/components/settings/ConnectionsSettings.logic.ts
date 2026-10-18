@@ -9,6 +9,7 @@ import {
   type RelayConnectionInfo,
   type ServerSettings,
   normalizeRelayServerUrl,
+  shouldDetectTailscaleEndpoints,
 } from "@supaterm/contracts";
 import { createAdvertisedEndpoint } from "@supaterm/shared/advertisedEndpoint";
 import type { PairingRouteHints } from "@supaterm/shared/remote";
@@ -88,7 +89,7 @@ export function isQrShareableEndpoint(endpoint: AdvertisedEndpoint): boolean {
 export function missingTailscaleEndpointDescription(
   state: Pick<DesktopServerExposureState, "mode" | "tailscaleServeEnabled"> | null,
 ): string {
-  return state && state.mode !== "network-accessible" && !state.tailscaleServeEnabled
+  return state && !shouldDetectTailscaleEndpoints(state)
     ? "Turn on Network access to detect Tailscale."
     : "Start Tailscale to set up HTTPS access through MagicDNS.";
 }
