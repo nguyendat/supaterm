@@ -99,6 +99,46 @@ export function layoutSequenceDiagram(
   >();
   const activations: Activation[] = [];
   const nestingOffset = 4;
+  const placeNotes = (notes: typeof diagram.notes | undefined, startY: number) => {
+    if (!notes || notes.length === 0) return;
+    let noteY = startY;
+    for (const note of notes) {
+      const noteW = Math.max(
+        SEQ.noteWidth,
+        estimateTextWidth(note.text, FONT_SIZES.edgeLabel, FONT_WEIGHTS.edgeLabel) +
+          SEQ.notePadX * 2,
+      );
+      const noteH = FONT_SIZES.edgeLabel + SEQ.notePadY * 2;
+      const firstActorIdx = actorIndex.get(note.actorIds[0] ?? "") ?? 0;
+      let noteX: number;
+      if (note.position === "left") {
+        noteX =
+          actorCenterX[firstActorIdx]! - actorWidths[firstActorIdx]! / 2 - noteW - SEQ.noteGap;
+      } else if (note.position === "right") {
+        noteX = actorCenterX[firstActorIdx]! + actorWidths[firstActorIdx]! / 2 + SEQ.noteGap;
+      } else {
+        if (note.actorIds.length > 1) {
+          const lastActorIdx =
+            actorIndex.get(note.actorIds[note.actorIds.length - 1] ?? "") ?? firstActorIdx;
+          noteX = (actorCenterX[firstActorIdx]! + actorCenterX[lastActorIdx]!) / 2 - noteW / 2;
+        } else {
+          noteX = actorCenterX[firstActorIdx]! - noteW / 2;
+        }
+      }
+      positionedNotes.push({
+        text: note.text,
+        x: noteX,
+        y: noteY,
+        width: noteW,
+        height: noteH,
+        position: note.position,
+        actors: note.actorIds,
+      });
+      noteY += noteH + 4;
+    }
+    messageY = Math.max(messageY, noteY + SEQ.messageRowHeight / 2);
+  };
+  placeNotes(notesByAfterIndex.get(-1), actorY + SEQ.actorHeight + 8);
   for (let msgIdx = 0; msgIdx < diagram.messages.length; msgIdx++) {
     const msg = diagram.messages[msgIdx]!;
     const fromIdx = actorIndex.get(msg.from) ?? 0;
@@ -143,46 +183,8 @@ export function layoutSequenceDiagram(
       }
     }
     messageY += isSelf ? SEQ.selfMessageHeight + SEQ.messageRowHeight : SEQ.messageRowHeight;
-    const notesForMsg = notesByAfterIndex.get(msgIdx);
-    if (notesForMsg && notesForMsg.length > 0) {
-      const selfLoopExtra = isSelf ? SEQ.selfMessageHeight : 0;
-      let noteY = messages[msgIdx]!.y + selfLoopExtra + 8;
-      for (const note of notesForMsg) {
-        const noteW = Math.max(
-          SEQ.noteWidth,
-          estimateTextWidth(note.text, FONT_SIZES.edgeLabel, FONT_WEIGHTS.edgeLabel) +
-            SEQ.notePadX * 2,
-        );
-        const noteH = FONT_SIZES.edgeLabel + SEQ.notePadY * 2;
-        const firstActorIdx = actorIndex.get(note.actorIds[0] ?? "") ?? 0;
-        let noteX: number;
-        if (note.position === "left") {
-          noteX =
-            actorCenterX[firstActorIdx]! - actorWidths[firstActorIdx]! / 2 - noteW - SEQ.noteGap;
-        } else if (note.position === "right") {
-          noteX = actorCenterX[firstActorIdx]! + actorWidths[firstActorIdx]! / 2 + SEQ.noteGap;
-        } else {
-          if (note.actorIds.length > 1) {
-            const lastActorIdx =
-              actorIndex.get(note.actorIds[note.actorIds.length - 1] ?? "") ?? firstActorIdx;
-            noteX = (actorCenterX[firstActorIdx]! + actorCenterX[lastActorIdx]!) / 2 - noteW / 2;
-          } else {
-            noteX = actorCenterX[firstActorIdx]! - noteW / 2;
-          }
-        }
-        positionedNotes.push({
-          text: note.text,
-          x: noteX,
-          y: noteY,
-          width: noteW,
-          height: noteH,
-          position: note.position,
-          actors: note.actorIds,
-        });
-        noteY += noteH + 4;
-      }
-      messageY = Math.max(messageY, noteY + SEQ.messageRowHeight / 2);
-    }
+    const selfLoopExtra = isSelf ? SEQ.selfMessageHeight : 0;
+    placeNotes(notesByAfterIndex.get(msgIdx), messages[msgIdx]!.y + selfLoopExtra + 8);
   }
   for (const [actorId, stack] of activationStacks) {
     for (const { startY, depth } of stack) {
