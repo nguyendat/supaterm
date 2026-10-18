@@ -1,8 +1,8 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeURL from "node:url";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
-import { renderMermaidAscii } from "../../../packages/mermaid-ascii/src/ascii/index.ts";
-import { MERMAID_ASCII_LIMITS as limits } from "../../../packages/mermaid-ascii/src/limits.ts";
+import { renderMermaidAscii } from "../../../packages/mermaid/src/ascii/index.ts";
+import { MERMAID_LIMITS as limits } from "../../../packages/mermaid/src/limits.ts";
 
 const supported = [
   "flowchart LR\nA --> B",

@@ -138,6 +138,7 @@ export default defineConfig(() => {
         "@pierre/diffs/edit",
         "@pierre/diffs/react",
         "@pierre/diffs/worker/worker.js",
+        "@supaterm/mermaid > elkjs/lib/elk.bundled.js",
         "effect/Array",
         "effect/Order",
         "react-dom/client",

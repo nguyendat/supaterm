@@ -64,7 +64,7 @@
     "@shikijs/themes": "4.2.0",
     "@supaterm/client-runtime": "workspace:*",
     "@supaterm/contracts": "workspace:*",
-    "@supaterm/mermaid-ascii": "workspace:*",
+    "@supaterm/mermaid": "workspace:*",
     "@supaterm/mobile-relay-tunnel": "file:./modules/supaterm-relay-tunnel",
     "@supaterm/mobile-review-diff-native": "file:./modules/supaterm-review-diff",
     "@supaterm/mobile-source-text": "file:./modules/supaterm-source-text",

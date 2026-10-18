@@ -90,13 +90,13 @@ afterEach(async () => {
 });
 
 describe("NativeMermaidBlock", () => {
-  it("shows the rendered diagram and copies the selected representation", async () => {
+  it("shows the rendered diagram and copies the source from either view", async () => {
     const source = "graph LR\nA --> B";
     const renderer = vi.fn().mockResolvedValue("[A] --> [B]");
     await render(source, renderer);
     expect(displayedText()).toBe("[A] --> [B]");
-    await press("Copy diagram");
-    expect(copy).toHaveBeenLastCalledWith("[A] --> [B]");
+    await press("Copy Mermaid source");
+    expect(copy).toHaveBeenLastCalledWith(source);
     await act(() => vi.advanceTimersByTime(1200));
     await press("View Mermaid source");
     expect(displayedText()).toBe(source);

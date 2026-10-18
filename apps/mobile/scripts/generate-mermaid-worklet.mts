@@ -16,7 +16,7 @@ export async function generateMermaidWorklet(
       target: "es2022",
       minify: true,
       lib: {
-        entry: NodeURL.fileURLToPath(import.meta.resolve("@supaterm/mermaid-ascii")),
+        entry: NodeURL.fileURLToPath(import.meta.resolve("@supaterm/mermaid/ascii")),
         name: "SupatermMermaidAscii",
         formats: ["iife"],
       },

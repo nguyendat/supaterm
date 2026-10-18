@@ -1,4 +1,4 @@
-import { MERMAID_ASCII_LIMITS } from "@supaterm/mermaid-ascii/limits";
+import { MERMAID_LIMITS } from "@supaterm/mermaid/limits";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createDiagramRenderer } from "./diagramRendering.ts";
@@ -91,7 +91,7 @@ describe("createDiagramRenderer", () => {
   it("rejects oversized source before retaining or dispatching it", async () => {
     const render = vi.fn(async () => "diagram");
     const renderer = createDiagramRenderer(render);
-    expect(await renderer.render("x".repeat(MERMAID_ASCII_LIMITS.sourceChars + 1))).toBeNull();
+    expect(await renderer.render("x".repeat(MERMAID_LIMITS.sourceChars + 1))).toBeNull();
     expect(render).not.toHaveBeenCalled();
   });
 });

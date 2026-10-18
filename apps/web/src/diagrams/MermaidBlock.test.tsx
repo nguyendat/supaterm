@@ -37,9 +37,11 @@ class TestIntersectionObserver {
 }
 
 let renderer: ReactTestRenderer | undefined;
+let shadowRoots: Array<{ innerHTML: string }> = [];
 
 beforeEach(() => {
   TestIntersectionObserver.instances = [];
+  shadowRoots = [];
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("window", {});
   vi.stubGlobal("IntersectionObserver", TestIntersectionObserver);
@@ -55,13 +57,22 @@ afterEach(async () => {
 async function mount(source: string, complete = true) {
   await act(async () => {
     renderer = create(<MermaidBlock source={source} complete={complete} title={null} />, {
-      createNodeMock: () => ({}),
+      createNodeMock: () => ({
+        shadowRoot: null as { innerHTML: string } | null,
+        attachShadow() {
+          this.shadowRoot = { innerHTML: "" };
+          shadowRoots.push(this.shadowRoot);
+          return this.shadowRoot;
+        },
+      }),
     });
   });
 }
 
 function displayedText() {
-  return renderer!.root.findByType("code").children.join("");
+  const code = renderer!.root.findAllByType("code")[0];
+  if (code) return code.children.join("");
+  return shadowRoots.at(-1)?.innerHTML.replace(/^<style>.*?<\/style>/, "");
 }
 
 function button(label: string) {
@@ -94,26 +105,23 @@ describe("MermaidBlock", () => {
     expect(renderMermaidDiagram).toHaveBeenCalledTimes(1);
   });
 
-  it("preserves source until visible and copies the currently selected representation", async () => {
+  it("preserves source until visible and copies the source from either view", async () => {
     const writeText = vi.fn(async () => {});
     vi.stubGlobal("navigator", { clipboard: { writeText } });
-    vi.mocked(renderMermaidDiagram).mockResolvedValue("┌───┐\n│ A │\n└───┘");
+    vi.mocked(renderMermaidDiagram).mockResolvedValue("<svg>A</svg>");
     await mount("graph TD\n A");
     expect(renderMermaidDiagram).not.toHaveBeenCalled();
     await act(async () => TestIntersectionObserver.instances[0]!.visible(true));
-    expect(displayedText()).toBe("┌───┐\n│ A │\n└───┘");
-    await act(async () =>
-      button("Copy diagram").onClick?.({} as React.MouseEvent<HTMLButtonElement>),
-    );
-    expect(writeText).toHaveBeenLastCalledWith("┌───┐\n│ A │\n└───┘");
-    await act(async () => button("Source").onClick?.({} as React.MouseEvent<HTMLButtonElement>));
-    expect(displayedText()).toBe("graph TD\n A");
+    expect(displayedText()).toBe("<svg>A</svg>");
     await act(async () =>
       button("Copy source").onClick?.({} as React.MouseEvent<HTMLButtonElement>),
     );
     expect(writeText).toHaveBeenLastCalledWith("graph TD\n A");
+    await act(async () => button("Source").onClick?.({} as React.MouseEvent<HTMLButtonElement>));
+    expect(displayedText()).toBe("graph TD\n A");
     await act(async () => button("Diagram").onClick?.({} as React.MouseEvent<HTMLButtonElement>));
-    expect(displayedText()).toBe("┌───┐\n│ A │\n└───┘");
+    expect(displayedText()).toBe("<svg>A</svg>");
+    expect(shadowRoots).toHaveLength(2);
     expect(renderMermaidDiagram).toHaveBeenCalledTimes(1);
   });
 
@@ -128,7 +136,7 @@ describe("MermaidBlock", () => {
     expect(renderMermaidDiagram).toHaveBeenCalledTimes(1);
   });
 
-  it("copies diagrams on remote HTTP pages without the Clipboard API", async () => {
+  it("copies the source on remote HTTP pages without the Clipboard API", async () => {
     const textarea = {
       value: "",
       style: {},
@@ -147,14 +155,14 @@ describe("MermaidBlock", () => {
       createElement: () => textarea,
       execCommand,
     });
-    vi.mocked(renderMermaidDiagram).mockResolvedValue("diagram");
+    vi.mocked(renderMermaidDiagram).mockResolvedValue("<svg>A</svg>");
     await mount("graph TD\n A");
     await act(async () => TestIntersectionObserver.instances[0]!.visible(true));
     await act(async () =>
-      button("Copy diagram").onClick?.({} as React.MouseEvent<HTMLButtonElement>),
+      button("Copy source").onClick?.({} as React.MouseEvent<HTMLButtonElement>),
     );
     expect(execCommand).toHaveBeenCalledWith("copy");
-    expect(textarea.value).toBe("diagram");
+    expect(textarea.value).toBe("graph TD\n A");
     expect(button("Copied")).toBeDefined();
   });
 

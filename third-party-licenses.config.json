@@ -305,6 +305,14 @@
       "name": "Expo text editor implementation",
       "noticeFile": "apps/mobile/modules/supaterm-composer-editor/LICENSE",
       "sourceUrl": "https://github.com/expo/expo"
+    },
+    {
+      "bundles": ["desktop", "mobile", "web"],
+      "license": "MIT",
+      "name": "beautiful-mermaid",
+      "noticeFile": "packages/mermaid/LICENSE",
+      "sourceUrl": "https://github.com/lukilabs/beautiful-mermaid",
+      "version": "1.1.3"
     }
   ],
   "packageOverrides": [

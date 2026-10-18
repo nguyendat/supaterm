@@ -1,0 +1,35 @@
+{
+  "name": "@supaterm/mermaid",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./ascii": {
+      "types": "./src/ascii/index.ts",
+      "import": "./src/ascii/index.ts"
+    },
+    "./svg": {
+      "types": "./src/svg.ts",
+      "import": "./src/svg.ts"
+    },
+    "./limits": {
+      "types": "./src/limits.ts",
+      "import": "./src/limits.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vp test run --config ../../vite.config.ts --dir ."
+  },
+  "dependencies": {
+    "elkjs": "0.11.1"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "upstream": {
+    "repository": "https://github.com/lukilabs/beautiful-mermaid",
+    "revision": "2ac8bbbb060ca0a65a6a21f3200bd99b1587b488",
+    "version": "1.1.3"
+  }
+}

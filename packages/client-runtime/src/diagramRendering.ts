@@ -1,4 +1,4 @@
-import { MERMAID_ASCII_LIMITS } from "@supaterm/mermaid-ascii/limits";
+import { MERMAID_LIMITS } from "@supaterm/mermaid/limits";
 
 export function createDiagramRenderer(
   render: (source: string) => Promise<string | null>,
@@ -6,9 +6,12 @@ export function createDiagramRenderer(
     maxPending?: number;
     maxCacheEntries?: number;
     maxCacheBytes?: number;
+    maxOutputChars?: number;
   } = {},
 ) {
   const maxPending = options.maxPending ?? 32;
+  const maxOutputChars =
+    options.maxOutputChars ?? MERMAID_LIMITS.canvasCells * 2 + MERMAID_LIMITS.canvasDimension;
   const maxCacheEntries = options.maxCacheEntries ?? 128;
   const maxCacheBytes = options.maxCacheBytes ?? 2 * 1024 * 1024;
   const cache = new Map<string, { output: string | null; bytes: number }>();
@@ -37,12 +40,7 @@ export function createDiagramRenderer(
       let output: string | null = null;
       try {
         const rendered = await render(request.source);
-        if (
-          rendered !== null &&
-          rendered.length > 0 &&
-          rendered.length <=
-            MERMAID_ASCII_LIMITS.canvasCells * 2 + MERMAID_ASCII_LIMITS.canvasDimension
-        ) {
+        if (rendered !== null && rendered.length > 0 && rendered.length <= maxOutputChars) {
           output = rendered;
         }
         remember(request.source, output);
@@ -57,7 +55,7 @@ export function createDiagramRenderer(
 
   return {
     render(source: string): Promise<string | null> {
-      if (source.length === 0 || source.length > MERMAID_ASCII_LIMITS.sourceChars) {
+      if (source.length === 0 || source.length > MERMAID_LIMITS.sourceChars) {
         return Promise.resolve(null);
       }
       const cached = cache.get(source);

@@ -7,6 +7,24 @@ import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { renderMermaidDiagram } from "./mermaidRenderer";
 import { MarkdownFindContext, useFindRevealRef } from "../components/chat/markdownFindContext";
 
+// The diagram's own <style> targets bare `svg` and `text` selectors, so it renders in a
+// shadow root where those rules cannot reach the rest of the app.
+const DIAGRAM_STYLE = "<style>svg{display:block;margin-inline:auto}</style>";
+
+function DiagramSvg({ svg }: { svg: string }) {
+  const mount = useCallback(
+    (element: HTMLDivElement | null) => {
+      if (!element) return;
+      const root = element.shadowRoot ?? element.attachShadow({ mode: "open" });
+      root.innerHTML = DIAGRAM_STYLE + svg;
+    },
+    [svg],
+  );
+  return (
+    <div ref={mount} data-thread-find-ignore="true" className="overflow-x-auto px-3 pt-2 pb-3" />
+  );
+}
+
 export function MermaidBlock({
   source,
   complete,
@@ -23,17 +41,13 @@ export function MermaidBlock({
   const searching = use(MarkdownFindContext);
   const revealSource = useCallback(() => setShowSource(true), []);
   const sourceRevealRef = useFindRevealRef(revealSource);
-  const [copiedText, setCopiedText] = useState<string | null>(null);
-  const { copyToClipboard, isCopied } = useCopyToClipboard<string>({
+  const { copyToClipboard, isCopied } = useCopyToClipboard({
     timeout: 1200,
-    target: "diagram content",
-    onCopy: setCopiedText,
+    target: "diagram source",
   });
   const output = complete && rendered?.source === source ? rendered.output : null;
   const showingDiagram = output !== null && !showSource;
-  const content = showingDiagram ? output : source;
-  const copied = isCopied && copiedText === content;
-  const copyLabel = copied ? "Copied" : showingDiagram ? "Copy diagram" : "Copy source";
+  const copyLabel = isCopied ? "Copied" : "Copy source";
 
   useEffect(() => {
     const element = container.current;
@@ -97,23 +111,26 @@ export function MermaidBlock({
                   variant="ghost-muted"
                   size="icon-xs"
                   aria-label={copyLabel}
-                  onClick={() => copyToClipboard(content, content)}
+                  onClick={() => copyToClipboard(source)}
                 />
               }
             >
-              {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
+              {isCopied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
             </TooltipTrigger>
             <TooltipPopup side="top">{copyLabel}</TooltipPopup>
           </Tooltip>
         </span>
       </div>
-      <pre
-        ref={searching && !showingDiagram ? sourceRevealRef : undefined}
-        data-thread-find-ignore={showingDiagram ? "true" : undefined}
-        className="overflow-x-auto whitespace-pre font-mono [overflow-wrap:normal] [word-break:normal]"
-      >
-        <code>{content}</code>
-      </pre>
+      {showingDiagram ? (
+        <DiagramSvg svg={output} />
+      ) : (
+        <pre
+          ref={searching ? sourceRevealRef : undefined}
+          className="overflow-x-auto whitespace-pre font-mono [overflow-wrap:normal] [word-break:normal]"
+        >
+          <code>{source}</code>
+        </pre>
+      )}
       {searching && showingDiagram ? (
         <pre ref={sourceRevealRef} hidden>
           {source}

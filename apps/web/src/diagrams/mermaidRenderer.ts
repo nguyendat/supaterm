@@ -1,5 +1,5 @@
 import { createDiagramRenderer } from "@supaterm/client-runtime/diagram-rendering";
-import { MERMAID_ASCII_LIMITS } from "@supaterm/mermaid-ascii/limits";
+import { MERMAID_LIMITS } from "@supaterm/mermaid/limits";
 
 export function createBrowserDiagramRenderer() {
   let worker: Worker | undefined;
@@ -37,7 +37,7 @@ export function createBrowserDiagramRenderer() {
           if (sent) return;
           sent = true;
           clearTimeout(timer);
-          timer = setTimeout(() => finish(null, true), MERMAID_ASCII_LIMITS.durationMs * 2);
+          timer = setTimeout(() => finish(null, true), MERMAID_LIMITS.durationMs * 2);
           try {
             activeWorker.postMessage({ source }, []);
           } catch {
@@ -75,6 +75,7 @@ export function createBrowserDiagramRenderer() {
         activeWorker.addEventListener("messageerror", handleMessageError);
         if (ready) send();
       }),
+    { maxOutputChars: MERMAID_LIMITS.svgChars },
   );
 }
 

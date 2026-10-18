@@ -80,8 +80,8 @@ export function NativeMermaidBlock({
           </Pressable>
         ) : null}
         <CopyTextButton
-          accessibilityLabel={showDiagram ? "Copy diagram" : "Copy Mermaid source"}
-          text={content}
+          accessibilityLabel="Copy Mermaid source"
+          text={source}
           tintColor={textStyle.mutedColor}
           copiedTintColor={textStyle.linkColor}
           backgroundColor={textStyle.codeBackgroundColor}

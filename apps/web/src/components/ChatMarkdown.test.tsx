@@ -607,14 +607,22 @@ describe("ChatMarkdown diagrams", () => {
     async ({ text, streaming, expected }) => {
       vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
       vi.mocked(renderMermaidDiagram).mockReset().mockResolvedValue("diagram");
+      const shadowRoots: Array<{ innerHTML: string }> = [];
       let renderer: ReactTestRenderer | undefined;
       try {
         await act(async () => {
           renderer = create(<ChatMarkdown cwd={undefined} text={text} isStreaming={streaming} />, {
-            createNodeMock: () => ({}),
+            createNodeMock: () => ({
+              attachShadow: () => shadowRoots[shadowRoots.push({ innerHTML: "" }) - 1],
+            }),
           });
         });
-        expect(renderer!.root.findByType("code").children.join("")).toBe(expected);
+        const code = renderer!.root.findAllByType("code")[0];
+        expect(
+          code
+            ? code.children.join("")
+            : shadowRoots[0]?.innerHTML.replace(/^<style>.*?<\/style>/, ""),
+        ).toBe(expected);
         expect(renderMermaidDiagram).toHaveBeenCalledTimes(expected === "diagram" ? 1 : 0);
       } finally {
         await act(async () => renderer?.unmount());
@@ -1270,7 +1278,10 @@ it("keeps Mermaid diagrams rendered until find selects a match in their source",
   const frame = () =>
     act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
   vi.mocked(renderMermaidDiagram).mockResolvedValue("Rendered diagram");
-  const diagrams = () => (container.textContent?.match(/Rendered diagram/g) ?? []).length;
+  const diagrams = () =>
+    [...container.querySelectorAll("div")].filter((element) =>
+      element.shadowRoot?.innerHTML.includes("Rendered diagram"),
+    ).length;
   try {
     await act(() => root.render(<Probe query="Needle" />));
     await frame();

@@ -1,4 +1,4 @@
-import { MERMAID_ASCII_LIMITS } from "@supaterm/mermaid-ascii/limits";
+import { MERMAID_LIMITS } from "@supaterm/mermaid/limits";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { createBrowserDiagramRenderer } from "./mermaidRenderer";
@@ -56,7 +56,7 @@ describe("browser diagram rendering", () => {
     const first = renderer.render("slow");
     const firstWorker = TestWorker.instances[0]!;
     firstWorker.reply({ ready: true });
-    vi.advanceTimersByTime(MERMAID_ASCII_LIMITS.durationMs * 2);
+    vi.advanceTimersByTime(MERMAID_LIMITS.durationMs * 2);
     expect(await first).toBeNull();
     expect(firstWorker.terminate).toHaveBeenCalledTimes(1);
     expect(TestWorker.instances).toHaveLength(1);
@@ -103,7 +103,7 @@ describe("browser diagram rendering", () => {
     expect(worker.terminate).not.toHaveBeenCalled();
     expect(worker.postMessage).not.toHaveBeenCalled();
     worker.reply({ ready: true });
-    vi.advanceTimersByTime(MERMAID_ASCII_LIMITS.durationMs);
+    vi.advanceTimersByTime(MERMAID_LIMITS.durationMs);
     worker.reply({ output: "diagram" });
     expect(await result).toBe("diagram");
   });

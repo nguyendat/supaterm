@@ -25,7 +25,7 @@ const workspaceFiles = [
   "oxlint-plugin-supaterm/package.json",
   "packages/client-runtime/package.json",
   "packages/contracts/package.json",
-  "packages/mermaid-ascii/package.json",
+  "packages/mermaid/package.json",
   "packages/shared/package.json",
   "packages/ssh/package.json",
   "packages/tailscale/package.json",
