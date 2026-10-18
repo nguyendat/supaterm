@@ -15,6 +15,7 @@ import {
   STROKE_WIDTHS,
   ARROW_HEAD,
   estimateTextWidth,
+  SEQUENCE_ACTOR_NAME_OFFSET,
 } from "../styles.ts";
 import { renderMultilineText } from "../multiline-utils.ts";
 export function renderSequenceSvg(
@@ -86,7 +87,7 @@ function renderActor(actor: PositionedActor): string {
         renderMultilineText(
           label,
           x,
-          y + height + 14,
+          y + height + SEQUENCE_ACTOR_NAME_OFFSET,
           FONT_SIZES.nodeLabel,
           `font-size="${FONT_SIZES.nodeLabel}" text-anchor="middle" font-weight="${FONT_WEIGHTS.nodeLabel}" fill="var(--_text)"`,
         ),

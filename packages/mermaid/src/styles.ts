@@ -26,6 +26,7 @@ export const STROKE_WIDTHS = {
   innerBox: 0.75,
   connector: 1,
 } as const;
+export const SEQUENCE_ACTOR_NAME_OFFSET = 14;
 export const TEXT_BASELINE_SHIFT = "0.35em" as const;
 export const ARROW_HEAD = {
   width: 8,

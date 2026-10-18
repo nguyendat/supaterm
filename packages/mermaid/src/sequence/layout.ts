@@ -9,7 +9,13 @@ import type {
   PositionedNote,
 } from "./types.ts";
 import type { RenderOptions } from "../types.ts";
-import { estimateTextWidth, FONT_SIZES, FONT_WEIGHTS } from "../styles.ts";
+import {
+  estimateTextWidth,
+  FONT_SIZES,
+  FONT_WEIGHTS,
+  SEQUENCE_ACTOR_NAME_OFFSET,
+} from "../styles.ts";
+import { measureMultilineText } from "../text-metrics.ts";
 const SEQ = {
   padding: 30,
   actorGap: 140,
@@ -72,7 +78,20 @@ export function layoutSequenceDiagram(
     width: actorWidths[i]!,
     height: SEQ.actorHeight,
   }));
-  let messageY = actorY + SEQ.actorHeight + SEQ.headerGap;
+  // Stick-figure actors draw their name below the figure instead of inside a box.
+  const actorNameDepth = Math.max(
+    0,
+    ...diagram.actors
+      .filter((actor) => actor.type === "actor")
+      .map(
+        (actor) =>
+          SEQUENCE_ACTOR_NAME_OFFSET +
+          measureMultilineText(actor.label, FONT_SIZES.nodeLabel, FONT_WEIGHTS.nodeLabel).height /
+            2,
+      ),
+  );
+  const headerBottom = actorY + SEQ.actorHeight + actorNameDepth;
+  let messageY = headerBottom + SEQ.headerGap;
   const messages: PositionedMessage[] = [];
   const extraSpaceBefore = new Map<number, number>();
   for (const block of diagram.blocks) {
@@ -138,7 +157,7 @@ export function layoutSequenceDiagram(
     }
     messageY = Math.max(messageY, noteY + SEQ.messageRowHeight / 2);
   };
-  placeNotes(notesByAfterIndex.get(-1), actorY + SEQ.actorHeight + 8);
+  placeNotes(notesByAfterIndex.get(-1), headerBottom + 8);
   for (let msgIdx = 0; msgIdx < diagram.messages.length; msgIdx++) {
     const msg = diagram.messages[msgIdx]!;
     const fromIdx = actorIndex.get(msg.from) ?? 0;
