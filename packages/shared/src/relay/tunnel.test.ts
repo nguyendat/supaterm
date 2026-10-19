@@ -373,17 +373,22 @@ describe("host record compression", () => {
   it("deflates large compressible records for a client that offered it", async () => {
     const identity = NodeCrypto.randomBytes(32);
     const handshake = createClientHandshake(relayPublicKey(identity), NodeCrypto.randomBytes);
-    expect(acceptClientHandshake(handshake.hello, identity, NodeCrypto.randomBytes).deflate).toBe(
-      false,
+    const accept = (hello: string) =>
+      acceptClientHandshake(hello, identity, NodeCrypto.randomBytes);
+    expect(accept(handshake.hello).deflate).toBe(false);
+    const accepted = accept(
+      JSON.stringify({ ...JSON.parse(handshake.hello), compression: "deflate" }),
     );
-    const hello = JSON.stringify({ ...JSON.parse(handshake.hello), compression: "deflate" });
-    const accepted = acceptClientHandshake(hello, identity, NodeCrypto.randomBytes);
     expect(accepted.deflate).toBe(true);
     const cipher = handshake.finish(accepted.welcome);
     const toHost: Uint8Array[] = [];
     const toClient: Uint8Array[] = [];
     let hostStream: TunnelStream | undefined;
-    const client = createTunnelSession({ cipher, initiator: true, send: (r) => toHost.push(r) });
+    const client = createTunnelSession({
+      cipher,
+      initiator: true,
+      send: (record) => toHost.push(record),
+    });
     const host = createTunnelSession({
       cipher: accepted.cipher,
       initiator: false,

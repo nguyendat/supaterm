@@ -97,13 +97,11 @@ export function createTunnelSession(input: {
     return frame(WINDOW, id, payload);
   };
   const compress = (plain: Uint8Array) => {
-    if (!input.deflate || plain.length < MIN_DEFLATE_BYTES) return plain;
-    if (
-      plain.length > DEFLATE_PROBE_BYTES &&
-      input.deflate(plain.subarray(0, DEFLATE_PROBE_BYTES)).length >= DEFLATE_PROBE_BYTES
-    )
-      return plain;
-    const packed = input.deflate(plain);
+    const deflate = input.deflate;
+    if (!deflate || plain.length < MIN_DEFLATE_BYTES) return plain;
+    const probe = plain.subarray(0, DEFLATE_PROBE_BYTES);
+    if (probe.length < plain.length && deflate(probe).length >= probe.length) return plain;
+    const packed = deflate(plain);
     return packed.length + HEADER_BYTES < plain.length ? frame(DEFLATE, 0, packed) : plain;
   };
   const schedule = () => {
