@@ -15,7 +15,9 @@ const FIN = 4;
 const RST = 5;
 const PING = 6;
 const PONG = 7;
+const DEFLATE = 8;
 const HEADER_BYTES = 9;
+const MIN_DEFLATE_BYTES = 512;
 export const TUNNEL_MAX_PLAIN_BYTES = 64 * 1024;
 const SESSION_WINDOW = 8 * 1024 * 1024;
 const MIN_MESSAGE_COST = 48 * 1024;
@@ -62,6 +64,7 @@ export function createTunnelSession(input: {
   readonly cipher: RelayCipher;
   readonly send: (message: Uint8Array<ArrayBuffer>) => void;
   readonly initiator: boolean;
+  readonly deflate?: (plain: Uint8Array) => Uint8Array;
   readonly onStream?: (stream: TunnelStream) => void;
   readonly onClose?: (error?: Error) => void;
 }): TunnelSession {
@@ -91,6 +94,11 @@ export function createTunnelSession(input: {
     const payload = new Uint8Array(4);
     new DataView(payload.buffer).setUint32(0, bytes);
     return frame(WINDOW, id, payload);
+  };
+  const compress = (plain: Uint8Array) => {
+    if (!input.deflate || plain.length < MIN_DEFLATE_BYTES) return plain;
+    const packed = input.deflate(plain);
+    return packed.length + HEADER_BYTES < plain.length ? frame(DEFLATE, 0, packed) : plain;
   };
   const schedule = () => {
     if (scheduled || closed) return;
@@ -198,7 +206,7 @@ export function createTunnelSession(input: {
         offset += part.length;
       }
       try {
-        input.send(input.cipher.seal(plain));
+        input.send(input.cipher.seal(compress(plain)));
       } catch (error) {
         const failure = error instanceof Error ? error : new Error("Relay send failed");
         for (const callback of callbacks) callback(failure);

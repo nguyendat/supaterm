@@ -41,7 +41,7 @@ struct RelayHandshake {
       ?? Curve25519.KeyAgreement.PrivateKey()
   }
   var hello: String {
-    "{\"type\":\"hello\",\"version\":2,\"key\":\"\(ephemeral.publicKey.rawRepresentation.base64URL)\"}"
+    "{\"type\":\"hello\",\"version\":2,\"key\":\"\(ephemeral.publicKey.rawRepresentation.base64URL)\",\"compression\":\"deflate\"}"
   }
   func transcript(host: Data) -> Data {
     Data("supaterm-tunnel-v2\n".utf8) + identity.key + ephemeral.publicKey.rawRepresentation + host

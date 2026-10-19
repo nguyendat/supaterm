@@ -1,3 +1,4 @@
+import Compression
 import Foundation
 
 let streamWindow = 2 * 1024 * 1024
@@ -5,7 +6,7 @@ let sessionWindow = 8 * 1024 * 1024
 let minimumCost = 48 * 1024
 let maxPlain = 64 * 1024
 
-enum MuxFrame: UInt8 { case open = 1, data, window, fin, reset, ping, pong }
+enum MuxFrame: UInt8 { case open = 1, data, window, fin, reset, ping, pong, deflate }
 
 enum MuxEvent: Equatable { case data(UInt32, Data), fin(UInt32), reset(UInt32), credit(UInt32) }
 
@@ -78,7 +79,25 @@ final class TunnelMux {
 
   func ping() { controls.append(Self.frame(.ping, 0)) }
 
-  func receive(_ plain: Data) throws -> [MuxEvent] {
+  static func inflate(_ record: Data) throws -> Data {
+    guard record.first == MuxFrame.deflate.rawValue else { return record }
+    guard record.count > 9, record.uint32(at: 1) == 0, Int(record.uint32(at: 5)) == record.count - 9 else {
+      throw RelayError.invalid("Invalid mux DEFLATE")
+    }
+    var plain = Data(count: maxPlain + 1)
+    let count = plain.withUnsafeMutableBytes { output in
+      record.dropFirst(9).withUnsafeBytes { input in
+        compression_decode_buffer(output.bindMemory(to: UInt8.self).baseAddress!, output.count,
+                                  input.bindMemory(to: UInt8.self).baseAddress!, input.count, nil, COMPRESSION_ZLIB)
+      }
+    }
+    guard count > 0, count <= maxPlain else { throw RelayError.invalid("Invalid mux DEFLATE") }
+    plain.count = count
+    return plain
+  }
+
+  func receive(_ record: Data) throws -> [MuxEvent] {
+    let plain = try Self.inflate(record)
     receivedSinceTick = true
     var frames: [(MuxFrame, UInt32, Data)] = []
     var offset = 0; var dataBytes = 0
@@ -140,7 +159,7 @@ final class TunnelMux {
       case .pong:
         guard payload.isEmpty, id == 0 else { throw RelayError.invalid("Invalid mux PONG") }
         onPong()
-      case .open:
+      case .open, .deflate:
         throw RelayError.invalid("Unknown mux frame")
       }
     }

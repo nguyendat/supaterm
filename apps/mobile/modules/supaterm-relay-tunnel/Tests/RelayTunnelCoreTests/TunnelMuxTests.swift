@@ -1,3 +1,4 @@
+import Compression
 import XCTest
 @testable import RelayTunnelCore
 
@@ -8,6 +9,17 @@ struct MuxFrameValue: Equatable {
   init(_ type: MuxFrame, _ id: UInt32, _ payload: Data = Data()) {
     self.type = type; self.id = id; self.payload = payload
   }
+}
+
+func deflate(_ plain: Data) -> Data {
+  var packed = Data(count: plain.count + 1_024)
+  let count = packed.withUnsafeMutableBytes { output in
+    plain.withUnsafeBytes { input in
+      compression_encode_buffer(output.bindMemory(to: UInt8.self).baseAddress!, output.count,
+                                input.bindMemory(to: UInt8.self).baseAddress!, input.count, nil, COMPRESSION_ZLIB)
+    }
+  }
+  return packed.prefix(count)
 }
 
 func decodeFrames(_ plain: Data) throws -> [MuxFrameValue] {
@@ -167,5 +179,16 @@ final class TunnelMuxTests: XCTestCase {
     XCTAssertEqual(full.dataBytes, maxPlain - 9)
     XCTAssertEqual(try XCTUnwrap(mux.nextRecord()).dataBytes, 100_000 - (maxPlain - 9))
     XCTAssertNil(mux.nextRecord())
+  }
+
+  func testInflatesHostRecordsWithinTheRecordLimit() throws {
+    let mux = TunnelMux()
+    mux.open(1)
+    let record = try XCTUnwrap(Data(hex: "08000000000000001b636260606064606072282e2d482c492dca5518658c060219290100"))
+    XCTAssertEqual(try mux.receive(record), [.data(1, Data(String(repeating: "supaterm ", count: 64).utf8))])
+    XCTAssertThrowsError(try mux.receive(TunnelMux.frame(.deflate, 1, record.dropFirst(9))))
+    XCTAssertThrowsError(try mux.receive(record + TunnelMux.frame(.ping, 0)))
+    XCTAssertThrowsError(try mux.receive(TunnelMux.frame(.deflate, 0, deflate(Data(count: maxPlain + 1)))))
+    XCTAssertThrowsError(try mux.receive(TunnelMux.frame(.deflate, 0, deflate(record))))
   }
 }

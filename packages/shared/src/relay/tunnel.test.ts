@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - real endpoint crypto verifies interoperable encrypted records.
 import * as NodeCrypto from "node:crypto";
+import * as NodeZlib from "node:zlib";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   acceptClientHandshake,
@@ -350,5 +351,72 @@ describe("encrypted relay multiplexing", () => {
     expect(closed).toBe(true);
     expect(() => p.client.open()).toThrow("closed");
     p.host.close();
+  });
+});
+
+describe("host record compression", () => {
+  const frames = (plain: Uint8Array) => {
+    const view = new DataView(plain.buffer, plain.byteOffset, plain.byteLength);
+    const parsed: { type: number; id: number; payload: Uint8Array }[] = [];
+    for (let offset = 0; offset < plain.length;) {
+      const length = view.getUint32(offset + 5);
+      parsed.push({
+        type: view.getUint8(offset),
+        id: view.getUint32(offset + 1),
+        payload: plain.slice(offset + 9, offset + 9 + length),
+      });
+      offset += 9 + length;
+    }
+    return parsed;
+  };
+
+  it("deflates large compressible records for a client that offered it", async () => {
+    const identity = NodeCrypto.randomBytes(32);
+    const handshake = createClientHandshake(relayPublicKey(identity), NodeCrypto.randomBytes);
+    expect(acceptClientHandshake(handshake.hello, identity, NodeCrypto.randomBytes).deflate).toBe(
+      false,
+    );
+    const hello = JSON.stringify({ ...JSON.parse(handshake.hello), compression: "deflate" });
+    const accepted = acceptClientHandshake(hello, identity, NodeCrypto.randomBytes);
+    expect(accepted.deflate).toBe(true);
+    const cipher = handshake.finish(accepted.welcome);
+    const toHost: Uint8Array[] = [];
+    const toClient: Uint8Array[] = [];
+    let hostStream: TunnelStream | undefined;
+    const client = createTunnelSession({ cipher, initiator: true, send: (r) => toHost.push(r) });
+    const host = createTunnelSession({
+      cipher: accepted.cipher,
+      initiator: false,
+      send: (record) => toClient.push(record),
+      deflate: (plain) => NodeZlib.deflateRawSync(plain),
+      onStream: (stream) => {
+        hostStream = stream;
+      },
+    });
+    const id = client.open().id;
+    await Promise.resolve();
+    for (const record of toHost.splice(0)) host.receive(record);
+
+    const received = async (bytes: Uint8Array) => {
+      hostStream!.write(bytes);
+      await Promise.resolve();
+      expect(toClient).toHaveLength(1);
+      return cipher.open(toClient.shift()!, TUNNEL_MAX_PLAIN_BYTES);
+    };
+    const text = new TextEncoder().encode(
+      JSON.stringify(Array.from({ length: 64 }, (_, i) => ({ type: "event", sequence: i }))),
+    );
+    const [deflated] = frames(await received(text));
+    expect(deflated).toMatchObject({ type: 8, id: 0 });
+    expect(frames(new Uint8Array(NodeZlib.inflateRawSync(deflated!.payload)))).toEqual([
+      { type: 2, id, payload: text },
+    ]);
+
+    const small = text.subarray(0, 200);
+    expect(frames(await received(small))).toEqual([{ type: 2, id, payload: small }]);
+    const random = new Uint8Array(NodeCrypto.randomBytes(4096));
+    expect(frames(await received(random))).toEqual([{ type: 2, id, payload: random }]);
+    client.close();
+    host.close();
   });
 });

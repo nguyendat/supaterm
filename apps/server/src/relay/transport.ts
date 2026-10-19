@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - relay WebSocket adapter owns native socket events.
 import * as NodeCrypto from "node:crypto";
+import * as NodeZlib from "node:zlib";
 import WebSocket from "ws";
 import * as Schema from "effect/Schema";
 import {
@@ -29,6 +30,8 @@ const ControlEvent = Schema.Union([
   Schema.Struct({ type: Schema.Literal("closed"), connectionId: Schema.String }),
 ]);
 const decodeControl = Schema.decodeUnknownSync(ControlEvent);
+const deflate = (plain: Uint8Array) =>
+  NodeZlib.deflateRawSync(plain, { level: NodeZlib.constants.Z_BEST_SPEED });
 export type RelayHostState = "connecting" | "registered" | "superseded" | "stopped";
 
 export function startRelayTransport(input: {
@@ -94,6 +97,7 @@ export function startRelayTransport(input: {
           onStream: input.acceptStream,
           send: (message) => socket.send(message),
           onClose: stop,
+          ...(handshake.deflate ? { deflate } : {}),
         });
         cancelHandshake();
         socket.send(handshake.welcome);

@@ -73,6 +73,7 @@ const Hello = Schema.Struct({
   type: Schema.Literal("hello"),
   version: Version,
   key: Schema.String,
+  compression: Schema.optionalKey(Schema.String),
 });
 const Welcome = Schema.Struct({
   type: Schema.Literal("welcome"),
@@ -179,6 +180,7 @@ export function acceptClientHandshake(
     const context = transcript(relayPublicKey(identitySecret), client, publicKey, hello.version);
     return {
       version: hello.version,
+      deflate: hello.compression === "deflate",
       welcome: JSON.stringify({
         type: "welcome",
         version: hello.version,
