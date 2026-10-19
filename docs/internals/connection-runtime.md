@@ -50,6 +50,14 @@ a loopback request, so a tunnel-side retry loop keeps dialing an offline host lo
 after the client gave up. Offline hosts answer 503 rather than 404, because a
 declared 404 blocks the environment.
 
+Only the iOS tunnel offers `"compression":"deflate"` in its relay hello. React
+Native's iOS WebSocket cannot negotiate `permessage-deflate`, so without it the
+app's RPC socket crosses the relay uncompressed. Chromium and Android's OkHttp
+already negotiate it inside the tunnel, so an offer from them would compress the
+same bytes twice. The host then deflates each [host-to-client record](../../packages/shared/src/relay/tunnel.ts)
+on its own, without a shared dictionary, and skips small records such as
+keystroke echoes.
+
 The [registry](../../packages/client-runtime/src/connection/registry.ts) scopes
 connections by environment. An involuntary disconnect retains the registration
 and cached data. Explicit removal closes the scope and clears credentials,
