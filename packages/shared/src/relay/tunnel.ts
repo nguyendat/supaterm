@@ -18,6 +18,7 @@ const PONG = 7;
 const DEFLATE = 8;
 const HEADER_BYTES = 9;
 const MIN_DEFLATE_BYTES = 512;
+const DEFLATE_PROBE_BYTES = 4096;
 export const TUNNEL_MAX_PLAIN_BYTES = 64 * 1024;
 const SESSION_WINDOW = 8 * 1024 * 1024;
 const MIN_MESSAGE_COST = 48 * 1024;
@@ -97,6 +98,11 @@ export function createTunnelSession(input: {
   };
   const compress = (plain: Uint8Array) => {
     if (!input.deflate || plain.length < MIN_DEFLATE_BYTES) return plain;
+    if (
+      plain.length > DEFLATE_PROBE_BYTES &&
+      input.deflate(plain.subarray(0, DEFLATE_PROBE_BYTES)).length >= DEFLATE_PROBE_BYTES
+    )
+      return plain;
     const packed = input.deflate(plain);
     return packed.length + HEADER_BYTES < plain.length ? frame(DEFLATE, 0, packed) : plain;
   };
