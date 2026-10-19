@@ -1,5 +1,5 @@
-import Compression
 import Foundation
+import zlib
 
 let streamWindow = 2 * 1024 * 1024
 let sessionWindow = 8 * 1024 * 1024
@@ -84,14 +84,25 @@ final class TunnelMux {
     guard record.count > 9, record.uint32(at: 1) == 0, Int(record.uint32(at: 5)) == record.count - 9 else {
       throw RelayError.invalid("Invalid mux DEFLATE")
     }
+    var stream = z_stream()
+    guard inflateInit2_(&stream, -MAX_WBITS, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size)) == Z_OK else {
+      throw RelayError.invalid("Invalid mux DEFLATE")
+    }
+    defer { inflateEnd(&stream) }
     var plain = Data(count: maxPlain + 1)
-    let count = plain.withUnsafeMutableBytes { output in
+    let status = plain.withUnsafeMutableBytes { output in
       record.dropFirst(9).withUnsafeBytes { input in
-        compression_decode_buffer(output.bindMemory(to: UInt8.self).baseAddress!, output.count,
-                                  input.bindMemory(to: UInt8.self).baseAddress!, input.count, nil, COMPRESSION_ZLIB)
+        stream.next_in = UnsafeMutablePointer(mutating: input.bindMemory(to: Bytef.self).baseAddress)
+        stream.avail_in = uInt(input.count)
+        stream.next_out = output.bindMemory(to: Bytef.self).baseAddress
+        stream.avail_out = uInt(output.count)
+        return zlib.inflate(&stream, Z_FINISH)
       }
     }
-    guard count > 0, count <= maxPlain else { throw RelayError.invalid("Invalid mux DEFLATE") }
+    let count = plain.count - Int(stream.avail_out)
+    guard status == Z_STREAM_END, stream.avail_in == 0, count > 0, count <= maxPlain else {
+      throw RelayError.invalid("Invalid mux DEFLATE")
+    }
     plain.count = count
     return plain
   }

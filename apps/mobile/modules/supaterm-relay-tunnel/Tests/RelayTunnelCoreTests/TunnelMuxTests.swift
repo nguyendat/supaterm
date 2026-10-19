@@ -190,5 +190,12 @@ final class TunnelMuxTests: XCTestCase {
     XCTAssertThrowsError(try mux.receive(record + TunnelMux.frame(.ping, 0)))
     XCTAssertThrowsError(try mux.receive(TunnelMux.frame(.deflate, 0, deflate(Data(count: maxPlain + 1)))))
     XCTAssertThrowsError(try mux.receive(TunnelMux.frame(.deflate, 0, deflate(record))))
+    let packed = record.dropFirst(9)
+    XCTAssertThrowsError(try mux.receive(TunnelMux.frame(.deflate, 0, packed.dropLast())))
+    XCTAssertThrowsError(try mux.receive(TunnelMux.frame(.deflate, 0, packed + Data([0]))))
+    XCTAssertThrowsError(try mux.receive(TunnelMux.frame(.deflate, 0, packed + packed)))
+
+    let full = Data(repeating: 7, count: maxPlain - 9)
+    XCTAssertEqual(try mux.receive(TunnelMux.frame(.deflate, 0, deflate(TunnelMux.frame(.data, 1, full)))), [.data(1, full)])
   }
 }
