@@ -35,7 +35,7 @@ export function MermaidBlock({
   const showingDiagram = output !== null && !showSource;
   const content = showingDiagram ? output : source;
   const copied = isCopied && copiedText === content;
-  const copyLabel = copied ? "Copied" : showingDiagram ? "Copy diagram" : "Copy source";
+  const copyLabel = copied ? "Copied" : showingDiagram ? "Copy SVG" : "Copy source";
 
   useEffect(() => {
     const element = container.current;
@@ -124,13 +124,20 @@ export function MermaidBlock({
           </Tooltip>
         </span>
       </div>
-      <pre
-        ref={searching && !showingDiagram ? sourceRevealRef : undefined}
-        data-thread-find-ignore={showingDiagram ? "true" : undefined}
-        className="overflow-x-auto whitespace-pre font-mono [overflow-wrap:normal] [word-break:normal]"
-      >
-        <code>{content}</code>
-      </pre>
+      {showingDiagram ? (
+        <div
+          data-thread-find-ignore="true"
+          className="mermaid-svg overflow-x-auto p-3"
+          dangerouslySetInnerHTML={{ __html: output }}
+        />
+      ) : (
+        <pre
+          ref={searching ? sourceRevealRef : undefined}
+          className="overflow-x-auto whitespace-pre font-mono [overflow-wrap:normal] [word-break:normal]"
+        >
+          <code>{source}</code>
+        </pre>
+      )}
       {searching && showingDiagram ? (
         <pre ref={sourceRevealRef} hidden>
           {source}
@@ -142,9 +149,7 @@ export function MermaidBlock({
           fit="center"
           onClose={() => setExpandedDiagram(null)}
         >
-          <pre className="m-0 font-mono text-(length:--font-size-code,var(--text-sm)) leading-snug whitespace-pre">
-            {expandedDiagram}
-          </pre>
+          <div className="mermaid-svg" dangerouslySetInnerHTML={{ __html: expandedDiagram }} />
         </ExpandedPreviewDialog>
       ) : null}
     </div>

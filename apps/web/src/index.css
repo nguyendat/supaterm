@@ -1304,6 +1304,20 @@ html[data-theme-id] :is(.chat-markdown, .composer-tiptap) .chat-markdown-codeblo
   background-color: transparent;
 }
 
+.mermaid-svg .ondine {
+  --ondine-bg: var(--background);
+  --ondine-fg: var(--foreground);
+  --ondine-muted: var(--muted-foreground);
+  --ondine-line: var(--muted-foreground);
+  --ondine-border: color-mix(in srgb, var(--foreground) 55%, transparent);
+  --ondine-surface: var(--card);
+  --ondine-accent: var(--primary);
+  --ondine-font: var(--font-mono);
+  --ondine-stroke: 1.5px;
+  --ondine-radius: 4px;
+  font-size: var(--font-size-code, var(--text-sm));
+}
+
 html[data-theme-id] :is(.chat-markdown, .composer-tiptap) .chat-markdown-codeblock-header {
   color: color-mix(in srgb, var(--code-foreground) 72%, transparent);
 }
