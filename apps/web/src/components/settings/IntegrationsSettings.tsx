@@ -122,6 +122,7 @@ import { OrchestrationSkillsSettings } from "./OrchestrationSkillsSettings";
 import { AgentBrowserAccessRow } from "./ProjectDefaultsSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { BrowserImportWizard, type WizardTarget } from "./BrowserImportWizard";
+import { DictationSettings } from "./DictationSettings";
 import type { ImportOutcome } from "./browserImportWizard.logic";
 
 const FILL_VALUE = "fill";
@@ -1613,6 +1614,7 @@ export function IntegrationsSettingsPanel() {
         <PullRequestLinksOpenInAppSetting />
       </SettingsSection>
       <DeviceIntegrationSettings />
+      <DictationSettings />
     </SettingsPageContainer>
   );
 }

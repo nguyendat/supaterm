@@ -76,6 +76,7 @@ import {
   LinkIcon,
   MessageSquareIcon,
   MessageSquareTextIcon,
+  MicIcon,
   MonitorIcon,
   MoonIcon,
   PaletteIcon,
@@ -86,6 +87,7 @@ import {
   TextSearchIcon,
 } from "lucide-react";
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
+import { requestComposerDictation } from "../dictation/dictationCommands";
 import {
   useDeferredValue,
   useEffect,
@@ -131,6 +133,7 @@ import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
+import { useDictationAvailability } from "../state/dictation";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
@@ -1057,6 +1060,9 @@ function OpenCommandPaletteDialog(props: {
   const relativePathNeedsActiveProject =
     isExplicitRelativeProjectPath(query.trim()) && currentProjectCwdForBrowse === null;
   const browseAccess = useFilesystemReadAccess(browseEnvironmentId);
+  const canDictate =
+    useDictationAvailability(paletteRouteTarget ? currentProjectEnvironmentId : null, null).kind ===
+    "available";
   const hasBrowseTarget =
     isBrowsing &&
     browsePath.directoryPath.length > 0 &&
@@ -1810,6 +1816,20 @@ function OpenCommandPaletteDialog(props: {
       shortcutCommand: "chat.find",
       run: async () => {
         requestThreadFindOpen();
+      },
+    });
+  }
+
+  if (canDictate) {
+    actionItems.push({
+      kind: "action",
+      value: "action:dictate",
+      searchTerms: ["dictate", "dictation", "voice", "microphone", "speech", "transcribe"],
+      title: "Dictate",
+      icon: <MicIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "composer.dictate",
+      run: async () => {
+        requestComposerDictation();
       },
     });
   }

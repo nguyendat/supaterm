@@ -31,6 +31,7 @@ import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { ServerProviderUsageLimits } from "./providerUsageLimits.ts";
 import { ServerSettings } from "./settings.ts";
 import { RelayConnectionInfo } from "./relay.ts";
+import { DictationCatalog } from "./transcription.ts";
 
 const KeybindingsMalformedConfigIssue = Schema.Struct({
   kind: Schema.Literal("keybindings.malformed-config"),
@@ -620,6 +621,8 @@ export const ServerConfig = Schema.Struct({
   threadFindProgressive: Schema.optionalKey(Schema.Boolean),
   scratchWorkspaceRoot: Schema.optionalKey(TrimmedNonEmptyString),
   newProjectsRoot: Schema.optionalKey(TrimmedNonEmptyString),
+
+  dictation: Schema.optionalKey(DictationCatalog),
   /**
    * Never sent in a config snapshot: the theme stream emits the current set
    * before any change, so a snapshot carrying it too would hand every
@@ -747,6 +750,14 @@ export const ServerConfigStreamRelayAdvertisementUpdatedEvent = Schema.Struct({
   payload: Schema.NullOr(RelayConnectionInfo),
 });
 
+export const ServerConfigStreamDictationUpdatedEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("dictationUpdated"),
+  payload: DictationCatalog,
+});
+export type ServerConfigStreamDictationUpdatedEvent =
+  typeof ServerConfigStreamDictationUpdatedEvent.Type;
+
 const ServerConfigKnownStreamEvents = [
   ServerConfigStreamSnapshotEvent,
   ServerConfigStreamKeybindingsUpdatedEvent,
@@ -754,6 +765,7 @@ const ServerConfigKnownStreamEvents = [
   ServerConfigStreamSettingsUpdatedEvent,
   ServerConfigStreamEnvironmentThemesUpdatedEvent,
   ServerConfigStreamRelayAdvertisementUpdatedEvent,
+  ServerConfigStreamDictationUpdatedEvent,
 ] as const;
 
 const isUnknownServerConfigStreamEvent = hasUnknownUnionTag(ServerConfigKnownStreamEvents, "type");

@@ -2312,6 +2312,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
           "Supaterm connects to devices on your local network for remote environments and commands run by terminals and coding agents.",
         NSScreenCaptureUsageDescription:
           "Supaterm captures the active window when you use the window capture shortcut.",
+        NSMicrophoneUsageDescription:
+          "Supaterm uses your microphone to dictate messages and commands.",
         CFBundleDocumentTypes: [
           {
             CFBundleTypeName: "Web page",
