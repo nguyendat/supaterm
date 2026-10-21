@@ -328,6 +328,7 @@ function projectOverrides(
  */
 export function SettingsRow({
   title,
+  icon,
   description,
   status,
   resetAction,
@@ -341,6 +342,7 @@ export function SettingsRow({
   ...rowProps
 }: Omit<ComponentPropsWithoutRef<"div">, "title"> & {
   title: ReactNode;
+  icon?: ReactNode;
   description?: ReactNode;
   status?: ReactNode;
   resetAction?: ReactNode;
@@ -483,6 +485,27 @@ export function SettingsRow({
       />
     ) : null;
   const renderedStatus = status;
+  const text = (
+    <div className="min-w-0 flex-1 space-y-0.5">
+      <div className="flex min-h-5 items-center gap-1.5">
+        <h3 className="text-sm font-medium text-foreground">{title}</h3>
+        {renderedInheritance ? (
+          <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
+            {renderedInheritance}
+          </span>
+        ) : null}
+        <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
+          {renderedReset}
+        </span>
+      </div>
+      {description ? (
+        <p className="max-w-xl text-xs leading-normal text-muted-foreground/80">{description}</p>
+      ) : null}
+      {renderedStatus ? (
+        <div className="pt-0.5 text-xs text-muted-foreground">{renderedStatus}</div>
+      ) : null}
+    </div>
+  );
 
   return (
     <div
@@ -497,27 +520,14 @@ export function SettingsRow({
       )}
     >
       <div className="flex flex-col gap-2.5 @min-[32rem]/settings-row:grid @min-[32rem]/settings-row:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8">
-        <div className="min-w-0 flex-1 space-y-0.5">
-          <div className="flex min-h-5 items-center gap-1.5">
-            <h3 className="text-sm font-medium text-foreground">{title}</h3>
-            {renderedInheritance ? (
-              <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
-                {renderedInheritance}
-              </span>
-            ) : null}
-            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
-              {renderedReset}
-            </span>
+        {icon ? (
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            {icon}
+            {text}
           </div>
-          {description ? (
-            <p className="max-w-xl text-xs leading-normal text-muted-foreground/80">
-              {description}
-            </p>
-          ) : null}
-          {renderedStatus ? (
-            <div className="pt-0.5 text-xs text-muted-foreground">{renderedStatus}</div>
-          ) : null}
-        </div>
+        ) : (
+          text
+        )}
         {renderedControl ? (
           <div className="flex w-full min-w-0 shrink-0 items-center gap-2 @min-[32rem]/settings-row:w-auto @min-[32rem]/settings-row:justify-end">
             {renderedControl}

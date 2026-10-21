@@ -40,6 +40,13 @@ import {
 import { AuthSessionId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { RelayConnectionInfo, RelayPreparationError } from "./relay.ts";
 import {
+  TailnetError,
+  TailnetLoginResult,
+  TailnetSignInInput,
+  TailnetSignOutResult,
+  TailnetStatus,
+} from "./tailnet.ts";
+import {
   ExecutionEnvironmentDescriptor,
   ORCHESTRATION_PROTOCOL_HEADER,
   ORCHESTRATION_PROTOCOL_VERSION_TEXT,
@@ -543,8 +550,33 @@ class EnvironmentRelayHttpApi extends HttpApiGroup.make("relay").add(
   }).middleware(EnvironmentAuthenticatedAuth),
 ) {}
 
+class EnvironmentTailnetHttpApi extends HttpApiGroup.make("tailnet")
+  .add(
+    HttpApiEndpoint.get("status", "/api/tailnet/status", {
+      headers: OptionalBearerHeaders,
+      success: TailnetStatus,
+      error: [EnvironmentScopeRequiredError, EnvironmentInternalError],
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("signIn", "/api/tailnet/sign-in", {
+      headers: OptionalBearerHeaders,
+      payload: TailnetSignInInput,
+      success: TailnetLoginResult,
+      error: [TailnetError, EnvironmentScopeRequiredError, EnvironmentInternalError],
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("signOut", "/api/tailnet/sign-out", {
+      headers: OptionalBearerHeaders,
+      success: TailnetSignOutResult,
+      error: [TailnetError, EnvironmentScopeRequiredError, EnvironmentInternalError],
+    }).middleware(EnvironmentAuthenticatedAuth),
+  ) {}
+
 export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentRelayHttpApi)
+  .add(EnvironmentTailnetHttpApi)
   .add(EnvironmentMetadataHttpApi)
   .add(EnvironmentAuthHttpApi)
   .add(EnvironmentMcpOAuthHttpApi)

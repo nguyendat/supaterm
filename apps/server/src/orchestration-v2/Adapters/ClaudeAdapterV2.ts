@@ -1400,6 +1400,7 @@ export const CLAUDE_READ_ONLY_SUPATERM_MCP_ALLOWED_TOOLS: ReadonlyArray<string> 
   "mcp__supaterm__supaterm_thread_search",
   "mcp__supaterm__supaterm_preview_list",
   "mcp__supaterm__supaterm_environment_read",
+  "mcp__supaterm__supaterm_tailscale_status",
   "mcp__supaterm__supaterm_queue_list",
   "mcp__supaterm__supaterm_queue_read",
   "mcp__supaterm__html_preview",

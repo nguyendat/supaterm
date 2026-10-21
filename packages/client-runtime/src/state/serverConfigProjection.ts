@@ -120,6 +120,19 @@ export function applyServerConfigProjection(
         latestEvent: event,
         source: "live",
       }));
+    case "reachabilityUpdated":
+      return Option.map(current, (projection) => ({
+        config: {
+          ...projection.config,
+          auth: reuseUnchanged(projection.config.auth, event.payload.auth),
+          directEndpoints: reuseUnchanged(
+            projection.config.directEndpoints,
+            event.payload.directEndpoints,
+          ),
+        },
+        latestEvent: event,
+        source: "live",
+      }));
     case "environmentThemesUpdated":
       return Option.map(current, (projection) => ({
         config: {

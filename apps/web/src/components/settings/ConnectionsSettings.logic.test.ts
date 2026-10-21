@@ -10,8 +10,10 @@ import {
   selectQrEndpointOption,
   togglePairingScopeSelection,
   resolvePairingLinkRoutes,
-  resolveTailscaleHttpsRow,
   createRelayPairingEndpoint,
+  endpointDefaultPreferenceKey,
+  resolveTailnetPairingEndpoints,
+  selectPairingEndpoint,
 } from "./ConnectionsSettings.logic";
 
 it("shares the confirmed relay route before its status subscription arrives", () => {
@@ -329,34 +331,51 @@ it("uses current routing when the relay server changes after link creation", () 
   ).toEqual([]);
 });
 
-describe("resolveTailscaleHttpsRow", () => {
-  const endpoint = makeEndpoint({
-    id: "tailscale-magicdns:https://machine.tailnet.ts.net",
-    label: "Tailscale HTTPS",
-    httpBaseUrl: "https://machine.tailnet.ts.net",
-    reachability: "private-network",
-  });
+describe("built-in Tailscale pairing endpoints", () => {
+  const running = {
+    phase: "running",
+    serveEnabled: true,
+    httpsUrl: "https://host.tailnet.ts.net/",
+    httpUrl: "http://100.64.0.7/",
+  } as const;
+  const lan = makeEndpoint({});
 
-  it("offers setup before Tailscale has reported a MagicDNS name", () => {
-    expect(resolveTailscaleHttpsRow({ endpoint: null, serveEnabled: false })).toEqual({
-      description: "Use Tailscale Serve to expose this backend through a MagicDNS HTTPS URL.",
-      unreachable: false,
+  it("offers HTTPS for hosted pairing and plain HTTP as a labeled fallback", () => {
+    const { https, http } = resolveTailnetPairingEndpoints(running);
+    expect(https).toMatchObject({
+      label: "Tailscale (built-in)",
+      reachability: "private-network",
+      compatibility: { hostedHttpsApp: "compatible" },
+    });
+    expect(http).toMatchObject({
+      label: "Tailscale HTTP · limited browser features",
+      compatibility: { hostedHttpsApp: "mixed-content-blocked" },
     });
   });
 
-  it("asks to start Tailscale when Serve is on but no MagicDNS name is reported", () => {
-    expect(resolveTailscaleHttpsRow({ endpoint: null, serveEnabled: true })).toEqual({
-      description: "Start Tailscale to set up HTTPS access through MagicDNS.",
-      unreachable: false,
-    });
+  it("makes HTTPS the default pairing route unless the user saved another", () => {
+    const { https, http } = resolveTailnetPairingEndpoints(running);
+    if (https === null || http === null) throw new Error("Both tailnet routes must be offered.");
+    const endpoints = [https, lan, http];
+    expect(selectPairingEndpoint(endpoints, null)).toBe(https);
+    expect(selectPairingEndpoint(endpoints, endpointDefaultPreferenceKey(lan))).toBe(lan);
+    expect(selectPairingEndpoint([lan, http], null)).toBe(lan);
   });
 
-  it("shows the URL and flags it when this machine cannot reach it", () => {
-    expect(
-      resolveTailscaleHttpsRow({
-        endpoint: { ...endpoint, status: "unavailable" },
-        serveEnabled: true,
-      }),
-    ).toEqual({ description: endpoint.httpBaseUrl, unreachable: true });
+  it("offers no route until the node is running and serving", () => {
+    for (const status of [
+      null,
+      { ...running, serveEnabled: false },
+      { ...running, phase: "needs-reauth" as const },
+    ]) {
+      expect(resolveTailnetPairingEndpoints(status)).toEqual({ https: null, http: null });
+    }
+    const { https, http } = resolveTailnetPairingEndpoints({
+      phase: "running",
+      serveEnabled: true,
+      httpUrl: running.httpUrl,
+    });
+    expect(https).toBeNull();
+    expect(http).not.toBeNull();
   });
 });

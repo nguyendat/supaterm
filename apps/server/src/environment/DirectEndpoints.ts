@@ -25,6 +25,7 @@ import * as NodeOS from "node:os";
 import { isPrivateNetworkHost, isTailnetHost } from "@supaterm/shared/hostClassification";
 
 import * as ServerConfig from "../config.ts";
+import { TailnetExposure } from "../tailnet/TailnetExposure.ts";
 import { formatHostForUrl, isLoopbackHost, isWildcardHost } from "../startupAccess.ts";
 
 type NetworkInterfacesMap = ReturnType<typeof NodeOS.networkInterfaces>;
@@ -95,6 +96,7 @@ export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const httpClient = yield* HttpClient.HttpClient;
+  const tailnet = yield* TailnetExposure;
 
   const resolve = Effect.gen(function* () {
     const endpoints = [
@@ -132,6 +134,7 @@ export const make = Effect.gen(function* () {
         endpoints.push({ kind: "tailnet", httpBaseUrl: servedUrl.value });
       }
     }
+    endpoints.push(...(yield* tailnet.current).endpoints);
     return endpoints;
   });
 

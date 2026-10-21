@@ -68,6 +68,20 @@ Tailscale supplies an endpoint for ordinary pairing, so it needs no separate
 environment type. Authentication remains the environment's responsibility for
 every route. See [environment authentication](./environment-auth.md).
 
+The built-in Tailscale node is a server-owned ingress, like the relay. It runs as the
+`supaterm-tailnet` sidecar ([native/tailnet](../../native/tailnet)), because tsnet is Go.
+TLS ends in the sidecar, which hands each accepted connection to the server over a private
+unix socket or named pipe. The connection opens with one preamble line carrying a per-spawn
+secret and the caller's WhoIs result. The server attaches that identity to the socket and
+answers with a one-byte verdict before any client bytes flow. Never move this identity into
+HTTP headers: a reverse proxy pools upstream connections across callers, and a header on a
+loopback port can be forged by any local process. The "limit to my account" check is enforced
+in the server against both the preamble and the sidecar's latest status, so it can revoke live
+sockets, WebSockets included, when the policy or the node's identity changes. Tailnet identity
+only narrows who may connect; pairing and scopes still decide what a caller can do. The
+sidecar's state and the service's intent live under the environment's state directory, so a
+dev worktree never touches the installed node.
+
 SSH can launch a server as well as forward a port. Desktop main owns that
 lifecycle because it can spawn SSH and handle authentication prompts. The
 renderer uses the forwarded endpoint through the shared connection runtime.

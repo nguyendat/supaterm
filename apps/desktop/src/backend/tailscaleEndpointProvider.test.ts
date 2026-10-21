@@ -156,7 +156,7 @@ describe("tailscale endpoint provider", () => {
       assert.deepEqual(endpoints, [
         {
           id: "tailscale-ip:http://100.100.100.100:3773",
-          label: "Tailscale IP",
+          label: "System Tailscale IP",
           provider: {
             id: "tailscale",
             label: "Tailscale",
@@ -176,7 +176,7 @@ describe("tailscale endpoint provider", () => {
         },
         {
           id: "tailscale-magicdns:https://desktop.tail.ts.net/",
-          label: "Tailscale HTTPS",
+          label: "System Tailscale",
           provider: {
             id: "tailscale",
             label: "Tailscale",
@@ -235,7 +235,7 @@ describe("tailscale endpoint provider", () => {
         assert.deepEqual(endpoints, [
           {
             id: "tailscale-magicdns:https://desktop.tail.ts.net/",
-            label: "Tailscale HTTPS",
+            label: "System Tailscale",
             provider: {
               id: "tailscale",
               label: "Tailscale",

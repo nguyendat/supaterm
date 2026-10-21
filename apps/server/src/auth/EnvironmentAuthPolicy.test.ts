@@ -2,9 +2,11 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import { TailnetExposure, type TailnetExposureState } from "../tailnet/TailnetExposure.ts";
 import * as EnvironmentAuthPolicy from "./EnvironmentAuthPolicy.ts";
 
 const layerEnvironmentAuthPolicy = (overrides?: Partial<ServerConfig.ServerConfig["Service"]>) =>
@@ -173,5 +175,41 @@ it.layer(NodeServices.layer)("EnvironmentAuthPolicy.layer", (it) => {
         }),
       ),
     ),
+  );
+
+  it.effect.each(["web", "desktop"] as const)(
+    "follows the built-in tailnet at runtime in %s mode without changing the cookie",
+    (mode) =>
+      Effect.gen(function* () {
+        const exposure = yield* SubscriptionRef.make<TailnetExposureState>({
+          serving: false,
+          endpoints: [],
+        });
+        const policy = yield* EnvironmentAuthPolicy.EnvironmentAuthPolicy.pipe(
+          Effect.provide(
+            layerEnvironmentAuthPolicy({ mode, host: "127.0.0.1", port: 3773 }).pipe(
+              Layer.provide(
+                Layer.succeed(TailnetExposure, {
+                  current: SubscriptionRef.get(exposure),
+                  changes: SubscriptionRef.changes(exposure),
+                }),
+              ),
+            ),
+          ),
+        );
+        const local = yield* policy.getDescriptor();
+        yield* SubscriptionRef.set(exposure, {
+          serving: true,
+          endpoints: [{ kind: "tailnet", httpBaseUrl: "https://host.tail1234.ts.net/" }],
+        });
+        const serving = yield* policy.getDescriptor();
+
+        expect(local.policy).toBe(
+          mode === "desktop" ? "desktop-managed-local" : "loopback-browser",
+        );
+        expect(serving.policy).toBe("remote-reachable");
+        expect(serving.bootstrapMethods).toContain("one-time-token");
+        expect(serving.sessionCookieName).toBe(local.sessionCookieName);
+      }),
   );
 });

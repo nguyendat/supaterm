@@ -899,13 +899,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     localBackendManagementOnly: true,
   },
   {
-    id: "tailscale-https",
-    title: "Tailscale HTTPS",
+    id: "tailscale",
+    title: "Tailscale",
     to: "/settings/connections",
-    targetId: "connections-environment",
-    searchTerms: ["serve magicdns endpoint remote secure network"],
-    desktopOnly: true,
-    localBackendManagementOnly: true,
+    searchTerms: [
+      "tailnet sign in serve magicdns https remote secure network hostname tags device access",
+    ],
+    environmentOnly: true,
   },
   {
     id: "wsl-backend",

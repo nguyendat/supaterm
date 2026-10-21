@@ -8,6 +8,7 @@ import {
   type DesktopWslState,
   type RelayConnectionInfo,
   type ServerSettings,
+  type TailnetStatus,
   normalizeRelayServerUrl,
 } from "@supaterm/contracts";
 import { createAdvertisedEndpoint } from "@supaterm/shared/advertisedEndpoint";
@@ -89,20 +90,102 @@ export function isQrShareableEndpoint(endpoint: AdvertisedEndpoint): boolean {
   return endpoint.status !== "unavailable" && endpoint.reachability !== "loopback";
 }
 
+export function selectPairingEndpoint(
+  endpoints: ReadonlyArray<AdvertisedEndpoint>,
+  defaultEndpointKey?: string | null,
+): AdvertisedEndpoint | null {
+  const availableEndpoints = endpoints.filter((endpoint) => endpoint.status !== "unavailable");
+  if (defaultEndpointKey) {
+    const selectedEndpoint = availableEndpoints.find(
+      (endpoint) => endpointDefaultPreferenceKey(endpoint) === defaultEndpointKey,
+    );
+    if (selectedEndpoint) {
+      return selectedEndpoint;
+    }
+  }
+  return (
+    availableEndpoints.find((endpoint) => endpoint.isDefault) ??
+    availableEndpoints.find((endpoint) => endpoint.reachability !== "loopback") ??
+    availableEndpoints.find((endpoint) => endpoint.compatibility.hostedHttpsApp === "compatible") ??
+    null
+  );
+}
+
+export function isTailscaleHttpsEndpoint(endpoint: AdvertisedEndpoint): boolean {
+  return endpoint.id.startsWith("tailscale-magicdns:");
+}
+
+export function endpointDefaultPreferenceKey(endpoint: AdvertisedEndpoint): string {
+  if (endpoint.id.startsWith("desktop-loopback:")) {
+    return "desktop-core:loopback:http";
+  }
+  if (endpoint.id.startsWith("desktop-lan:")) {
+    return "desktop-core:lan:http";
+  }
+  if (endpoint.id.startsWith("tailscale-ip:")) {
+    return "tailscale:ip:http";
+  }
+  if (isTailscaleHttpsEndpoint(endpoint)) {
+    return "tailscale:magicdns:https";
+  }
+  if (endpoint.id.startsWith("tailnet-https:")) {
+    return "tailnet:https";
+  }
+  if (endpoint.id.startsWith("tailnet-http:")) {
+    return "tailnet:http";
+  }
+
+  let scheme = "unknown";
+  try {
+    scheme = new URL(endpoint.httpBaseUrl).protocol.replace(/:$/u, "");
+  } catch {}
+
+  return `${endpoint.provider.id}:${endpoint.reachability}:${scheme}:${endpoint.label}`;
+}
+
+const BUILT_IN_TAILNET_PROVIDER = {
+  id: "tailnet",
+  label: "Tailscale (built-in)",
+  kind: "private-network",
+  isAddon: false,
+} as const;
+
 /**
- * The row follows the saved Serve flag rather than probe health so a failed
- * probe or a stopped Tailscale never hides the way to turn Serve off.
+ * HTTPS is the default pairing target: browsers treat the 100.x HTTP address
+ * as an insecure context, so it stays a labeled fallback.
  */
-export function resolveTailscaleHttpsRow(input: {
-  readonly endpoint: AdvertisedEndpoint | null;
-  readonly serveEnabled: boolean;
-}) {
-  const { endpoint, serveEnabled } = input;
+export function resolveTailnetPairingEndpoints(
+  status: Pick<TailnetStatus, "phase" | "serveEnabled" | "httpsUrl" | "httpUrl"> | null,
+) {
+  if (status?.phase !== "running" || !status.serveEnabled) return { https: null, http: null };
   return {
-    description: serveEnabled
-      ? (endpoint?.httpBaseUrl ?? "Start Tailscale to set up HTTPS access through MagicDNS.")
-      : "Use Tailscale Serve to expose this backend through a MagicDNS HTTPS URL.",
-    unreachable: serveEnabled && endpoint !== null && endpoint.status !== "available",
+    https:
+      status.httpsUrl === undefined
+        ? null
+        : createAdvertisedEndpoint({
+            id: `tailnet-https:${status.httpsUrl}`,
+            label: "Tailscale (built-in)",
+            provider: BUILT_IN_TAILNET_PROVIDER,
+            httpBaseUrl: status.httpsUrl,
+            reachability: "private-network",
+            hostedHttpsCompatibility: "compatible",
+            source: "server",
+            isDefault: true,
+            description: "Reachable from devices on your tailnet over HTTPS.",
+          }),
+    http:
+      status.httpUrl === undefined
+        ? null
+        : createAdvertisedEndpoint({
+            id: `tailnet-http:${status.httpUrl}`,
+            label: "Tailscale HTTP · limited browser features",
+            provider: BUILT_IN_TAILNET_PROVIDER,
+            httpBaseUrl: status.httpUrl,
+            reachability: "private-network",
+            hostedHttpsCompatibility: "mixed-content-blocked",
+            source: "server",
+            description: "Reachable from devices on your tailnet over plain HTTP.",
+          }),
   };
 }
 

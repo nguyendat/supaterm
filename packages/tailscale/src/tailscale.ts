@@ -218,7 +218,7 @@ export const parseTailscaleStatus = (
   );
 
 const readTailscaleOutput = Effect.fn("tailscale.readTailscaleOutput")(function* (
-  subcommand: "status" | "debug",
+  subcommand: "status" | "debug" | "serve",
   args: readonly string[],
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -380,7 +380,11 @@ export const ensureTailscaleServe = (input: {
   return runTailscaleCommand(args, TAILSCALE_SERVE_TIMEOUT);
 };
 
-export const disableTailscaleServe = Effect.fn("tailscale.disableTailscaleServe")(function* (
+/**
+ * Removes every mount on the port, including ones other tools added. Only for
+ * a port the caller owns outright, such as a dev worktree's own web port.
+ */
+export const clearTailscaleServePort = Effect.fn("tailscale.clearTailscaleServePort")(function* (
   input: {
     readonly servePort?: number;
   } = {},
@@ -391,6 +395,91 @@ export const disableTailscaleServe = Effect.fn("tailscale.disableTailscaleServe"
     TAILSCALE_SERVE_TIMEOUT,
   );
 });
+
+const TailscaleServeConfigJson = Schema.NullOr(
+  Schema.Struct({
+    Web: Schema.optional(
+      Schema.Record(
+        Schema.String,
+        Schema.Struct({
+          Handlers: Schema.optional(
+            Schema.Record(Schema.String, Schema.Struct({ Proxy: Schema.optional(Schema.String) })),
+          ),
+        }),
+      ),
+    ),
+  }),
+);
+
+const decodeTailscaleServeConfigJson = Schema.decodeEffect(
+  Schema.fromJsonString(TailscaleServeConfigJson),
+);
+
+export type DisableTailscaleServeResult =
+  | { readonly outcome: "removed" }
+  | { readonly outcome: "absent" }
+  | {
+      readonly outcome: "not-owned";
+      readonly reason: "other-target" | "unreadable";
+      readonly manualCommand: string;
+    };
+
+const sameProxyTarget = (proxy: string | undefined, target: string): boolean => {
+  if (proxy === undefined || !URL.canParse(proxy)) return false;
+  return new URL(proxy).href === new URL(target).href;
+};
+
+/**
+ * The user may have mounted other paths on the same port, or pointed `/`
+ * somewhere else since Supaterm set it, so only a `/` that still proxies to
+ * Supaterm's target is removed.
+ */
+export const disableTailscaleServe = Effect.fn("tailscale.disableTailscaleServe")(
+  function* (input: {
+    readonly localPort: number;
+    readonly servePort?: number;
+    readonly localHost?: string;
+  }): Effect.fn.Return<
+    DisableTailscaleServeResult,
+    TailscaleCommandError,
+    ChildProcessSpawner.ChildProcessSpawner
+  > {
+    const servePort = input.servePort ?? DEFAULT_TAILSCALE_SERVE_PORT;
+    const target = `http://${input.localHost ?? "127.0.0.1"}:${input.localPort}`;
+    const offArgs = ["serve", `--https=${servePort}`, "--set-path=/", "off"];
+    const notOwned = (reason: "other-target" | "unreadable") =>
+      ({ outcome: "not-owned", reason, manualCommand: `tailscale ${offArgs.join(" ")}` }) as const;
+
+    const statusJson = yield* readTailscaleOutput("serve", ["serve", "status", "--json"]);
+    const config = yield* decodeTailscaleServeConfigJson(statusJson).pipe(Effect.option);
+    if (Option.isNone(config)) {
+      return notOwned("unreadable");
+    }
+
+    // Web is keyed by "<sni name>:<port>". `serve off` acts on the current name
+    // only, so every name's `/` on this port must be ours before removing one.
+    const rootMounts = Object.entries(config.value?.Web ?? {}).flatMap(([hostPort, web]) => {
+      const handler = web.Handlers?.["/"];
+      return hostPort.endsWith(`:${servePort}`) && handler !== undefined ? [handler] : [];
+    });
+    if (rootMounts.length === 0) {
+      return { outcome: "absent" } as const;
+    }
+    if (!rootMounts.every((handler) => sameProxyTarget(handler.Proxy, target))) {
+      return notOwned("other-target");
+    }
+
+    return yield* runTailscaleCommand(offArgs, TAILSCALE_SERVE_TIMEOUT).pipe(
+      Effect.as({ outcome: "removed" } as const),
+      Effect.catchIf(
+        (error) =>
+          error._tag === "TailscaleCommandExitError" &&
+          error.stderrDiagnostic === "no-existing-handler",
+        () => Effect.succeed({ outcome: "absent" } as const),
+      ),
+    );
+  },
+);
 
 export const probeTailscaleHttpsEndpoint = Effect.fn("tailscale.probeTailscaleHttpsEndpoint")(
   function* (input: { readonly baseUrl: string; readonly timeout?: Duration.Input }) {

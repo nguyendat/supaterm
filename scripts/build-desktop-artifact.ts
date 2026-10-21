@@ -149,6 +149,27 @@ export function resourceMonitorExecutableName(platform: typeof BuildPlatform.Typ
   return platform === "win" ? "supaterm-resource-monitor.exe" : "supaterm-resource-monitor";
 }
 
+const NODE_PLATFORMS = {
+  mac: "darwin",
+  linux: "linux",
+  win: "win32",
+} as const satisfies Record<typeof BuildPlatform.Type, NodeJS.Platform>;
+
+export function resolveTailnetTargets(
+  platform: typeof BuildPlatform.Type,
+  arch: typeof BuildArch.Type,
+): ReadonlyArray<{ readonly platform: NodeJS.Platform; readonly arch: "arm64" | "x64" }> {
+  const architectures = arch === "universal" ? (["arm64", "x64"] as const) : [arch];
+  return architectures.map((architecture) => ({
+    platform: NODE_PLATFORMS[platform],
+    arch: architecture,
+  }));
+}
+
+export function tailnetExecutableName(platform: typeof BuildPlatform.Type): string {
+  return platform === "win" ? "supaterm-tailnet.exe" : "supaterm-tailnet";
+}
+
 const PLATFORM_CONFIG: Record<typeof BuildPlatform.Type, PlatformConfig> = {
   mac: {
     cliFlag: "--mac",
@@ -295,9 +316,13 @@ export class BuildCommandFailedError extends Schema.TaggedError<BuildCommandFail
   }
 }
 
+const GO_PREREQUISITE_DESCRIPTION = "Go toolchain for the Tailscale sidecar";
+const GO_INSTALL_HINT = "Install Go with `mise install go` or from https://go.dev/dl/.";
+
 export const LINUX_DESKTOP_BUILD_PREREQUISITES = [
   { id: "cargo", description: "Rust compiler and Cargo", packages: ["cargo", "rustc"] },
   { id: "rust-target", description: "Requested Rust standard library", packages: [] },
+  { id: "go", description: GO_PREREQUISITE_DESCRIPTION, packages: [] },
   { id: "cc", description: "C/C++ build toolchain", packages: ["build-essential"] },
   { id: "make", description: "Make", packages: ["build-essential"] },
   {
@@ -344,6 +369,7 @@ export class LinuxDesktopBuildPrerequisitesMissingError extends Schema.TaggedErr
       ...(this.missing.includes("rust-target")
         ? ["Add the requested Rust target with:", `  rustup target add ${this.rustTarget}`]
         : []),
+      ...(this.missing.includes("go") ? [GO_INSTALL_HINT] : []),
       "",
       "For other distributions, see docs/operations/development.md#linux-appimage-prerequisites.",
       "Then rerun `vp run dist:desktop:linux`.",
@@ -353,6 +379,7 @@ export class LinuxDesktopBuildPrerequisitesMissingError extends Schema.TaggedErr
 
 const MAC_DESKTOP_BUILD_PREREQUISITES = [
   { id: "rust", description: "Rust/Cargo and the requested Rust target" },
+  { id: "go", description: GO_PREREQUISITE_DESCRIPTION },
   { id: "clang", description: "Xcode Command Line Tools (clang)" },
   { id: "make", description: "Xcode Command Line Tools (make)" },
   { id: "sips", description: "macOS image tool (sips)" },
@@ -378,6 +405,7 @@ export class MacDesktopBuildPrerequisitesMissingError extends Schema.TaggedError
       `Install ${XCODE_REQUIREMENT} and select its developer directory with DEVELOPER_DIR or xcode-select.`,
       "Install Rust from https://rustup.rs, then add the requested target(s):",
       `  rustup target add ${this.rustTargets.join(" ")}`,
+      ...(this.missing.includes("go") ? [GO_INSTALL_HINT] : []),
       "",
       "Then rerun the desktop artifact command.",
     ].join("\n");
@@ -386,6 +414,7 @@ export class MacDesktopBuildPrerequisitesMissingError extends Schema.TaggedError
 
 const WINDOWS_DESKTOP_BUILD_PREREQUISITES = [
   { id: "rust", description: "Rust/Cargo and the requested MSVC Rust target" },
+  { id: "go", description: GO_PREREQUISITE_DESCRIPTION },
   { id: "python", description: "Python 3 for node-gyp" },
   {
     id: "msvc",
@@ -413,6 +442,7 @@ export class WindowsDesktopBuildPrerequisitesMissingError extends Schema.TaggedE
       `  rustup target add ${this.rustTarget}`,
       "Install Python 3 and the Visual Studio Build Tools components listed in",
       "docs/operations/development.md#windows-installer-prerequisites.",
+      ...(this.missing.includes("go") ? [GO_INSTALL_HINT] : []),
       "",
       "Then rerun the desktop artifact command.",
     ].join("\n");
@@ -430,6 +460,18 @@ export class ResourceMonitorBuildOutputMissingError extends Schema.TaggedError<R
 ) {
   override get message(): string {
     return `Resource monitor build for ${this.rustTarget} did not produce ${this.binaryPath}.`;
+  }
+}
+
+export class TailnetBuildOutputMissingError extends Schema.TaggedError<TailnetBuildOutputMissingError>()(
+  "TailnetBuildOutputMissingError",
+  {
+    binaryPath: Schema.String,
+    target: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Tailscale sidecar build for ${this.target} did not produce ${this.binaryPath}. Run \`node scripts/build-tailnet.ts\` or unset SUPATERM_DESKTOP_REUSE_TAILNET.`;
   }
 }
 
@@ -691,6 +733,7 @@ const WindowsPackagedPayloadValidationReason = Schema.Literals([
   "sidecar-invalid",
   "unpacked-native-missing",
   "resource-monitor-missing",
+  "tailnet-missing",
   "wsl-runtime-missing",
   "wsl-runtime-invalid",
   "file-limit-exceeded",
@@ -716,6 +759,9 @@ export class WindowsPackagedPayloadValidationError extends Schema.TaggedError<Wi
     }
     if (this.reason === "resource-monitor-missing") {
       return "Windows packaged payload is missing the resource monitor executable.";
+    }
+    if (this.reason === "tailnet-missing") {
+      return "Windows packaged payload is missing the Tailscale sidecar executable.";
     }
     if (this.reason === "wsl-runtime-missing") {
       return "Windows packaged payload is missing the WSL runtime archive or SHA-256 sidecar.";
@@ -1098,6 +1144,10 @@ export const DESKTOP_EXTRA_RESOURCES = [
   {
     from: "apps/desktop/prod-resources/resource-monitor",
     to: "resource-monitor",
+  },
+  {
+    from: "apps/desktop/prod-resources/tailnet",
+    to: "tailnet",
   },
 ] as const;
 export const LINUX_CAPTURE_EXTRA_RESOURCES = [
@@ -1598,6 +1648,17 @@ const rustTargetIsInstalled = Effect.fn("rustTargetIsInstalled")(function* (targ
   return entries.some((entry) => entry.startsWith("libstd-") && entry.endsWith(".rlib"));
 });
 
+// Release CI restores the sidecar from a cache keyed on the Go sources and only
+// installs Go on a miss, so staging must be able to skip the build.
+const ReuseTailnetConfig = Config.Boolean("SUPATERM_DESKTOP_REUSE_TAILNET").pipe(
+  Config.withDefault(false),
+);
+
+const goToolchainAvailable = Effect.fn("goToolchainAvailable")(function* () {
+  if (yield* ReuseTailnetConfig) return true;
+  return yield* desktopBuildProbeSucceeds(ChildProcess.make("go", ["version"]), "go");
+});
+
 export const preflightLinuxDesktopBuild = Effect.fn("preflightLinuxDesktopBuild")(function* (
   arch: typeof BuildArch.Type = "x64",
 ) {
@@ -1616,6 +1677,7 @@ export const preflightLinuxDesktopBuild = Effect.fn("preflightLinuxDesktopBuild"
         ? desktopBuildProbeSucceeds(ChildProcess.make("cargo", ["--version"]), "cargo")
         : Effect.succeed(true),
       "rust-target": needsRust ? rustTargetIsInstalled(rustTarget) : Effect.succeed(true),
+      go: goToolchainAvailable(),
       cc: desktopBuildProbeSucceeds(ChildProcess.make("cc", ["--version"]), "cc"),
       make: desktopBuildProbeSucceeds(ChildProcess.make("make", ["--version"]), "make"),
       libsecret: desktopBuildProbeSucceeds(
@@ -1659,6 +1721,7 @@ export const preflightMacDesktopBuild = Effect.fn("preflightMacDesktopBuild")(fu
               Effect.map((results) => results.every(Boolean)),
             ),
           ]).pipe(Effect.map(([cargo, targets]) => cargo && targets)),
+      go: goToolchainAvailable(),
       clang: desktopBuildProbeSucceeds(ChildProcess.make("clang", ["--version"]), "clang"),
       make: desktopBuildProbeSucceeds(ChildProcess.make("make", ["--version"]), "make"),
       sips: desktopBuildProbeSucceeds(ChildProcess.make("sips", ["--help"]), "sips"),
@@ -1718,6 +1781,7 @@ export const preflightWindowsDesktopBuild = Effect.fn("preflightWindowsDesktopBu
               desktopBuildProbeSucceeds(ChildProcess.make("cargo", ["--version"]), "cargo"),
               rustTargetIsInstalled(rustTarget),
             ]).pipe(Effect.map(([cargo, target]) => cargo && target)),
+        go: goToolchainAvailable(),
         python: Effect.succeed(python !== undefined),
         msvc: reuseResourceMonitor
           ? Effect.succeed(true)
@@ -2024,6 +2088,39 @@ export const stageLinuxCaptureHelper = Effect.fn("stageLinuxCaptureHelper")(func
   }
 });
 
+const installStagedExecutable = Effect.fn("installStagedExecutable")(function* (input: {
+  readonly binaries: ReadonlyArray<string>;
+  readonly destinationDirectory: string;
+  readonly executableName: string;
+  readonly platform: typeof BuildPlatform.Type;
+  readonly label: string;
+  readonly verbose: boolean;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const destinationPath = path.join(input.destinationDirectory, input.executableName);
+  yield* fs
+    .remove(input.destinationDirectory, { recursive: true, force: true })
+    .pipe(Effect.ignore);
+  yield* fs.makeDirectory(input.destinationDirectory, { recursive: true });
+
+  if (input.binaries.length === 1) {
+    yield* fs.copyFile(input.binaries[0]!, destinationPath);
+  } else {
+    yield* runCommand(
+      ChildProcess.make("lipo", ["-create", ...input.binaries, "-output", destinationPath]),
+      {
+        label: `lipo ${input.label} universal binary`,
+        verbose: input.verbose,
+      },
+    );
+  }
+
+  if (input.platform !== "win") {
+    yield* fs.chmod(destinationPath, 0o755);
+  }
+});
+
 export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* (input: {
   readonly repoRoot: string;
   readonly stageResourcesDir: string;
@@ -2085,26 +2182,69 @@ export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* 
     builtBinaries.push(binaryPath);
   }
 
-  const destinationDirectory = path.join(input.stageResourcesDir, "resource-monitor");
-  const destinationPath = path.join(destinationDirectory, executableName);
-  yield* fs.remove(destinationDirectory, { recursive: true, force: true }).pipe(Effect.ignore);
-  yield* fs.makeDirectory(destinationDirectory, { recursive: true });
+  yield* installStagedExecutable({
+    binaries: builtBinaries,
+    destinationDirectory: path.join(input.stageResourcesDir, "resource-monitor"),
+    executableName,
+    platform: input.platform,
+    label: "resource monitor",
+    verbose: input.verbose,
+  });
+});
 
-  if (builtBinaries.length === 1) {
-    yield* fs.copyFile(builtBinaries[0]!, destinationPath);
-  } else {
-    yield* runCommand(
-      ChildProcess.make("lipo", ["-create", ...builtBinaries, "-output", destinationPath]),
-      {
-        label: "lipo resource monitor universal binary",
-        verbose: input.verbose,
-      },
-    );
+export const stageTailnet = Effect.fn("stageTailnet")(function* (input: {
+  readonly repoRoot: string;
+  readonly stageResourcesDir: string;
+  readonly platform: typeof BuildPlatform.Type;
+  readonly arch: typeof BuildArch.Type;
+  readonly verbose: boolean;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const node = yield* HostProcess.ExecutablePath;
+  const executableName = tailnetExecutableName(input.platform);
+  const reuseTailnet = yield* ReuseTailnetConfig;
+  const builtBinaries: string[] = [];
+
+  for (const target of resolveTailnetTargets(input.platform, input.arch)) {
+    const targetKey = `${target.platform}-${target.arch}`;
+    const outputDirectory = path.join(input.repoRoot, "native/tailnet/dist", targetKey);
+    if (reuseTailnet) {
+      yield* Effect.log(`[desktop-artifact] Reusing cached Tailscale sidecar (${targetKey}).`);
+    } else {
+      yield* runCommand(
+        ChildProcess.make(
+          node,
+          [
+            path.join(input.repoRoot, "scripts/build-tailnet.ts"),
+            "--platform",
+            target.platform,
+            "--arch",
+            target.arch,
+            "--out",
+            outputDirectory,
+          ],
+          { cwd: input.repoRoot },
+        ),
+        { label: `build Tailscale sidecar (${targetKey})`, verbose: input.verbose },
+      );
+    }
+
+    const binaryPath = path.join(outputDirectory, executableName);
+    if (!(yield* fs.exists(binaryPath))) {
+      return yield* new TailnetBuildOutputMissingError({ binaryPath, target: targetKey });
+    }
+    builtBinaries.push(binaryPath);
   }
 
-  if (input.platform !== "win") {
-    yield* fs.chmod(destinationPath, 0o755);
-  }
+  yield* installStagedExecutable({
+    binaries: builtBinaries,
+    destinationDirectory: path.join(input.stageResourcesDir, "tailnet"),
+    executableName,
+    platform: input.platform,
+    label: "Tailscale sidecar",
+    verbose: input.verbose,
+  });
 });
 
 export const stageBrowserSecret = Effect.fn("stageBrowserSecret")(function* (input: {
@@ -3100,6 +3240,14 @@ export const validateWindowsPackagedPayload = Effect.fn(
     });
   }
 
+  if (!(yield* isFile(path.join(resourcesDir, "tailnet", tailnetExecutableName("win"))))) {
+    return yield* new WindowsPackagedPayloadValidationError({
+      reason: "tailnet-missing",
+      packagedAppDir,
+      missingFiles: ["tailnet/supaterm-tailnet.exe"],
+    });
+  }
+
   const wslArchivePath = path.join(resourcesDir, WSL_RUNTIME_ARCHIVE_NAME);
   const wslArchiveHashPath = path.join(resourcesDir, WSL_RUNTIME_ARCHIVE_HASH_NAME);
   const [hasWslArchive, hasWslArchiveHash] = yield* Effect.all([
@@ -3440,6 +3588,13 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
     yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
   }
   yield* stageResourceMonitor({
+    repoRoot,
+    stageResourcesDir,
+    platform: options.platform,
+    arch: options.arch,
+    verbose: options.verbose,
+  });
+  yield* stageTailnet({
     repoRoot,
     stageResourcesDir,
     platform: options.platform,

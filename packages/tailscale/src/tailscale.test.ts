@@ -12,6 +12,7 @@ import * as HostProcess from "@supaterm/shared/HostProcess";
 
 import {
   buildTailscaleHttpsBaseUrl,
+  clearTailscaleServePort,
   disableTailscaleServe,
   ensureTailscaleServe,
   isTailscaleIpv4Address,
@@ -379,23 +380,176 @@ describe("tailscale", () => {
     });
   });
 
-  it.effect("disables tailscale serve through the process spawner service", () => {
+  it.effect("clears every mount on a port through the process spawner service", () => {
     const commands: {
       readonly command: string;
       readonly args: ReadonlyArray<string>;
     }[] = [];
     const layer = layerMockSpawner((command, args) => {
       commands.push({ command, args });
-      assert.equal(command, "tailscale");
-      assert.deepEqual(args, ["serve", "--https=8443", "off"]);
       return {};
     });
 
     return Effect.gen(function* () {
-      yield* disableTailscaleServe({ servePort: 8443 }).pipe(Effect.provide(layer));
+      yield* clearTailscaleServePort({ servePort: 8443 }).pipe(Effect.provide(layer));
       assert.deepEqual(commands, [
         { command: "tailscale", args: ["serve", "--https=8443", "off"] },
       ]);
+    });
+  });
+
+  describe("disableTailscaleServe", () => {
+    const serveStatus = (web: Record<string, Record<string, { Proxy?: string; Path?: string }>>) =>
+      JSON.stringify({
+        TCP: { "8443": { HTTPS: true } },
+        Web: Object.fromEntries(
+          Object.entries(web).map(([hostPort, handlers]) => [hostPort, { Handlers: handlers }]),
+        ),
+      });
+
+    const runDisable = (
+      statusStdout: string,
+      input: { readonly localHost?: string } = {},
+      offResult: { stderr?: string; code?: number } = {},
+    ) => {
+      const calls: Array<ReadonlyArray<string>> = [];
+      const layer = layerMockSpawner((command, args) => {
+        assert.equal(command, "tailscale");
+        calls.push(args);
+        return args.includes("status") ? { stdout: statusStdout } : offResult;
+      });
+      return disableTailscaleServe({ localPort: 13773, servePort: 8443, ...input }).pipe(
+        Effect.map((result) => ({ result, calls })),
+        Effect.provide(layer),
+      );
+    };
+
+    const statusCall = ["serve", "status", "--json"];
+    const offCall = ["serve", "--https=8443", "--set-path=/", "off"];
+
+    it.effect("removes only the root mount when it still proxies to Supaterm", () =>
+      Effect.gen(function* () {
+        const { result, calls } = yield* runDisable(
+          serveStatus({
+            "desktop.tail.ts.net:8443": {
+              "/": { Proxy: "http://127.0.0.1:13773" },
+              "/grafana": { Proxy: "http://127.0.0.1:3000" },
+            },
+            "desktop.tail.ts.net:443": { "/": { Proxy: "http://127.0.0.1:8080" } },
+          }),
+        );
+
+        assert.deepEqual(result, { outcome: "removed" });
+        assert.deepEqual(calls, [statusCall, offCall]);
+      }),
+    );
+
+    it.effect("matches the loopback target the way tailscale normalizes it", () =>
+      Effect.gen(function* () {
+        const ipv6 = yield* runDisable(
+          serveStatus({ "desktop.tail.ts.net:8443": { "/": { Proxy: "http://[::1]:13773" } } }),
+          { localHost: "[::1]" },
+        );
+        assert.deepEqual(ipv6.result, { outcome: "removed" });
+
+        const trailingSlash = yield* runDisable(
+          serveStatus({
+            "desktop.tail.ts.net:8443": { "/": { Proxy: "http://127.0.0.1:13773/" } },
+          }),
+        );
+        assert.deepEqual(trailingSlash.result, { outcome: "removed" });
+      }),
+    );
+
+    it.effect("leaves a root mount that points somewhere else", () =>
+      Effect.gen(function* () {
+        for (const handler of [
+          { Proxy: "http://127.0.0.1:3000" },
+          { Proxy: "http://localhost:13773" },
+          { Path: "/srv/www" },
+        ]) {
+          const { result, calls } = yield* runDisable(
+            serveStatus({ "desktop.tail.ts.net:8443": { "/": handler } }),
+          );
+
+          assert.deepEqual(result, {
+            outcome: "not-owned",
+            reason: "other-target",
+            manualCommand: "tailscale serve --https=8443 --set-path=/ off",
+          });
+          assert.deepEqual(calls, [statusCall]);
+        }
+      }),
+    );
+
+    it.effect("leaves the port alone when any name's root mount is not Supaterm's", () =>
+      Effect.gen(function* () {
+        const { result, calls } = yield* runDisable(
+          serveStatus({
+            "old-name.tail.ts.net:8443": { "/": { Proxy: "http://127.0.0.1:13773" } },
+            "desktop.tail.ts.net:8443": { "/": { Proxy: "http://127.0.0.1:3000" } },
+          }),
+        );
+
+        assert.equal(result.outcome, "not-owned");
+        assert.deepEqual(calls, [statusCall]);
+      }),
+    );
+
+    it.effect("does nothing when the port has no root mount", () =>
+      Effect.gen(function* () {
+        for (const statusStdout of [
+          "null",
+          "{}",
+          serveStatus({ "desktop.tail.ts.net:443": { "/": { Proxy: "http://127.0.0.1:13773" } } }),
+          serveStatus({
+            "desktop.tail.ts.net:8443": { "/grafana": { Proxy: "http://127.0.0.1:3000" } },
+          }),
+        ]) {
+          const { result, calls } = yield* runDisable(statusStdout);
+          assert.deepEqual(result, { outcome: "absent" });
+          assert.deepEqual(calls, [statusCall]);
+        }
+      }),
+    );
+
+    it.effect("reports unreadable serve status without changing anything", () =>
+      Effect.gen(function* () {
+        const { result, calls } = yield* runDisable("{not-json");
+
+        assert.deepEqual(result, {
+          outcome: "not-owned",
+          reason: "unreadable",
+          manualCommand: "tailscale serve --https=8443 --set-path=/ off",
+        });
+        assert.deepEqual(calls, [statusCall]);
+      }),
+    );
+
+    it.effect("treats a mount removed between status and off as absent", () =>
+      Effect.gen(function* () {
+        const { result } = yield* runDisable(
+          serveStatus({ "desktop.tail.ts.net:8443": { "/": { Proxy: "http://127.0.0.1:13773" } } }),
+          {},
+          { code: 1, stderr: "error: failed to remove web serve: handler does not exist" },
+        );
+        assert.deepEqual(result, { outcome: "absent" });
+      }),
+    );
+
+    it.effect("fails with the command error when serve status cannot run", () => {
+      const layer = layerMockSpawner(() => ({ code: 1, stderr: "not logged in" }));
+
+      return Effect.gen(function* () {
+        const error = yield* disableTailscaleServe({ localPort: 13773, servePort: 8443 }).pipe(
+          Effect.flip,
+          Effect.provide(layer),
+        );
+
+        assert.instanceOf(error, TailscaleCommandExitError);
+        assert.equal(error.subcommand, "serve");
+        assert.equal(error.stderrDiagnostic, "not-logged-in");
+      });
     });
   });
 });

@@ -42,6 +42,7 @@ apps/mobile/.bundle/
 apps/mobile/fastlane/report.xml
 .github/pr-assets/
 native/**/target/
+native/tailnet/dist/
 node_modules/
 *.log
 .env*

@@ -6,7 +6,7 @@
 
 import {
   buildTailscaleHttpsBaseUrl,
-  disableTailscaleServe,
+  clearTailscaleServePort,
   ensureTailscaleServe,
   readTailscaleStatus,
   type TailscaleCommandError,
@@ -103,7 +103,7 @@ export const unshareDevServer = (
   never,
   ChildProcessSpawner.ChildProcessSpawner
 > =>
-  disableTailscaleServe({ servePort: webPort }).pipe(
+  clearTailscaleServePort({ servePort: webPort }).pipe(
     Effect.as({ cleared: true } as const),
     Effect.catch((error: TailscaleCommandError) =>
       Effect.succeed(

@@ -212,6 +212,12 @@ const RPC_AGGREGATES = {
   [WS_METHODS.subscribeBackgroundPolicy]: "server",
   [WS_METHODS.subscribeRelayStatus]: "server",
   [WS_METHODS.prepareRelay]: "server",
+  [WS_METHODS.subscribeTailnetStatus]: "server",
+  [WS_METHODS.tailnetSignIn]: "server",
+  [WS_METHODS.tailnetCancelSignIn]: "server",
+  [WS_METHODS.tailnetReauthenticate]: "server",
+  [WS_METHODS.tailnetSignOut]: "server",
+  [WS_METHODS.tailnetConfigure]: "server",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";

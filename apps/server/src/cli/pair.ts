@@ -11,6 +11,7 @@
 import {
   type AuthEnvironmentScope,
   AuthStandardClientScopes,
+  AuthAccessReadScope,
   AuthAccessWriteScope,
   EnvironmentHttpApi,
   ExecutionEnvironmentDescriptor,
@@ -251,14 +252,14 @@ const probeEnvironmentDescriptor: (
   Effect.catch((outcome) => Effect.succeed(outcome)),
 );
 
-interface DiscoveredPairTarget {
+export interface DiscoveredPairTarget {
   readonly baseDir: string;
   readonly variant: PairStateVariant;
   readonly state: PersistedServerRuntimeState;
   readonly descriptor: ExecutionEnvironmentDescriptor;
 }
 
-const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
+export const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
   explicitBaseDir: string | undefined,
 ) {
   const bases: Array<string> = [];
@@ -316,7 +317,7 @@ const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
  * pinned to where the runtime state was actually found, independent of ambient environment
  * variables.
  */
-const makePairServerConfig = Effect.fn(function* (input: {
+export const makePairServerConfig = Effect.fn(function* (input: {
   readonly target: DiscoveredPairTarget;
   readonly logLevel: ServerConfig.ServerConfig["Service"]["logLevel"];
 }) {
@@ -475,26 +476,66 @@ const mintPairingLink = Effect.fn("pair.mintPairingLink")(function* (input: {
   );
 });
 
-const prepareRelay = Effect.fn("pair.prepareRelay")(function* (
-  target: DiscoveredPairTarget,
+/**
+ * Calls the running server's HTTP API with a short-lived bearer session minted in its
+ * database, revoked as soon as the call settles.
+ */
+export const withLiveServerSession = Effect.fn("pair.withLiveServerSession")(function* <A, E, R>(
   config: ServerConfig.ServerConfig["Service"],
+  session: {
+    readonly scopes: ReadonlyArray<AuthEnvironmentScope>;
+    readonly ttl: Duration.Duration;
+    readonly label: string;
+  },
+  use: (headers: { readonly authorization: string }) => Effect.Effect<A, E, R>,
 ) {
   return yield* Effect.gen(function* () {
     const auth = yield* EnvironmentAuth.EnvironmentAuth;
-    const client = yield* HttpApiClient.make(EnvironmentHttpApi, { baseUrl: target.state.origin });
     return yield* Effect.acquireUseRelease(
-      auth.issueSession({
-        scopes: [AuthAccessWriteScope],
-        ttl: Duration.seconds(30),
-        label: "supaterm pair relay preparation",
-      }),
-      (session) => client.relay.prepare({ headers: { authorization: `Bearer ${session.token}` } }),
-      (session) => auth.revokeSession(session.sessionId).pipe(Effect.ignore),
+      auth.issueSession(session),
+      (issued) => use({ authorization: `Bearer ${issued.token}` }),
+      (issued) => auth.revokeSession(issued.sessionId).pipe(Effect.ignore),
     );
   }).pipe(
     Effect.provide(EnvironmentAuth.layerRuntime.pipe(Layer.provide(ServerConfig.layer(config)))),
   );
 });
+
+const prepareRelay = Effect.fn("pair.prepareRelay")(function* (
+  target: DiscoveredPairTarget,
+  config: ServerConfig.ServerConfig["Service"],
+) {
+  const client = yield* HttpApiClient.make(EnvironmentHttpApi, { baseUrl: target.state.origin });
+  return yield* withLiveServerSession(
+    config,
+    {
+      scopes: [AuthAccessWriteScope],
+      ttl: Duration.seconds(30),
+      label: "supaterm pair relay preparation",
+    },
+    (headers) => client.relay.prepare({ headers }),
+  );
+});
+
+/** Null when the built-in node is not serving HTTPS, or the server predates it. */
+const resolveBuiltInTailnetPairingBase = Effect.fn("pair.resolveBuiltInTailnetPairingBase")(
+  function* (target: DiscoveredPairTarget, config: ServerConfig.ServerConfig["Service"]) {
+    const client = yield* HttpApiClient.make(EnvironmentHttpApi, {
+      baseUrl: target.state.origin,
+    });
+    const status = yield* withLiveServerSession(
+      config,
+      {
+        scopes: [AuthAccessReadScope],
+        ttl: Duration.seconds(30),
+        label: "supaterm pair tailscale status",
+      },
+      (headers) => client.tailnet.status({ headers }),
+    );
+    return status.phase === "running" && status.serveEnabled ? (status.httpsUrl ?? null) : null;
+  },
+  Effect.orElseSucceed(() => null),
+);
 
 const ttlFlag = Flag.String("ttl").pipe(
   Flag.withSchema(DurationFromString),
@@ -511,7 +552,7 @@ const labelFlag = Flag.String("label").pipe(
 
 const tailscaleFlag = Flag.Boolean("tailscale").pipe(
   Flag.withDescription(
-    "Publish the server over Tailscale Serve HTTPS and pair through the tailnet URL.",
+    "Pair through the tailnet: the built-in Tailscale node's HTTPS URL when it is serving, otherwise publish the server over Tailscale Serve HTTPS.",
   ),
   Flag.withDefault(false),
 );
@@ -569,12 +610,18 @@ export const pairCommand = Command.make("pair", {
         pairingBaseUrl = relayEndpoint;
         notes.push(`Paired clients show this host as Relay · ${relayName(relayEndpoint)}.`);
       } else if (flags.tailscale) {
-        const resolved = yield* resolveTailscalePairingBase({
-          target,
-          servePort: flags.tailscaleServePort,
-        });
-        pairingBaseUrl = resolved.baseUrl;
-        notes.push(...resolved.notes);
+        const builtIn = yield* resolveBuiltInTailnetPairingBase(target, config);
+        if (builtIn !== null) {
+          pairingBaseUrl = builtIn;
+          notes.push("Pairing through Supaterm's built-in Tailscale node.");
+        } else {
+          const resolved = yield* resolveTailscalePairingBase({
+            target,
+            servePort: flags.tailscaleServePort,
+          });
+          pairingBaseUrl = resolved.baseUrl;
+          notes.push(...resolved.notes);
+        }
       } else {
         pairingBaseUrl = resolveDirectPairingBaseUrl(target.state);
         if (isLoopbackHost(new URL(pairingBaseUrl).hostname)) {

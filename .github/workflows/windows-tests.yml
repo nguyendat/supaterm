@@ -78,6 +78,13 @@ jobs:
           toolchain: stable
           targets: x86_64-pc-windows-msvc
 
+      - name: Setup Go for desktop packaging
+        if: inputs.build_desktop
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: native/tailnet/go.mod
+          cache-dependency-path: native/tailnet/go.sum
+
       - name: Install Spectre-mitigated MSVC libs
         if: inputs.build_desktop
         shell: pwsh

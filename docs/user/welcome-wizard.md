@@ -13,7 +13,8 @@ browser.
 You can add more computers before continuing. **Add a computer** connects
 directly to a server on your network or tailnet.
 [Install the CLI](./install.md#command-line), start the server with `supaterm serve`,
-then run `supaterm pair --tailscale` and paste the pairing link. You can also run
+run `supaterm tailscale login` to put it on your tailnet, then run `supaterm pair --tailscale` and
+paste the pairing link. You can also run
 `supaterm serve --host <address>` and use `supaterm pair --no-relay` when the server is already
 reachable on your network.
 

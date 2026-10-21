@@ -357,6 +357,10 @@ const SUPATERM_MCP_TOOLS: Readonly<Record<string, SupatermMcpToolDefinition>> = 
     ["Update", "Updating", "Updated", "environment preferences"],
     "environment-update",
   ),
+  supaterm_tailscale_status: tool(
+    ["Read", "Reading", "Read", "Tailscale status"],
+    "environment-read",
+  ),
   supaterm_thread_launch: tool(
     ["Launch", "Launching", "Launched", "a project thread"],
     "thread-create",

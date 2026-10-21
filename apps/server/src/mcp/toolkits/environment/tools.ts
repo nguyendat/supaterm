@@ -5,6 +5,8 @@ import {
   OrchestratorMcpFailure,
   ServerSettings,
   ServerSettingsPatch,
+  TailnetHttpsState,
+  TailnetPhase,
 } from "@supaterm/contracts";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
@@ -12,6 +14,7 @@ import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Settings from "../../../serverSettings.ts";
+import * as TailnetNode from "../../../tailnet/TailnetNode.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
 const PreferenceFields = {
@@ -64,4 +67,24 @@ const EnvironmentPreferencesTool = Tool.make("supaterm_environment_preferences_u
   }),
   success: Schema.Struct(PreferenceFields),
 }).annotate(Tool.Destructive, true);
-export const EnvironmentToolkit = Toolkit.make(EnvironmentReadTool, EnvironmentPreferencesTool);
+const TailscaleStatusTool = Tool.make("supaterm_tailscale_status", {
+  ...shared,
+  dependencies: [...shared.dependencies, TailnetNode.TailnetNode],
+  description:
+    "Read whether this server is reachable through its built-in Tailscale node: the node's phase, its tailnet DNS name, whether it is serving, HTTPS certificate readiness, whether only the owner's Tailscale account may connect, and whether the node is tagged. Signing in, signing out, and changing access are done by the user in Settings.",
+  success: Schema.Struct({
+    phase: TailnetPhase,
+    dnsName: Schema.NullOr(Schema.String),
+    serving: Schema.Boolean,
+    https: TailnetHttpsState,
+    requireOwner: Schema.Boolean,
+    tagged: Schema.Boolean,
+  }),
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false);
+export const EnvironmentToolkit = Toolkit.make(
+  EnvironmentReadTool,
+  EnvironmentPreferencesTool,
+  TailscaleStatusTool,
+);

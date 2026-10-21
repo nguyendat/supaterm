@@ -517,8 +517,9 @@ function PairingForm({
             </p>
             <CommandBlock command="supaterm pair" className="mt-2" />
             <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-              Start Supaterm first, or run <code className="font-mono">supaterm serve</code>. Add{" "}
-              <code className="font-mono">--tailscale</code> to use your tailnet.
+              Start Supaterm first, or run <code className="font-mono">supaterm serve</code>. To
+              pair over your tailnet, sign in under Settings → Connections → Tailscale on that
+              computer first.
             </p>
           </CollapsiblePanel>
         </Collapsible>

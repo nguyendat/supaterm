@@ -2,12 +2,12 @@
 
 > For maintainers. Using Supaterm? See [docs/user](../user/).
 
-`.devcontainer/` gives you a ready-to-code Linux environment matching CI: Ubuntu 24.04, Mise-managed Node, pnpm, `vp`, Rust stable, and the GitHub CLI. Open the repo in VS Code and "Reopen in Container", or create a GitHub Codespace. Mise installation, dependency install, the Electron exec-bit repair, and the Vite dep-cache warmup all run automatically before you attach.
+`.devcontainer/` gives you a ready-to-code Linux environment matching CI: Ubuntu 24.04; Node, pnpm, `vp`, and Go from Mise; Rust stable; and the GitHub CLI. Open the repo in VS Code and "Reopen in Container", or create a GitHub Codespace. Mise installation, dependency install, the Electron exec-bit repair, and the Vite dep-cache warmup all run automatically before you attach.
 
 ## What works in the container
 
 - The full dev stack: `mise exec -- vp run dev`, then open the pairing URL it prints through the forwarded web port (5733). The bare origin is useless without the pairing token. In VS Code the forwarded port is a true localhost, so the printed URL works as-is; in browser Codespaces the forwarded origin differs, and if the server rejects it, pass the forwarded origin via `SUPATERM_DEV_ALLOWED_ORIGINS`.
-- Everything the Linux CI jobs run: focused `mise exec -- vp test run <files>`, `mise exec -- vp lint <files>`, package typechecks, `mise exec -- vp run build:desktop`, and the resource-monitor cargo build and tests. Use `mise exec -- vpr` for the Vite+ package runner.
+- Everything the Linux CI jobs run: focused `mise exec -- vp test run <files>`, `mise exec -- vp lint <files>`, package typechecks, `mise exec -- vp run build:desktop`, the resource-monitor cargo build and tests, and the Tailscale sidecar's `go vet` and `go test` in `native/tailnet`. Use `mise exec -- vpr` for the Vite+ package runner.
 
 ## State and safety
 

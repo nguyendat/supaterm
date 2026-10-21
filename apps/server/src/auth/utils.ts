@@ -9,6 +9,8 @@ import * as NodeCrypto from "node:crypto";
 import * as Base64Url from "effect/encoding/Base64Url";
 import * as Result from "effect/Result";
 
+import { tailnetPeerOf } from "../tailnet/TailnetIngress.ts";
+
 const SESSION_COOKIE_NAME = "supaterm_session";
 
 /**
@@ -168,7 +170,12 @@ export function deriveAuthClientMetadata(input: {
   readonly presented?: AuthClientPresentationMetadata;
 }): AuthClientMetadata {
   const userAgent = normalizeNonEmptyString(input.request.headers["user-agent"]);
-  const ipAddress = readRemoteAddressFromSource(input.request.source);
+  // Handed-off tailnet sockets have no remote address of their own.
+  const tailnetPeer = tailnetPeerOf(input.request);
+  const ipAddress =
+    tailnetPeer === undefined
+      ? readRemoteAddressFromSource(input.request.source)
+      : normalizeIpAddress(tailnetPeer.ip);
   const os = input.presented?.os ?? inferOs(userAgent);
   const browser = inferBrowser(userAgent);
   return {

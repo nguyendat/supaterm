@@ -51,8 +51,9 @@ parameters only pick targets; see
 [threadAccess](../../apps/server/src/mcp/threadAccess.ts).
 
 Issuer and resource URLs come from the request's Host and
-`X-Forwarded-Proto`, so one server answers over loopback and Tailscale Serve. A proxy that rewrites Host or drops the protocol header
-breaks sign-in.
+`X-Forwarded-Proto`, so one server answers over loopback, Tailscale Serve, and the built-in
+Tailscale node, which sets the header from the handed-off socket. A proxy that rewrites Host or
+drops the protocol header breaks sign-in.
 
 Bearer clients obtain short-lived WebSocket tickets through authenticated
 HTTP so long-lived tokens stay out of socket URLs. Browser sessions can

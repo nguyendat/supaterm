@@ -291,7 +291,8 @@ const signMacArchiveContents = Effect.fn("signMacArchiveContents")(function* (in
         entry.endsWith(".node") ||
         entry.endsWith(".dylib") ||
         entry.endsWith("spawn-helper") ||
-        entry.endsWith("supaterm-resource-monitor"),
+        entry.endsWith("supaterm-resource-monitor") ||
+        entry.endsWith("supaterm-tailnet"),
     )
     .map((entry) => path.join(input.contentDir, entry));
 
@@ -438,6 +439,7 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
   readonly version: string;
   readonly outputDir: string;
   readonly resourceMonitorDir: Option.Option<string>;
+  readonly tailnetDir: Option.Option<string>;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -465,6 +467,7 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
   const resourceMonitorDir = Option.getOrElse(input.resourceMonitorDir, () =>
     path.join(serverDir, "dist/resource-monitor"),
   );
+  const tailnetDir = Option.getOrElse(input.tailnetDir, () => path.join(serverDir, "dist/tailnet"));
 
   yield* requireInput(
     builtExecutable,
@@ -478,6 +481,7 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
     resourceMonitorDir,
     "Build the resource monitor or pass --resource-monitor-dir.",
   );
+  yield* requireInput(tailnetDir, "Build the Tailscale sidecar or pass --tailnet-dir.");
 
   const stem = cliArchiveStem(input.version, input.platform, input.arch);
   const stageRoot = yield* fs.makeTempDirectoryScoped({ prefix: "supaterm-cli-archive-" });
@@ -488,6 +492,7 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
   yield* fs.copyFile(builtExecutable, path.join(contentDir, executableName));
   yield* stageWebClient(webClient, path.join(contentDir, "client"));
   yield* fs.copy(resourceMonitorDir, path.join(contentDir, "resource-monitor"));
+  yield* fs.copy(tailnetDir, path.join(contentDir, "tailnet"));
   yield* stageRuntimeExternals({
     repoRoot,
     stageDir: contentDir,
@@ -562,6 +567,12 @@ const command = Command.make(
     resourceMonitorDir: Flag.String("resource-monitor-dir").pipe(
       Flag.withDescription(
         "Directory laid out like dist/resource-monitor (defaults to apps/server/dist/resource-monitor).",
+      ),
+      Flag.optional,
+    ),
+    tailnetDir: Flag.String("tailnet-dir").pipe(
+      Flag.withDescription(
+        "Directory laid out like dist/tailnet (defaults to apps/server/dist/tailnet).",
       ),
       Flag.optional,
     ),

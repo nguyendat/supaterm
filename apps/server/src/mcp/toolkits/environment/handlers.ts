@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Environment from "../../../environment/ServerEnvironment.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as Settings from "../../../serverSettings.ts";
+import * as TailnetNode from "../../../tailnet/TailnetNode.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { readCaller, unavailable } from "../../threadAccess.ts";
@@ -51,6 +52,21 @@ export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
         serverVersion: descriptor.serverVersion,
         platform: descriptor.platform,
         preferences: preferences(current),
+      };
+    }),
+  ),
+  supaterm_tailscale_status: McpToolAccess.reads(() =>
+    Effect.gen(function* () {
+      yield* access;
+      const tailnet = yield* TailnetNode.TailnetNode;
+      const status = yield* tailnet.currentStatus;
+      return {
+        phase: status.phase,
+        dnsName: status.self?.dnsName ?? null,
+        serving: status.httpsUrl !== undefined || status.httpUrl !== undefined,
+        https: status.https,
+        requireOwner: status.requireOwner,
+        tagged: status.self?.tagged ?? status.tags.length > 0,
       };
     }),
   ),

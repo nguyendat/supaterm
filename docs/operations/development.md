@@ -181,6 +181,11 @@ to retain packaging files for inspection. `--without-codex-micro` leaves out the
 keyboard and its native HID library; the app then hides that settings section. Run `vp run dist:desktop:artifact --help` for other
 options.
 
+Desktop and CLI artifacts also bundle the built-in Tailscale sidecar, which needs Go. `mise install`
+provides the pinned version; `vp run build:tailnet` builds it for this machine, which a dev server
+needs before **Settings → Connections → Tailscale** can sign in. It cross-compiles with
+`--platform` and `--arch`, so no per-platform toolchain is required.
+
 ### Linux AppImage prerequisites
 
 Build on Linux because the browser-secret helper links against the host's libsecret. Install

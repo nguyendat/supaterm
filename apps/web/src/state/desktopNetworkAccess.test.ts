@@ -21,7 +21,7 @@ const tailscaleEndpoint: AdvertisedEndpoint = {
   id: "tailscale-ip:100.74.126.34",
   httpBaseUrl: "http://100.74.126.34:37737/",
   wsBaseUrl: "ws://100.74.126.34:37737/",
-  label: "Tailscale IP",
+  label: "System Tailscale IP",
   provider: { id: "tailscale", kind: "private-network", label: "Tailscale", isAddon: true },
   reachability: "private-network",
   status: "available",

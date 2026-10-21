@@ -336,6 +336,14 @@ import {
 } from "./settings.ts";
 import { RelayConnectionInfo, RelayHostStatus, RelayPreparationError } from "./relay.ts";
 import {
+  TailnetConfigureInput,
+  TailnetError,
+  TailnetLoginResult,
+  TailnetSignInInput,
+  TailnetSignOutResult,
+  TailnetStatus,
+} from "./tailnet.ts";
+import {
   ScheduledTaskDeleteInput,
   ScheduledTaskDeleteResult,
   ScheduledTaskError,
@@ -568,6 +576,12 @@ export const WS_METHODS = {
   subscribeBackgroundPolicy: "subscribeBackgroundPolicy",
   subscribeRelayStatus: "subscribeRelayStatus",
   prepareRelay: "relay.prepare",
+  subscribeTailnetStatus: "subscribeTailnetStatus",
+  tailnetSignIn: "tailnet.signIn",
+  tailnetCancelSignIn: "tailnet.cancelSignIn",
+  tailnetReauthenticate: "tailnet.reauthenticate",
+  tailnetSignOut: "tailnet.signOut",
+  tailnetConfigure: "tailnet.configure",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
 } as const;
 
@@ -1839,6 +1853,41 @@ const WsPrepareRelayRpc = Rpc.make(WS_METHODS.prepareRelay, {
   error: RelayPreparationError,
 });
 
+const WsSubscribeTailnetStatusRpc = Rpc.make(WS_METHODS.subscribeTailnetStatus, {
+  payload: Schema.Struct({}),
+  success: TailnetStatus,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+const WsTailnetSignInRpc = Rpc.make(WS_METHODS.tailnetSignIn, {
+  payload: TailnetSignInInput,
+  success: TailnetLoginResult,
+  error: TailnetError,
+});
+
+const WsTailnetCancelSignInRpc = Rpc.make(WS_METHODS.tailnetCancelSignIn, {
+  payload: Schema.Struct({}),
+  error: TailnetError,
+});
+
+const WsTailnetReauthenticateRpc = Rpc.make(WS_METHODS.tailnetReauthenticate, {
+  payload: Schema.Struct({}),
+  success: TailnetLoginResult,
+  error: TailnetError,
+});
+
+const WsTailnetSignOutRpc = Rpc.make(WS_METHODS.tailnetSignOut, {
+  payload: Schema.Struct({}),
+  success: TailnetSignOutResult,
+  error: TailnetError,
+});
+
+const WsTailnetConfigureRpc = Rpc.make(WS_METHODS.tailnetConfigure, {
+  payload: TailnetConfigureInput,
+  error: TailnetError,
+});
+
 const WsSubscribeResourceTelemetryRpc = Rpc.make(WS_METHODS.subscribeResourceTelemetry, {
   payload: Schema.Struct({}),
   success: ResourceTelemetrySnapshot,
@@ -2033,6 +2082,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeBackgroundPolicyRpc,
   WsSubscribeRelayStatusRpc,
   WsPrepareRelayRpc,
+  WsSubscribeTailnetStatusRpc,
+  WsTailnetSignInRpc,
+  WsTailnetCancelSignInRpc,
+  WsTailnetReauthenticateRpc,
+  WsTailnetSignOutRpc,
+  WsTailnetConfigureRpc,
   WsSubscribeResourceTelemetryRpc,
   WsOrchestrationV2DispatchCommandRpc,
   WsOrchestrationV2GetWorkflowScriptRpc,

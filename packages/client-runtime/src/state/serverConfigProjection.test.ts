@@ -93,3 +93,57 @@ describe("applyServerConfigProjection settingsUpdated", () => {
     expect(nextSettings.providerInstances.claude.config.launchArgs).toBe("--verbose");
   });
 });
+
+describe("applyServerConfigProjection reachabilityUpdated", () => {
+  const lan = { kind: "lan", httpBaseUrl: "http://192.168.1.4:3773" } as const;
+  const tailnet = { kind: "tailnet", httpBaseUrl: "https://host.tailnet.ts.net/" } as const;
+  const auth = (policy: string) => ({
+    policy,
+    bootstrapMethods: [],
+    sessionMethods: [],
+    sessionCookieName: "supaterm_session",
+  });
+  const current = Option.some({
+    config: {
+      auth: auth("loopback-browser"),
+      directEndpoints: [lan],
+      settings: { favorites: [] },
+    } as unknown as ServerConfig,
+    latestEvent: {} as ServerConfigStreamEvent,
+    source: "live" as const,
+  });
+  const reachability = (policy: string, directEndpoints: ReadonlyArray<unknown>) =>
+    ({
+      version: 1,
+      type: "reachabilityUpdated",
+      payload: { auth: auth(policy), directEndpoints },
+    }) as unknown as ServerConfigStreamEvent;
+
+  it("merges learned routes and the auth policy without touching the rest of the config", () => {
+    const next = Option.getOrThrow(
+      applyServerConfigProjection(current, reachability("remote-reachable", [tailnet, lan])),
+    );
+    const before = Option.getOrThrow(current).config;
+    expect(next.config.auth.policy).toBe("remote-reachable");
+    expect(next.config.directEndpoints).toEqual([tailnet, lan]);
+    expect(next.config.directEndpoints?.[1]).toBe(before.directEndpoints?.[0]);
+    expect(next.config.settings).toBe(before.settings);
+    expect(next.latestEvent.type).toBe("reachabilityUpdated");
+  });
+
+  it("withdraws routes the server stopped advertising", () => {
+    const next = Option.getOrThrow(
+      applyServerConfigProjection(current, reachability("loopback-browser", [])),
+    );
+    expect(next.config.directEndpoints).toEqual([]);
+    expect(next.config.auth).toBe(Option.getOrThrow(current).config.auth);
+  });
+
+  it("waits for a snapshot before applying an update", () => {
+    expect(
+      Option.isNone(
+        applyServerConfigProjection(Option.none(), reachability("remote-reachable", [tailnet])),
+      ),
+    ).toBe(true);
+  });
+});

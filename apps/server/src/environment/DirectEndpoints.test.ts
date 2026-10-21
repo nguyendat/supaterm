@@ -11,6 +11,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import { describe, expect, it } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";
+import { TailnetExposure } from "../tailnet/TailnetExposure.ts";
 import * as DirectEndpoints from "./DirectEndpoints.ts";
 import { resolveBoundEndpoints } from "./DirectEndpoints.ts";
 
@@ -235,6 +236,46 @@ describe("DirectEndpoints Tailscale Serve", () => {
   effectIt.effect("leaves the tailnet name out when Serve is not forwarding", () =>
     Effect.gen(function* () {
       expect(yield* resolveWithServe(502)).toEqual([]);
+    }),
+  );
+});
+
+describe("DirectEndpoints built-in Tailscale", () => {
+  effectIt.effect("lists the built-in node's routes, HTTPS first, even on a loopback server", () =>
+    Effect.gen(function* () {
+      const endpoints = [
+        { kind: "tailnet" as const, httpBaseUrl: "https://host.tail1234.ts.net/" },
+        { kind: "tailnet" as const, httpBaseUrl: "http://100.64.0.1/" },
+      ];
+      const resolved = yield* Effect.flatMap(DirectEndpoints.DirectEndpoints, (service) =>
+        service.resolve(),
+      ).pipe(
+        Effect.provide(
+          DirectEndpoints.layer.pipe(
+            Layer.provide(
+              Layer.succeed(TailnetExposure, {
+                current: Effect.succeed({ serving: true, endpoints }),
+                changes: Stream.empty,
+              }),
+            ),
+            Layer.provide(
+              Layer.effect(
+                ServerConfig.ServerConfig,
+                Effect.map(ServerConfig.ServerConfig, (config) => ({
+                  ...config,
+                  host: "127.0.0.1",
+                })),
+              ).pipe(
+                Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-direct-" })),
+                Layer.provide(NodeServices.layer),
+              ),
+            ),
+            Layer.provide(layerTailscaleUp),
+            Layer.provide(layerServeProbe(200)),
+          ),
+        ),
+      );
+      expect(resolved).toEqual(endpoints);
     }),
   );
 });

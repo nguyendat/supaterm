@@ -1,4 +1,6 @@
 import {
+  AuthAccessReadScope,
+  AuthAccessWriteScope,
   AuthEnvironmentMaintainScope,
   AuthDiagnosticsReadScope,
   AuthFilesystemReadScope,
@@ -57,6 +59,19 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.subscribeBackgroundPolicy)).toBe(
       AuthOrchestrationReadScope,
     );
+  });
+
+  it("keeps built-in Tailscale behind access scopes", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.subscribeTailnetStatus)).toBe(AuthAccessReadScope);
+    for (const method of [
+      WS_METHODS.tailnetSignIn,
+      WS_METHODS.tailnetCancelSignIn,
+      WS_METHODS.tailnetReauthenticate,
+      WS_METHODS.tailnetSignOut,
+      WS_METHODS.tailnetConfigure,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthAccessWriteScope);
+    }
   });
 
   it("requires permission to operate on a thread before uploading feedback", () => {

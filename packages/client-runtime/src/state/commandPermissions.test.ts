@@ -86,6 +86,30 @@ describe("command permissions", () => {
       }),
     ),
   );
+  it.effect("requires the destination access grant to change built-in Tailscale", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const configure = createCommandPermissions(runtime, WS_METHODS.tailnetConfigure);
+        registry.set(
+          sessions(env),
+          AsyncResult.success({ ...grant(true), scopes: [AuthSettingsWriteScope] }),
+        );
+        expect(registry.get(configure.permissionAtom(env))).toBe(false);
+        expect((yield* configure.authorize(registry, env).pipe(Effect.flip)).requiredScope).toBe(
+          AuthAccessWriteScope,
+        );
+        registry.set(
+          sessions(env),
+          AsyncResult.success({ ...grant(false), scopes: [AuthAccessWriteScope] }),
+        );
+        expect(registry.get(configure.permissionAtom(env))).toBe(true);
+        yield* configure.authorize(registry, env);
+        registry.set(sessions(other), AsyncResult.success(grant(false)));
+        expect(registry.get(configure.permissionAtom(other))).toBe(false);
+      }),
+    ),
+  );
   it.effect.each([
     { method: WS_METHODS.mcpAppsCallTool, scope: AuthOrchestrationOperateScope },
     { method: WS_METHODS.mcpAppsUpdateModelContext, scope: AuthOrchestrationOperateScope },

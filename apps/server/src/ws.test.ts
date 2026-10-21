@@ -1,4 +1,5 @@
 import * as RelayAccess from "./relay/RelayAccess.ts";
+import * as TailnetNode from "./tailnet/TailnetNode.ts";
 import * as OrchestrationSkills from "./provider/OrchestrationSkills.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -122,6 +123,7 @@ import {
   subscribeOrchestrationV2Thread,
   WS_RPC_SERVER_OPTIONS,
   withLateEditorConfig,
+  reachabilityUpdates,
   relayAdvertisementUpdates,
 } from "./ws.ts";
 
@@ -396,6 +398,63 @@ it.effect.each([relayAdvertisement, null])(
     }),
 );
 
+const localAuth: ServerConfig["auth"] = {
+  policy: "desktop-managed-local",
+  bootstrapMethods: ["desktop-bootstrap"],
+  sessionMethods: ["browser-session-cookie", "bearer-access-token"],
+  sessionCookieName: "supaterm_session_3773",
+};
+const tailnetReachable = {
+  auth: {
+    ...localAuth,
+    policy: "remote-reachable" as const,
+    bootstrapMethods: ["desktop-bootstrap" as const, "one-time-token" as const],
+  },
+  directEndpoints: [{ kind: "tailnet" as const, httpBaseUrl: "https://host.tail1234.ts.net/" }],
+};
+
+it.effect("sends reachability changes once each, skipping what the snapshot already holds", () =>
+  Effect.gen(function* () {
+    const config = snapshotConfig({ auth: localAuth, directEndpoints: [] });
+    const events = yield* reachabilityUpdates(
+      config,
+      Stream.make({ auth: localAuth, directEndpoints: [] }, tailnetReachable, tailnetReachable, {
+        auth: localAuth,
+        directEndpoints: [],
+      }),
+    ).pipe(Stream.runCollect);
+    assert.deepEqual(
+      Array.from(events).map((event) => event.payload),
+      [tailnetReachable, { auth: localAuth, directEndpoints: [] }],
+    );
+  }),
+);
+
+it.effect("keeps reachability in late editor snapshots", () =>
+  Effect.gen(function* () {
+    const sent = yield* Deferred.make<void>();
+    const events = yield* withLateEditorConfig(
+      snapshotConfig({ auth: localAuth, directEndpoints: [] }),
+      Stream.make({ version: 1, type: "reachabilityUpdated", payload: tailnetReachable }),
+      {
+        resolveAvailableEditors: () => Deferred.await(sent).pipe(Effect.as(["file-manager"])),
+        resolveFileManagerRevealKind: () => Effect.succeed(undefined),
+      },
+    ).pipe(
+      Stream.tap((event) =>
+        event.type === "reachabilityUpdated" ? Deferred.succeed(sent, undefined) : Effect.void,
+      ),
+      Stream.runCollect,
+    );
+    const late = events[1];
+    assert.equal(late?.type, "snapshot");
+    if (late?.type === "snapshot") {
+      assert.deepEqual(late.config.auth, tailnetReachable.auth);
+      assert.deepEqual(late.config.directEndpoints, tailnetReachable.directEndpoints);
+    }
+  }),
+);
+
 const ReplayTestLayer = OrchestrationEventStore.layer.pipe(
   Layer.provideMerge(SqlitePersistence.layerMemory),
 );
@@ -565,6 +624,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
     advertisement: Effect.succeed({}),
     advertisements: Stream.empty,
   }),
+  Layer.mock(TailnetNode.TailnetNode)({ exposureChanges: Stream.empty }),
   Layer.mock(ServerLifecycleEvents.ServerLifecycleEvents)({}),
   Layer.mock(ServerRuntimeStartup.ServerRuntimeStartup)({}),
   Layer.mock(ServerSelfUpdate.ServerSelfUpdate)({}),

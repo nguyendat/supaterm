@@ -19,6 +19,7 @@ import * as Environment from "../../../environment/ServerEnvironment.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Settings from "../../../serverSettings.ts";
+import * as TailnetNode from "../../../tailnet/TailnetNode.ts";
 import * as McpHttpServer from "../../McpHttpServer.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -40,6 +41,40 @@ const caller: McpInvocationContext.McpInvocationScope = {
   capabilities: new Set(["orchestration" as const]),
   issuedAt: 0,
 };
+const mcpClient = McpSchema.McpServerClient.of({
+  clientId: 1,
+  protocolVersion: "2025-06-18",
+  clientCapabilities: {},
+  clientInfo: { name: "preferences", version: "1" },
+  initializePayload: {
+    protocolVersion: "2025-06-18",
+    capabilities: {},
+    clientInfo: { name: "preferences", version: "1" },
+  },
+  getClient: Effect.die("unused"),
+});
+const layerTailnet = Layer.mock(TailnetNode.TailnetNode)({
+  currentStatus: Effect.succeed({
+    phase: "running",
+    suggestedHostname: "khoi-abcdefghij-supaterm",
+    hostname: "khoi-abcdefghij-supaterm",
+    tags: [],
+    serveEnabled: true,
+    requireOwner: true,
+    loggingAllowed: false,
+    loggingRequired: false,
+    https: "ready",
+    httpsUrl: "https://khoi-abcdefghij-supaterm.tail1234.ts.net/",
+    httpUrl: "http://100.64.0.1/",
+    self: {
+      dnsName: "khoi-abcdefghij-supaterm.tail1234.ts.net",
+      ipv4: "100.64.0.1",
+      loginName: "khoi@github",
+      tagged: false,
+      tags: [],
+    },
+  }),
+});
 const layerEnvironment = Layer.mock(Environment.ServerEnvironment)({
   getDescriptor: Effect.succeed({
     environmentId,
@@ -90,6 +125,42 @@ it.effect("updates preferences for a thread caller through the /mcp registration
         ),
         Layer.provide(layerEnvironment),
         Layer.provide(Settings.layerTest()),
+        Layer.provide(layerTailnet),
+      ),
+    ),
+  ),
+);
+
+it.effect("reports built-in Tailscale reachability without any URL", () =>
+  Effect.gen(function* () {
+    const server = yield* McpServer.McpServer;
+    const result = yield* server
+      .callTool({ name: "supaterm_tailscale_status", arguments: {} })
+      .pipe(
+        Effect.provideService(McpInvocationContext.McpInvocationContext, caller),
+        Effect.provideService(McpSchema.McpServerClient, mcpClient),
+      );
+    expect(result.isError).toBe(false);
+    expect(result.structuredContent).toEqual({
+      phase: "running",
+      dnsName: "khoi-abcdefghij-supaterm.tail1234.ts.net",
+      serving: true,
+      https: "ready",
+      requireOwner: true,
+      tagged: false,
+    });
+  }).pipe(
+    Effect.provide(
+      McpHttpServer.layerEnvironmentToolkit.pipe(
+        Layer.provideMerge(McpServer.McpServer.layer),
+        Layer.provide(
+          Layer.mock(ThreadManagement.ThreadManagementService)({
+            getThreadShell: (id) => Effect.succeed(liveThreadShell(id)),
+          }),
+        ),
+        Layer.provide(layerEnvironment),
+        Layer.provide(Settings.layerTest()),
+        Layer.provide(layerTailnet),
       ),
     ),
   ),

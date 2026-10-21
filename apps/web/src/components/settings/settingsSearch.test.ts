@@ -169,6 +169,11 @@ describe("searchSettings", () => {
     });
   });
 
+  it("offers the built-in Tailscale section outside the desktop app", () => {
+    expect(searchSettings("tailscale").map((item) => item.id)).toContain("tailscale");
+    expect(searchSettings("tailnet hostname").map((item) => item.id)).toContain("tailscale");
+  });
+
   it("hides settings whose controls are unavailable", () => {
     const available = filterAvailableSettingsSearchItems({
       hasEnvironment: false,
@@ -189,7 +194,7 @@ describe("searchSettings", () => {
       "review-guide-model",
       "review-guide-instructions",
       "source-control-writing-style",
-      "tailscale-https",
+      "tailscale",
       "wsl-backend",
       "auto-mark-done-inactive-threads",
       "auto-mark-done-merged-threads",

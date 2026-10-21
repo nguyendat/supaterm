@@ -996,6 +996,36 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:relay-status",
       tag: WS_METHODS.subscribeRelayStatus,
     }),
+    tailnetStatus: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:tailnet-status",
+      tag: WS_METHODS.subscribeTailnetStatus,
+    }),
+    tailnetSignIn: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:tailnet-sign-in",
+      tag: WS_METHODS.tailnetSignIn,
+      concurrency: { mode: "singleFlight", key: ({ environmentId }) => environmentId },
+    }),
+    tailnetCancelSignIn: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:tailnet-cancel-sign-in",
+      tag: WS_METHODS.tailnetCancelSignIn,
+      concurrency: { mode: "singleFlight", key: ({ environmentId }) => environmentId },
+    }),
+    tailnetReauthenticate: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:tailnet-reauthenticate",
+      tag: WS_METHODS.tailnetReauthenticate,
+      concurrency: { mode: "singleFlight", key: ({ environmentId }) => environmentId },
+    }),
+    tailnetSignOut: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:tailnet-sign-out",
+      tag: WS_METHODS.tailnetSignOut,
+      concurrency: { mode: "singleFlight", key: ({ environmentId }) => environmentId },
+    }),
+    // Single-flight would hand a second, different patch the first one's result and drop it.
+    tailnetConfigure: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:tailnet-configure",
+      tag: WS_METHODS.tailnetConfigure,
+      concurrency: { mode: "serial", key: ({ environmentId }) => environmentId },
+    }),
     providerAuthState: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:provider:auth-state",
       tag: WS_METHODS.providerAuthSubscribe,

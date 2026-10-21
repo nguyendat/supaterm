@@ -7,6 +7,11 @@ inputs:
 runs:
   using: composite
   steps:
+    # Only the jobs that build the Tailscale sidecar need Go, and they install
+    # it with actions/setup-go. Without this, every `mise exec` and `mise run`
+    # downloads it.
+    - shell: bash
+      run: echo "MISE_DISABLE_TOOLS=go" >> "$GITHUB_ENV"
     - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8
       with:
         cache: ${{ inputs.cache }}

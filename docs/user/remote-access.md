@@ -22,7 +22,7 @@ supaterm pair
 ```
 
 The command activates the relay before printing the link. Pass `--no-relay` to
-pair directly, or `--tailscale` to pair through Tailscale Serve.
+pair directly, or `--tailscale` to pair through [Tailscale](#tailscale).
 
 If Encrypted Relay is off, enable it from the terminal before creating the link:
 
@@ -181,34 +181,61 @@ machine even when all are busy and prefers machines with spare capacity. If no u
 resource readings are available, machine preferences determine the selection. A machine
 set to **Manual only** remains excluded. Mobile keeps its manual environment selection.
 
-### Tailscale HTTPS
+### Tailscale
 
-Join both devices to the same tailnet. In the desktop app, enable **Tailscale
-HTTPS** in **Settings → Connections**. **Network access** can stay off; Tailscale
-reaches the backend on this machine. Turn it off there to remove that route.
+Supaterm can join your tailnet by itself, so the host does not need the Tailscale
+app. The devices you connect from still need Tailscale.
 
-To start a command-line server with Tailscale HTTPS:
+1. Open **Settings → Connections → Tailscale** and choose **Sign In**.
+2. Pick a hostname and, optionally, tags. Tags make this a tagged device, so your
+   tailnet's access policy decides who can connect.
+3. Sign in to Tailscale in the browser that opens. On a remote host, open the
+   link or scan the QR code on any device.
+
+Supaterm appears as its own device in your tailnet. Pair your other devices as
+usual; the pairing link uses an address such as `https://host.tailnet.ts.net/`.
+**Network access** can stay off.
+
+- **Serve over Tailscale** turns the tailnet address on or off without signing out.
+- **Limit access to your Tailscale account** accepts connections only from
+  devices signed in to the same Tailscale account. It is on by default for
+  untagged devices and does not apply to tagged ones. Pairing is still required
+  either way.
+- **Preferred hostname** changes the address. Devices paired only through the old
+  name may need to pair again.
+- To change tags, sign out and sign in again.
+
+The secure address needs **HTTPS certificates** turned on in your Tailscale admin
+console's DNS settings. Until then, Supaterm serves only a plain HTTP address such
+as `http://100.101.102.103/`. Desktop and mobile apps can use it; browsers lose
+features such as clipboard copy and notifications, and a hosted web app cannot
+use it. HTTPS hostnames are published in public certificate logs.
+
+If your tailnet requires network logging, Supaterm asks before turning on log
+uploads to Tailscale; otherwise it sends none.
+
+From a terminal on the host:
 
 ```bash
-supaterm serve --tailscale-serve
+supaterm tailscale login
+supaterm tailscale status
+supaterm tailscale logout
 ```
 
-For an already-running server:
+`login` prints the sign-in link and a QR code. Use `--auth-key-file <path>` to
+sign in with a Tailscale auth key instead. Then run `supaterm pair --tailscale` to
+create a pairing link that uses the tailnet address.
 
-```bash
-supaterm pair --tailscale
-```
+Signing out removes Supaterm's Tailscale keys from the host. If Tailscale can't
+be reached at that moment, remove the device from your Tailscale admin console.
 
-The pairing link uses an address such as `https://machine.tailnet.ts.net/`.
-The mapping created by `pair --tailscale` persists across restarts. Remove its
-default-port mapping with:
+#### System Tailscale Serve
 
-```bash
-tailscale serve --https=443 off
-```
-
-If that port is already in use, choose another with
-`--tailscale-serve-port`. See `supaterm pair --help` for other pairing options.
+Servers started with `supaterm serve --tailscale-serve`, or set up earlier through
+the Tailscale app, keep working. When this is on, **Settings → Connections**
+shows **System Tailscale Serve** with **Turn off**, which removes only Supaterm's
+mapping. When the built-in node is not signed in, `supaterm pair --tailscale`
+still sets up Tailscale Serve through the system Tailscale app.
 
 ### Hosted web app
 

@@ -554,6 +554,17 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
         ELECTRON_RUN_AS_NODE: "1",
 
         SUPATERM_CLI_SHIM_PATH: Option.getOrUndefined(input.cliPath),
+        // The server bundle sits inside an asar, so it cannot find the sidecar
+        // the artifact build places in resources/tailnet by its own path.
+        ...(environment.isPackaged
+          ? {
+              SUPATERM_TAILNET_PATH: environment.path.join(
+                environment.resourcesPath,
+                "tailnet",
+                environment.platform === "win32" ? "supaterm-tailnet.exe" : "supaterm-tailnet",
+              ),
+            }
+          : {}),
       },
       extendEnv: true,
       bootstrap,

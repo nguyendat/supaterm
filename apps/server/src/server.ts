@@ -117,6 +117,11 @@ import * as RelayAccess from "./relay/RelayAccess.ts";
 import * as RelayHttp from "./relay/RelayHttp.ts";
 import * as RelayIdentity from "./relay/RelayIdentity.ts";
 import * as RelayIngress from "./relay/RelayIngress.ts";
+import * as TailnetBinary from "./tailnet/TailnetBinary.ts";
+import * as TailnetHttp from "./tailnet/TailnetHttp.ts";
+import * as TailnetIngress from "./tailnet/TailnetIngress.ts";
+import * as TailnetNode from "./tailnet/TailnetNode.ts";
+import * as TailnetSidecar from "./tailnet/TailnetSidecar.ts";
 import { TunnelSocket } from "@supaterm/shared/relay/tunnelNode";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as AuthHttp from "./auth/http.ts";
@@ -255,7 +260,9 @@ const layerResourceDiagnostics = Layer.mergeAll(
 const layerHttpServer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
-    const server = guardHttpResponseWriteErrors(NodeHttp.createServer());
+    const server = guardHttpResponseWriteErrors(
+      TailnetIngress.installTailnetForwardedHeaders(NodeHttp.createServer()),
+    );
     return NodeHttpServer.layer(() => rejectRequestsUntilServing(server), {
       host: config.host ?? "127.0.0.1",
       port: config.port,
@@ -267,11 +274,16 @@ const layerHttpServer = Layer.unwrap(
       websocket: { perMessageDeflate: true },
     }).pipe(
       Layer.provideMerge(
-        Layer.succeed(RelayIngress.RelayIngress, {
-          accept: (stream) => {
-            server.emit("connection", new TunnelSocket(stream));
-          },
-        }),
+        Layer.mergeAll(
+          Layer.succeed(RelayIngress.RelayIngress, {
+            accept: (stream) => {
+              server.emit("connection", new TunnelSocket(stream));
+            },
+          }),
+          TailnetIngress.layer((socket) => {
+            server.emit("connection", socket);
+          }),
+        ),
       ),
     );
   }),
@@ -442,10 +454,19 @@ const layerServerEnvironment = Layer.effect(
   }),
 ).pipe(Layer.provideMerge(ServerEnvironment.layer), Layer.provideMerge(layerRelayAccess));
 
+// The ingress comes from layerHttpServer, which owns the Node server it hands sockets to.
+const layerTailnetNode = TailnetNode.layer.pipe(
+  Layer.provide(TailnetBinary.layer),
+  Layer.provide(TailnetSidecar.layer),
+  Layer.provide(ServerEnvironment.layerIdentity),
+);
+const layerTailnetExposure = TailnetNode.layerExposure.pipe(Layer.provide(layerTailnetNode));
+
 const layerAuth = EnvironmentAuth.layer.pipe(
   Layer.provideMerge(layerPersistence),
   Layer.provide(layerServerEnvironment),
   Layer.provide(ServerSecretStore.layer),
+  Layer.provide(layerTailnetExposure),
 );
 
 const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
@@ -624,7 +645,8 @@ const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
   Layer.provideMerge(AnalyticsService.layer),
   Layer.provideMerge(ExternalLauncher.layer),
   Layer.provideMerge(RemoteOpenTargets.layer),
-  Layer.provideMerge(DirectEndpoints.layer),
+  Layer.provideMerge(DirectEndpoints.layer.pipe(Layer.provide(layerTailnetExposure))),
+  Layer.provideMerge(layerTailnetNode),
   Layer.provideMerge(ServerLifecycleEvents.layer),
   Layer.provide(NetService.layer),
 );
@@ -642,6 +664,7 @@ const layerMakeRoutes = Layer.mergeAll(
     HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
       Layer.provide(AuthHttp.layer),
       Layer.provide(RelayHttp.layer),
+      Layer.provide(TailnetHttp.layer),
       Layer.provide(McpOAuthHttp.layer.pipe(Layer.provide(McpOAuth.layer))),
       Layer.provide(OrchestrationHttp.layer),
       Layer.provide(PullRequestHttp.layer),
@@ -739,12 +762,13 @@ const layerMakeServer = Layer.unwrap(
               }
 
               const localPort = address.port;
+              const localHost = loopbackUrlHostForAddress(address);
               return yield* ensureTailscaleServe({
                 localPort,
                 servePort: config.tailscaleServePort,
-                localHost: loopbackUrlHostForAddress(address),
+                localHost,
               }).pipe(
-                Effect.as({ localPort, servePort: config.tailscaleServePort }),
+                Effect.as({ localPort, localHost, servePort: config.tailscaleServePort }),
                 Effect.tap(() =>
                   Effect.logInfo("Tailscale Serve configured", {
                     localPort,
@@ -762,11 +786,18 @@ const layerMakeServer = Layer.unwrap(
             }).pipe(Effect.ensuring(Deferred.succeed(tailscaleSettled, undefined))),
             (configured) =>
               configured
-                ? disableTailscaleServe({ servePort: configured.servePort }).pipe(
-                    Effect.tap(() =>
-                      Effect.logInfo("Tailscale Serve disabled", {
-                        servePort: configured.servePort,
-                      }),
+                ? disableTailscaleServe(configured).pipe(
+                    Effect.tap((result) =>
+                      result.outcome === "not-owned"
+                        ? Effect.logWarning("Left Tailscale Serve in place: it is not Supaterm's", {
+                            reason: result.reason,
+                            manualCommand: result.manualCommand,
+                            servePort: configured.servePort,
+                          })
+                        : Effect.logInfo("Tailscale Serve disabled", {
+                            outcome: result.outcome,
+                            servePort: configured.servePort,
+                          }),
                     ),
                     Effect.catch((cause) =>
                       Effect.logWarning("Failed to disable Tailscale Serve", {
@@ -813,6 +844,13 @@ const layerMakeServer = Layer.unwrap(
           yield* awaitActivation;
           const relay = yield* RelayAccess.RelayAccess;
           yield* relay.start;
+        }),
+      ),
+      Layer.effectDiscard(
+        Effect.gen(function* () {
+          yield* awaitActivation;
+          const tailnet = yield* TailnetNode.TailnetNode;
+          yield* tailnet.start;
         }),
       ),
     );

@@ -27,6 +27,7 @@ import { themeCommand } from "./cli/theme.ts";
 import { traceCommand } from "./cli/trace.ts";
 import { relayClientCommand } from "./cli/relayClient.ts";
 import { settingsCommand } from "./cli/settings.ts";
+import { tailscaleCommand } from "./cli/tailscale.ts";
 import { triageCommand } from "./cli/triage.ts";
 
 const layerCliRuntime = Layer.mergeAll(NodeServices.layer, NetService.layer);
@@ -65,6 +66,7 @@ export const makeCli = () =>
       triageCommand,
       relayClientCommand,
       settingsCommand,
+      tailscaleCommand,
     ]),
   );
 

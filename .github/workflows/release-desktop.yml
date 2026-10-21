@@ -164,6 +164,22 @@ jobs:
             native/hyprland-snap-shot/target/${{ inputs.rust_target }}/release/supaterm-hyprland-snap-shot
           key: linux-capture-helpers-${{ inputs.rust_target }}-${{ hashFiles('native/kde-snap-shot/Cargo.lock', 'native/kde-snap-shot/Cargo.toml', 'native/kde-snap-shot/src/**', 'native/hyprland-snap-shot/Cargo.lock', 'native/hyprland-snap-shot/Cargo.toml', 'native/hyprland-snap-shot/src/**', 'native/hyprland-snap-shot/protocols/**') }}
 
+      # resource_key is the sidecar's <platform>-<arch> key in Node's names,
+      # which is also the directory scripts/build-tailnet.ts writes to.
+      - name: Cache Tailscale sidecar
+        id: tailnet_cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: native/tailnet/dist/${{ inputs.resource_key }}/supaterm-tailnet${{ inputs.platform == 'win' && '.exe' || '' }}
+          key: tailnet-${{ inputs.resource_key }}-${{ hashFiles('native/tailnet/go.mod', 'native/tailnet/go.sum', 'native/tailnet/**/*.go', 'scripts/build-tailnet.ts') }}
+
+      - name: Setup Go
+        if: steps.tailnet_cache.outputs.cache-hit != 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: native/tailnet/go.mod
+          cache: false
+
       - name: Setup Rust
         if: steps.resource_monitor_cache.outputs.cache-hit != 'true' || (inputs.platform == 'linux' && steps.capture_helper_cache.outputs.cache-hit != 'true')
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
@@ -216,6 +232,16 @@ jobs:
         if: steps.resource_monitor_cache.outputs.cache-hit != 'true'
         shell: bash
         run: cargo ${{ runner.os != 'Windows' && inputs.platform == 'win' && 'xwin build' || 'build' }} --locked --release --manifest-path native/resource-monitor/Cargo.toml --target "${INPUTS_RUST_TARGET}"
+
+      # Go cross-compiles without cgo, so any runner builds any target.
+      - name: Build Tailscale sidecar
+        if: steps.tailnet_cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          node scripts/build-tailnet.ts \
+            --platform "${INPUTS_RESOURCE_KEY%-*}" \
+            --arch "${INPUTS_ARCH}" \
+            --out "native/tailnet/dist/${INPUTS_RESOURCE_KEY}"
 
       - name: Prepare Azure Trusted Signing
         if: inputs.platform == 'win' && runner.os == 'Windows'
@@ -380,6 +406,15 @@ jobs:
           mkdir -p "$target_dir"
           cp "native/resource-monitor/target/${INPUTS_RUST_TARGET}/release/${binary_name}" "$target_dir/$binary_name"
 
+      - name: Stage Tailscale sidecar for the CLI archive
+        if: inputs.cli_archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          target_dir="$RUNNER_TEMP/cli-tailnet"
+          mkdir -p "$target_dir"
+          cp -R "native/tailnet/dist/${INPUTS_RESOURCE_KEY}" "$target_dir/"
+
       - name: Build CLI archive
         if: inputs.cli_archive
         shell: bash
@@ -402,6 +437,7 @@ jobs:
             --arch "${INPUTS_ARCH}" \
             --version "${INPUTS_VERSION}" \
             --resource-monitor-dir "$RUNNER_TEMP/cli-resource-monitor" \
+            --tailnet-dir "$RUNNER_TEMP/cli-tailnet" \
             --output-dir release-cli
 
       - name: Smoke-test CLI archive
@@ -517,6 +553,7 @@ jobs:
         env:
           pnpm_config_cache_dir: ${{ runner.temp }}/pnpm-metadata
           SUPATERM_DESKTOP_REUSE_RESOURCE_MONITOR: true
+          SUPATERM_DESKTOP_REUSE_TAILNET: true
           SUPATERM_DESKTOP_REUSE_LINUX_CAPTURE_HELPERS: ${{ steps.capture_helper_cache.outputs.cache-hit == 'true' }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -683,6 +720,13 @@ jobs:
           path: resource-monitor-publish/${{ inputs.resource_key }}/*
           if-no-files-found: error
 
+      - name: Upload Tailscale sidecar
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tailnet-${{ inputs.resource_key }}
+          path: native/tailnet/dist/${{ inputs.resource_key }}/*
+          if-no-files-found: error
+
   verify:
     name: Verify
     needs: [build]
@@ -763,4 +807,66 @@ jobs:
             throw new Error(`Resource monitor exited ${exitCode} with: ${output}`);
           }
           console.log(`Resource monitor sampled ${sample.scannedProcessCount} processes.`);
+          EOF
+
+      # Go cross-compiles this binary on Linux, so this is the first time the
+      # signed build runs on its own architecture. The sidecar answers configure
+      # with hello before it starts tsnet; it is stopped there, with a throwaway
+      # state directory, so no device is ever enrolled.
+      - name: Smoke-test Tailscale sidecar
+        shell: bash
+        env:
+          SIDECAR: verify/${{ inputs.platform }}-${{ inputs.arch }}-unpacked/resources/tailnet/supaterm-tailnet.exe
+        run: |
+          node --input-type=module <<'EOF'
+          import { spawn } from "node:child_process";
+          import { randomBytes } from "node:crypto";
+          import { mkdtempSync, readFileSync } from "node:fs";
+          import { tmpdir } from "node:os";
+          import { join } from "node:path";
+          const image = readFileSync(process.env.SIDECAR);
+          const machine = image.readUInt16LE(image.readUInt32LE(0x3c) + 4);
+          const expectedMachine = { arm64: 0xaa64, x64: 0x8664 }[process.env.INPUTS_ARCH];
+          if (machine !== expectedMachine) {
+            throw new Error(`Sidecar is built for PE machine 0x${machine.toString(16)}, expected 0x${expectedMachine.toString(16)}.`);
+          }
+          const sidecar = spawn(process.env.SIDECAR, { stdio: ["pipe", "pipe", "inherit"] });
+          try {
+            sidecar.stdout.setEncoding("utf8");
+            let output = "";
+            const hello = new Promise((resolve, reject) => {
+              const timer = setTimeout(() => reject(new Error(`No hello within 30s: ${output}`)), 30_000);
+              sidecar.on("error", reject);
+              sidecar.on("close", (code) => reject(new Error(`Sidecar exited ${code} before hello: ${output}`)));
+              sidecar.stdout.on("data", (chunk) => {
+                output += chunk;
+                const end = output.indexOf("\n");
+                if (end !== -1) {
+                  clearTimeout(timer);
+                  resolve(JSON.parse(output.slice(0, end)));
+                }
+              });
+            });
+            const configure = {
+              v: 1,
+              type: "configure",
+              dir: join(mkdtempSync(join(tmpdir(), "supaterm-tailnet-smoke-")), "tailscale"),
+              hostname: "supaterm-release-smoke",
+              tags: [],
+              serve: false,
+              allowLogging: false,
+              ingress: {
+                address: `\\\\.\\pipe\\supaterm-tailnet-smoke-${randomBytes(8).toString("hex")}`,
+                secret: randomBytes(32).toString("hex"),
+              },
+            };
+            sidecar.stdin.write(`${JSON.stringify(configure)}\n`);
+            const message = await hello;
+            if (message.v !== 1 || message.type !== "hello" || typeof message.tailscaleVersion !== "string") {
+              throw new Error(`Unexpected hello: ${JSON.stringify(message)}`);
+            }
+            console.log(`Tailscale sidecar ${message.version} (tailscale ${message.tailscaleVersion}) started.`);
+          } finally {
+            sidecar.kill();
+          }
           EOF

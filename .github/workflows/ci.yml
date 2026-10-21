@@ -336,6 +336,45 @@ jobs:
             cargo test --locked --manifest-path "native/$crate/Cargo.toml"
           done
 
+  # The Tailscale sidecar, on its own runner for the same reason as Rust.
+  go:
+    name: Go
+    runs-on: depot-ubuntu-24.04-8
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: native/tailnet
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: native/tailnet/go.mod
+          cache-dependency-path: native/tailnet/go.sum
+
+      - name: Check Go formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [[ -n "$unformatted" ]]; then
+            printf 'Run gofmt -w on:\n%s\n' "$unformatted" >&2
+            exit 1
+          fi
+
+      # Every release target is cross-compiled from Linux, so vet each OS's
+      # build here rather than discovering a Windows-only error at release.
+      - name: Vet
+        run: |
+          for goos in linux darwin windows; do
+            GOOS="$goos" go vet ./...
+          done
+
+      - name: Test
+        run: go test ./...
+
   # The static analysis below needs a macOS runner, so gate it on the native
   # sources it actually lints instead of holding one on every push. Detection is
   # API-only (no checkout) and fails open: if the diff cannot be resolved, the
@@ -478,6 +517,7 @@ jobs:
         test_mobile,
         test_server,
         rust,
+        go,
         mobile_native_changes,
         mobile_native_static_analysis,
         release_smoke,

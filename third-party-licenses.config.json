@@ -263,6 +263,38 @@
       ]
     },
     {
+      "bundles": ["desktop", "server"],
+      "license": "BSD-3-Clause AND MIT AND Apache-2.0",
+      "name": "Tailscale",
+      "version": "1.104.2",
+      "sourceUrl": "https://github.com/tailscale/tailscale/tree/v1.104.2",
+      "generatedNotices": [
+        {
+          "licenseId": "BSD-3-Clause",
+          "copyrights": ["Copyright (c) 2020 Tailscale Inc & contributors."],
+          "preamble": [
+            "The built-in Tailscale listener (supaterm-tailnet) is a Go program built from tailscale.com, the Go standard library, and the Go modules listed in native/tailnet/go.sum. The notices below cover tailscale.com and its largest bundled dependencies."
+          ]
+        },
+        {
+          "licenseId": "BSD-3-Clause",
+          "copyrights": ["Copyright 2009 The Go Authors."],
+          "preamble": ["The Go standard library and golang.org/x modules\nhttps://go.dev/LICENSE"]
+        },
+        {
+          "licenseId": "MIT",
+          "copyrights": ["Copyright (C) 2017-2023 WireGuard LLC. All Rights Reserved."],
+          "preamble": ["wireguard-go\nhttps://github.com/tailscale/wireguard-go"]
+        },
+        {
+          "licenseId": "Apache-2.0",
+          "preamble": [
+            "gVisor\nhttps://github.com/google/gvisor\n\nCopyright 2018 The gVisor Authors."
+          ]
+        }
+      ]
+    },
+    {
       "bundles": ["android", "assets", "mobile", "web"],
       "license": "MIT",
       "name": "libghostty-vt",

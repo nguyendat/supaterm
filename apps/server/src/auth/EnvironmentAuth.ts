@@ -574,7 +574,6 @@ export const make = Effect.gen(function* () {
   const policy = yield* EnvironmentAuthPolicy.EnvironmentAuthPolicy;
   const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
   const sessions = yield* SessionStore.SessionStore;
-  const descriptor = yield* policy.getDescriptor();
   const config = yield* ServerConfig.ServerConfig;
   const environment = yield* ServerEnvironment.ServerEnvironmentIdentity;
   const devAuth = resolveReusableDevAuth(config);
@@ -647,8 +646,11 @@ export const make = Effect.gen(function* () {
     return authenticateToken(credential.token);
   };
 
-  const getSessionState: EnvironmentAuth["Service"]["getSessionState"] = (request) =>
-    authenticateRequest(request).pipe(
+  const getSessionState: EnvironmentAuth["Service"]["getSessionState"] = Effect.fn(
+    "EnvironmentAuth.getSessionState",
+  )(function* (request) {
+    const descriptor = yield* policy.getDescriptor();
+    return yield* authenticateRequest(request).pipe(
       Effect.map(
         (session) =>
           ({
@@ -665,8 +667,8 @@ export const make = Effect.gen(function* () {
           auth: descriptor,
         } satisfies AuthSessionState),
       ),
-      Effect.withSpan("EnvironmentAuth.getSessionState"),
     );
+  });
 
   const createBrowserSession: EnvironmentAuth["Service"]["createBrowserSession"] = Effect.fn(
     "EnvironmentAuth.createBrowserSession",
@@ -1137,8 +1139,7 @@ export const make = Effect.gen(function* () {
     );
 
   return EnvironmentAuth.of({
-    getDescriptor: () =>
-      Effect.succeed(descriptor).pipe(Effect.withSpan("EnvironmentAuth.getDescriptor")),
+    getDescriptor: Effect.fn("EnvironmentAuth.getDescriptor")(() => policy.getDescriptor()),
     getSessionState,
     createBrowserSession,
     exchangeBootstrapCredentialForAccessToken,

@@ -5,6 +5,7 @@ import * as Layer from "effect/Layer";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import { TailnetExposure } from "../tailnet/TailnetExposure.ts";
 import { isRemoteReachableHost, resolveSessionCookieName } from "./utils.ts";
 
 export class EnvironmentAuthPolicy extends Context.Service<
@@ -18,41 +19,50 @@ export class EnvironmentAuthPolicy extends Context.Service<
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const serverEnvironment = yield* ServerEnvironment.ServerEnvironmentIdentity;
-  const isRemoteReachable = config.tailscaleServeEnabled || isRemoteReachableHost(config.host);
+  const tailnet = yield* TailnetExposure;
+  const reachableByConfig = config.tailscaleServeEnabled || isRemoteReachableHost(config.host);
 
-  const policy =
-    config.mode === "desktop"
-      ? isRemoteReachable
-        ? "remote-reachable"
-        : "desktop-managed-local"
-      : isRemoteReachable
-        ? "remote-reachable"
-        : "loopback-browser";
+  // The built-in tailnet node changes reachability at runtime; the cookie name must not follow
+  // it, or every browser session would drop when serving starts or stops.
+  const sessionCookieName = resolveSessionCookieName({
+    mode: config.mode,
+    port: config.port,
+    host: config.host,
+    instanceKey: config.stateDir,
+    environmentId: yield* serverEnvironment.getEnvironmentId,
+    development: config.devUrl !== undefined,
+  });
 
-  const bootstrapMethods: ServerAuthDescriptor["bootstrapMethods"] =
-    policy === "desktop-managed-local"
-      ? ["desktop-bootstrap"]
-      : config.mode === "desktop" && policy === "remote-reachable"
-        ? ["desktop-bootstrap", "one-time-token"]
-        : ["one-time-token"];
-
-  const descriptor: ServerAuthDescriptor = {
-    policy,
-    bootstrapMethods,
-    sessionMethods: ["browser-session-cookie", "bearer-access-token"],
-    sessionCookieName: resolveSessionCookieName({
-      mode: config.mode,
-      port: config.port,
-      host: config.host,
-      instanceKey: config.stateDir,
-      environmentId: yield* serverEnvironment.getEnvironmentId,
-      development: config.devUrl !== undefined,
-    }),
+  const describe = (isRemoteReachable: boolean): ServerAuthDescriptor => {
+    const policy =
+      config.mode === "desktop"
+        ? isRemoteReachable
+          ? "remote-reachable"
+          : "desktop-managed-local"
+        : isRemoteReachable
+          ? "remote-reachable"
+          : "loopback-browser";
+    return {
+      policy,
+      bootstrapMethods:
+        policy === "desktop-managed-local"
+          ? ["desktop-bootstrap"]
+          : config.mode === "desktop" && policy === "remote-reachable"
+            ? ["desktop-bootstrap", "one-time-token"]
+            : ["one-time-token"],
+      sessionMethods: ["browser-session-cookie", "bearer-access-token"],
+      sessionCookieName,
+    };
   };
+  const local = describe(reachableByConfig);
+  const remote = describe(true);
 
   return EnvironmentAuthPolicy.of({
-    getDescriptor: () =>
-      Effect.succeed(descriptor).pipe(Effect.withSpan("EnvironmentAuthPolicy.getDescriptor")),
+    getDescriptor: Effect.fn("EnvironmentAuthPolicy.getDescriptor")(() =>
+      reachableByConfig
+        ? Effect.succeed(remote)
+        : tailnet.current.pipe(Effect.map((exposure) => (exposure.serving ? remote : local))),
+    ),
   });
 });
 

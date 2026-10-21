@@ -770,6 +770,21 @@ export const ServerConfigStreamRelayAdvertisementUpdatedEvent = Schema.Struct({
   payload: Schema.NullOr(RelayConnectionInfo),
 });
 
+export const ServerConfigReachabilityUpdatedPayload = Schema.Struct({
+  auth: ServerAuthDescriptor,
+  directEndpoints: ForwardCompatibleArray(ServerDirectEndpoint),
+});
+export type ServerConfigReachabilityUpdatedPayload =
+  typeof ServerConfigReachabilityUpdatedPayload.Type;
+
+export const ServerConfigStreamReachabilityUpdatedEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("reachabilityUpdated"),
+  payload: ServerConfigReachabilityUpdatedPayload,
+});
+export type ServerConfigStreamReachabilityUpdatedEvent =
+  typeof ServerConfigStreamReachabilityUpdatedEvent.Type;
+
 const ServerConfigKnownStreamEvents = [
   ServerConfigStreamSnapshotEvent,
   ServerConfigStreamKeybindingsUpdatedEvent,
@@ -777,6 +792,7 @@ const ServerConfigKnownStreamEvents = [
   ServerConfigStreamSettingsUpdatedEvent,
   ServerConfigStreamEnvironmentThemesUpdatedEvent,
   ServerConfigStreamRelayAdvertisementUpdatedEvent,
+  ServerConfigStreamReachabilityUpdatedEvent,
 ] as const;
 
 const isUnknownServerConfigStreamEvent = hasUnknownUnionTag(ServerConfigKnownStreamEvents, "type");

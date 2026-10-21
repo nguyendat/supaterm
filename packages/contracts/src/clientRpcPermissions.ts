@@ -16,6 +16,11 @@ import { WS_METHODS } from "./rpc.ts";
 /** Incremental client enforcement; the server still authorizes every request. */
 export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.prepareRelay]: AuthAccessWriteScope,
+  [WS_METHODS.tailnetSignIn]: AuthAccessWriteScope,
+  [WS_METHODS.tailnetCancelSignIn]: AuthAccessWriteScope,
+  [WS_METHODS.tailnetReauthenticate]: AuthAccessWriteScope,
+  [WS_METHODS.tailnetSignOut]: AuthAccessWriteScope,
+  [WS_METHODS.tailnetConfigure]: AuthAccessWriteScope,
   [WS_METHODS.previewClose]: AuthPreviewOperateScope,
   [WS_METHODS.serverRunStorageCleanup]: AuthSettingsWriteScope,
   [WS_METHODS.serverCheckOtlpEndpoint]: AuthSettingsWriteScope,

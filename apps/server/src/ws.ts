@@ -1,5 +1,6 @@
 import { isRelayedRequest } from "./relay/RelayIngress.ts";
 import * as RelayAccess from "./relay/RelayAccess.ts";
+import * as TailnetNode from "./tailnet/TailnetNode.ts";
 import * as OrchestrationSkills from "./provider/OrchestrationSkills.ts";
 import { OrchestrationDispatchCommandError } from "@supaterm/contracts";
 import * as Crypto from "effect/Crypto";
@@ -76,6 +77,7 @@ import {
   ProviderSetupError,
   type ServerConfig as ClientServerConfig,
   type ServerConfigStreamEvent,
+  type ServerConfigReachabilityUpdatedPayload,
   type RelayConnectionInfo,
   relayAdvertisementFrom,
   withRelayAdvertisement,
@@ -302,6 +304,27 @@ export const relayAdvertisementUpdates = (
     })),
   );
 
+/** Auth policy and direct endpoints change together when the built-in tailnet node serves. */
+export const reachabilityUpdates = <E, R>(
+  config: ClientServerConfig,
+  reachability: Stream.Stream<ServerConfigReachabilityUpdatedPayload, E, R>,
+) =>
+  Stream.concat(
+    Stream.succeed<ServerConfigReachabilityUpdatedPayload>({
+      auth: config.auth,
+      directEndpoints: config.directEndpoints ?? [],
+    }),
+    reachability,
+  ).pipe(
+    Stream.changesWith((previous, next) => Equal.equals(previous, next)),
+    Stream.drop(1),
+    Stream.map((payload) => ({
+      version: 1 as const,
+      type: "reachabilityUpdated" as const,
+      payload,
+    })),
+  );
+
 export const withLateEditorConfig = <E, R>(
   config: ClientServerConfig,
   liveUpdates: Stream.Stream<ServerConfigStreamEvent, E, R>,
@@ -352,6 +375,15 @@ export const withLateEditorConfig = <E, R>(
               {
                 ...current,
                 environment: withRelayAdvertisement(current.environment, event.payload),
+              },
+              [event],
+            ];
+          case "reachabilityUpdated":
+            return [
+              {
+                ...current,
+                auth: event.payload.auth,
+                directEndpoints: event.payload.directEndpoints,
               },
               [event],
             ];
@@ -1279,6 +1311,7 @@ export const layerWsRpc = (
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
       const relayAccess = yield* RelayAccess.RelayAccess;
+      const tailnet = yield* TailnetNode.TailnetNode;
       const rpcClientIds = yield* Ref.make(new Set<RpcClientId>());
       yield* Effect.addFinalizer(() =>
         Ref.get(rpcClientIds).pipe(
@@ -2956,6 +2989,17 @@ export const layerWsRpc = (
                 config,
                 relayAccess.advertisements,
               );
+              const reachability = reachabilityUpdates(
+                config,
+                tailnet.exposureChanges.pipe(
+                  Stream.mapEffect(() =>
+                    Effect.all({
+                      auth: serverAuth.getDescriptor(),
+                      directEndpoints: resolveAvailableEditorsForConfig(directEndpoints.resolve()),
+                    }),
+                  ),
+                ),
+              );
 
               const liveUpdates = Stream.mergeAll<ServerConfigStreamEvent, never, never>(
                 [
@@ -2964,6 +3008,7 @@ export const layerWsRpc = (
                   settingsUpdates,
                   environmentThemeUpdates,
                   relayAdvertisements,
+                  reachability,
                 ],
                 { concurrency: "unbounded" },
               );
@@ -3034,6 +3079,12 @@ export const layerWsRpc = (
           ),
         [WS_METHODS.subscribeRelayStatus]: (_input) => relayAccess.status,
         [WS_METHODS.prepareRelay]: (_input) => relayAccess.prepare,
+        [WS_METHODS.subscribeTailnetStatus]: (_input) => tailnet.status,
+        [WS_METHODS.tailnetSignIn]: (input) => tailnet.signIn(input),
+        [WS_METHODS.tailnetCancelSignIn]: (_input) => tailnet.cancelSignIn,
+        [WS_METHODS.tailnetReauthenticate]: (_input) => tailnet.reauthenticate,
+        [WS_METHODS.tailnetSignOut]: (_input) => tailnet.signOut,
+        [WS_METHODS.tailnetConfigure]: (input) => tailnet.configure(input),
         [WS_METHODS.subscribeResourceTelemetry]: (_input) =>
           Stream.unwrap(
             Effect.map(resourceTelemetry.subscribe, ({ latest, changes }) =>
