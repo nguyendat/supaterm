@@ -127,11 +127,13 @@ const clientDrained = (
       resume(Effect.void);
       return;
     }
-    const done = () => resume(Effect.void);
+    const stopWaiting = () => transport.off("drain", done).off("close", done);
+    const done = () => {
+      stopWaiting();
+      resume(Effect.void);
+    };
     transport.once("drain", done).once("close", done);
-    return Effect.sync(() => {
-      transport.off("drain", done).off("close", done);
-    });
+    return Effect.sync(stopWaiting);
   });
 
 const pumpFrames =

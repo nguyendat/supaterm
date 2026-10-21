@@ -23,6 +23,7 @@ const ENCODER_STEPS: ReadonlyArray<EncoderSettings> = [
 ];
 const LARGEST_STEP = ENCODER_STEPS[ENCODER_STEPS.length - 1]!;
 const SETTLE = "1 second";
+const HUB_REQUEST_TIMEOUT = "5 seconds";
 
 const encoderSettingsFor = (displayEdges: ReadonlyArray<number | null>): EncoderSettings | null => {
   const known = displayEdges.filter((edge) => edge !== null);
@@ -45,6 +46,7 @@ interface TunedDevice {
   readonly hostId: DeviceHostId;
   readonly deviceId: string;
   readonly viewers: Set<DeviceStreamViewer>;
+  readonly applying: Semaphore.Semaphore;
   generation: number;
   baseline: EncoderSettings | null;
   applied: EncoderSettings | null;
@@ -61,7 +63,6 @@ const make = Effect.gen(function* () {
   const devices = yield* DeviceService.DeviceService;
   const client = yield* HttpClient.HttpClient;
   const serviceScope = yield* Effect.scope;
-  const applying = yield* Semaphore.make(1);
   const tuned = new Map<string, TunedDevice>();
 
   const apply = Effect.fn("DeviceStreamTuning.apply")(
@@ -76,6 +77,7 @@ const make = Effect.gen(function* () {
           .pipe(
             Effect.flatMap(HttpClientResponse.filterStatusOk),
             Effect.flatMap(HttpClientResponse.schemaBodyJson(EncoderSettings)),
+            Effect.timeout(HUB_REQUEST_TIMEOUT),
           );
         device.baseline = { maxDimension: current.maxDimension, h264Bitrate: current.h264Bitrate };
         device.applied = device.baseline;
@@ -84,15 +86,19 @@ const make = Effect.gen(function* () {
       if (next === null || sameSettings(next, device.applied)) return;
       yield* client
         .execute(HttpClientRequest.patch(url).pipe(HttpClientRequest.bodyJsonUnsafe(next)))
-        .pipe(Effect.flatMap(HttpClientResponse.filterStatusOk));
+        .pipe(
+          Effect.flatMap(HttpClientResponse.filterStatusOk),
+          Effect.timeout(HUB_REQUEST_TIMEOUT),
+        );
       device.applied = next;
     },
     Effect.catch((cause) => Effect.logWarning("device stream tuning failed", { cause })),
   );
 
-  const forgetIfUnwatched = (key: string, device: TunedDevice) =>
+  const forgetIfRestored = (key: string, device: TunedDevice) =>
     Effect.sync(() => {
-      if (device.viewers.size === 0 && tuned.get(key) === device) tuned.delete(key);
+      const restored = device.baseline === null || sameSettings(device.applied, device.baseline);
+      if (device.viewers.size === 0 && restored && tuned.get(key) === device) tuned.delete(key);
     });
 
   const schedule = (key: string, device: TunedDevice) => {
@@ -101,9 +107,9 @@ const make = Effect.gen(function* () {
       Effect.andThen(
         Effect.suspend(() =>
           generation === device.generation
-            ? applying
+            ? device.applying
                 .withPermits(1)(apply(device))
-                .pipe(Effect.ensuring(forgetIfUnwatched(key, device)), Effect.uninterruptible)
+                .pipe(Effect.ensuring(forgetIfRestored(key, device)))
             : Effect.void,
         ),
       ),
@@ -120,6 +126,7 @@ const make = Effect.gen(function* () {
           hostId: viewer.hostId,
           deviceId: viewer.deviceId,
           viewers: new Set<DeviceStreamViewer>(),
+          applying: Semaphore.makeUnsafe(1),
           generation: 0,
           baseline: null,
           applied: null,

@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
-import { HttpClient, HttpClientResponse } from "effect/http";
+import { HttpClient, type HttpClientRequest, HttpClientResponse } from "effect/http";
 import { TestClock } from "effect/testing";
 
 import type * as DeviceHost from "./DeviceHost.ts";
@@ -21,23 +21,30 @@ const HUB_SETTINGS = {
   h264Fps: 60,
 };
 
-const makeTuning = (upstream?: DeviceHost.DeviceHostReady["upstream"]) =>
+const makeTuning = (
+  options: {
+    readonly upstream?: DeviceHost.DeviceHostReady["upstream"];
+    readonly respond?: (
+      request: HttpClientRequest.HttpClientRequest,
+    ) => Effect.Effect<Response> | undefined;
+  } = {},
+) =>
   Effect.gen(function* () {
     const requests: Array<{
       readonly method: string;
       readonly url: string;
       readonly body?: unknown;
     }> = [];
-    const client = HttpClient.make((request) =>
-      Effect.sync(() => {
-        const body =
-          request.body._tag === "Uint8Array"
-            ? JSON.parse(new TextDecoder().decode(request.body.body))
-            : undefined;
-        requests.push({ method: request.method, url: request.url, ...(body ? { body } : {}) });
-        return HttpClientResponse.fromWeb(request, Response.json(body ?? HUB_SETTINGS));
-      }),
-    );
+    const client = HttpClient.make((request) => {
+      const body =
+        request.body._tag === "Uint8Array"
+          ? JSON.parse(new TextDecoder().decode(request.body.body))
+          : undefined;
+      requests.push({ method: request.method, url: request.url, ...(body ? { body } : {}) });
+      const response =
+        options.respond?.(request) ?? Effect.succeed(Response.json(body ?? HUB_SETTINGS));
+      return Effect.map(response, (web) => HttpClientResponse.fromWeb(request, web));
+    });
     const services = yield* Layer.build(
       DeviceStreamTuning.layer.pipe(
         Layer.provide(Layer.succeed(HttpClient.HttpClient, client)),
@@ -47,7 +54,7 @@ const makeTuning = (upstream?: DeviceHost.DeviceHostReady["upstream"]) =>
               Effect.succeed({
                 hostId: LOCAL_DEVICE_HOST_ID,
                 hub: { origin: "http://hub.test" },
-                ...(upstream ? { upstream } : {}),
+                ...(options.upstream ? { upstream: options.upstream } : {}),
               }),
           } as DeviceService.DeviceService["Service"]),
         ),
@@ -136,11 +143,58 @@ it.effect("waits for viewers to settle before changing anything", () =>
 
 it.effect("leaves hosts that route their own streams alone", () =>
   Effect.gen(function* () {
-    const { requests, watch } = yield* makeTuning(() => Effect.succeed(null));
+    const { requests, watch } = yield* makeTuning({ upstream: () => Effect.succeed(null) });
     const leave = yield* watch(1712);
     yield* settle;
     yield* leave;
     yield* settle;
     expect(requests).toEqual([]);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("keeps the hub's settings to restore when a restore fails", () =>
+  Effect.gen(function* () {
+    let failNextPatch = false;
+    const { requests, watch } = yield* makeTuning({
+      respond: (request) => {
+        if (request.method !== "PATCH" || !failNextPatch) return undefined;
+        failNextPatch = false;
+        return Effect.succeed(new Response("busy", { status: 503 }));
+      },
+    });
+    const leavePanel = yield* watch(1712);
+    yield* settle;
+    failNextPatch = true;
+    yield* leavePanel;
+    yield* settle;
+
+    const leaveMiniPlayer = yield* watch(900);
+    yield* settle;
+    yield* leaveMiniPlayer;
+    yield* settle;
+    expect(requests.filter((request) => request.method === "GET")).toHaveLength(1);
+    expect(requests.at(-1)).toEqual({
+      method: "PATCH",
+      url: SETTINGS_URL,
+      body: { maxDimension: 0, h264Bitrate: 6_000_000 },
+    });
+  }).pipe(Effect.scoped),
+);
+
+it.effect("tunes other devices while one hub stops answering", () =>
+  Effect.gen(function* () {
+    const { requests, watch } = yield* makeTuning({
+      respond: (request) => (request.url.includes("udid-stuck") ? Effect.never : undefined),
+    });
+    const leaveStuck = yield* watch(1712, "udid-stuck");
+    const leave = yield* watch(1712);
+    yield* settle;
+    expect(requests).toContainEqual({
+      method: "PATCH",
+      url: SETTINGS_URL,
+      body: { maxDimension: 1920, h264Bitrate: 3_500_000 },
+    });
+    yield* leave;
+    yield* leaveStuck;
   }).pipe(Effect.scoped),
 );
