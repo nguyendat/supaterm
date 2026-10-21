@@ -94,47 +94,40 @@ const PHASE_LABELS: Record<TailnetStatus["phase"], string> = {
 };
 
 function formatTailnetStatus(status: TailnetStatus): string {
-  const account =
-    status.self === undefined
-      ? undefined
-      : status.self.tagged
-        ? `Tags: ${status.self.tags.join(", ")}`
-        : status.self.loginName === undefined
-          ? undefined
-          : `Signed in as: ${status.self.loginName}`;
-  const serving =
-    status.phase !== "running"
-      ? undefined
-      : status.serveEnabled
-        ? [
-            ...(status.httpsUrl === undefined ? [] : [`HTTPS: ${status.httpsUrl}`]),
-            ...(status.httpUrl === undefined
-              ? []
-              : [`HTTP: ${status.httpUrl} (limited browser features)`]),
-          ]
-        : ["Serving: off"];
-  return [
-    `Built-in Tailscale: ${PHASE_LABELS[status.phase]}`,
-    ...(status.message === undefined ? [] : [status.message]),
-    ...(account === undefined ? [] : [account]),
-    ...(status.self?.dnsName === undefined ? [] : [`Name: ${status.self.dnsName}`]),
-    ...(serving ?? []),
-    ...(status.phase === "running" && status.https !== "ready"
-      ? [
-          `HTTPS certificate: ${status.https}${status.httpsMessage ? ` (${status.httpsMessage})` : ""}`,
-        ]
-      : []),
-    ...(status.phase === "signed-out" || status.phase === "unavailable"
-      ? []
-      : [
-          status.requireOwner
-            ? "Access: only your Tailscale account"
-            : "Access: anyone your tailnet policy allows",
-        ]),
-    ...(status.loggingRequired
-      ? ["This tailnet requires Tailscale logging. Allow it in Settings → Connections."]
-      : []),
-  ].join("\n");
+  const { self } = status;
+  const lines = [`Built-in Tailscale: ${PHASE_LABELS[status.phase]}`];
+  if (status.message !== undefined) lines.push(status.message);
+  if (self?.tagged) {
+    lines.push(`Tags: ${self.tags.join(", ")}`);
+  } else if (self?.loginName !== undefined) {
+    lines.push(`Signed in as: ${self.loginName}`);
+  }
+  if (self?.dnsName !== undefined) lines.push(`Name: ${self.dnsName}`);
+  if (status.phase === "running") {
+    if (status.serveEnabled) {
+      if (status.httpsUrl !== undefined) lines.push(`HTTPS: ${status.httpsUrl}`);
+      if (status.httpUrl !== undefined) {
+        lines.push(`HTTP: ${status.httpUrl} (limited browser features)`);
+      }
+    } else {
+      lines.push("Serving: off");
+    }
+    if (status.https !== "ready") {
+      const reason = status.httpsMessage ? ` (${status.httpsMessage})` : "";
+      lines.push(`HTTPS certificate: ${status.https}${reason}`);
+    }
+  }
+  if (status.phase !== "signed-out" && status.phase !== "unavailable") {
+    lines.push(
+      status.requireOwner
+        ? "Access: only your Tailscale account"
+        : "Access: anyone your tailnet policy allows",
+    );
+  }
+  if (status.loggingRequired) {
+    lines.push("This tailnet requires Tailscale logging. Allow it in Settings → Connections.");
+  }
+  return lines.join("\n");
 }
 
 const connect = Effect.fn("tailscale.connect")(function* (baseDir: Option.Option<string>) {

@@ -186,9 +186,12 @@ const make = Effect.fn("TailnetIngress.make")(function* (accept: (socket: NodeNe
     socket.once("close", () => owned.delete(socket));
     let buffered: Buffer = Buffer.alloc(0);
     const timer = setTimeout(() => socket.destroy(), PREAMBLE_TIMEOUT_MS);
-    const drop = () => {
+    const stopReadingPreamble = () => {
       clearTimeout(timer);
       socket.removeListener("data", onData);
+    };
+    const drop = () => {
+      stopReadingPreamble();
       socket.destroy();
     };
     const onError = () => socket.destroy();
@@ -206,8 +209,7 @@ const make = Effect.fn("TailnetIngress.make")(function* (accept: (socket: NodeNe
       if (Option.isNone(preamble) || !secretsMatch(expected, preamble.value.secret)) {
         return drop();
       }
-      clearTimeout(timer);
-      socket.removeListener("data", onData);
+      stopReadingPreamble();
       const connection: TailnetConnection = {
         tls: preamble.value.tls,
         peer: preamble.value.peer,

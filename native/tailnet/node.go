@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -95,13 +94,13 @@ func newNode(srv *tsnet.Server, lc *local.Client, cfg command, out *emitter, log
 		address: cfg.Ingress.Address,
 		secret:  cfg.Ingress.Secret,
 		whois:   lc.WhoIs,
-		self:    func() *selfIdentity { return n.snapshot().self },
+		self:    func() *selfIdentity { return n.snap.Load().self },
 		logf:    logf,
 	}
 	n.tls = &tls.Config{
 		NextProtos: []string{"http/1.1"},
 		GetCertificate: func(hi *tls.ClientHelloInfo) (*tls.Certificate, error) {
-			domain := n.snapshot().domain
+			domain := n.snap.Load().domain
 			if domain == "" {
 				return nil, errors.New("no certificate domain")
 			}
@@ -111,8 +110,6 @@ func newNode(srv *tsnet.Server, lc *local.Client, cfg command, out *emitter, log
 	n.snap.Store(&snapshot{})
 	return n
 }
-
-func (n *node) snapshot() *snapshot { return n.snap.Load() }
 
 // run owns all node state on one goroutine; it returns after shutdown or logout.
 func (n *node) run(ctx context.Context, cmds <-chan command) {
@@ -287,12 +284,13 @@ func (n *node) evaluateHTTPS(ctx context.Context, st *ipnstate.Status, running b
 	if n.cert.domain != domain {
 		n.cert = certState{domain: domain}
 	}
-	switch {
-	case domain == "":
+	if domain == "" {
 		return "pending", ""
-	case n.cert.ready:
+	}
+	if n.cert.ready {
 		return "ready", ""
-	case !n.cert.inflight && !time.Now().Before(n.cert.retryAt):
+	}
+	if !n.cert.inflight && !time.Now().Before(n.cert.retryAt) {
 		n.cert.inflight = true
 		go n.prewarm(ctx, domain)
 	}
@@ -330,11 +328,13 @@ func (n *node) applyCert(r certResult) {
 }
 
 func (n *node) setExposure(current *exposure, want bool, addr string, tlsConfig *tls.Config) *exposure {
-	switch {
-	case !want && current != nil:
-		current.close()
+	if !want {
+		if current != nil {
+			current.close()
+		}
 		return nil
-	case !want || current != nil:
+	}
+	if current != nil {
 		return current
 	}
 	ln, err := n.srv.Listen("tcp", addr)
@@ -437,7 +437,8 @@ func certDomain(st *ipnstate.Status) (domain string, available bool) {
 		return "", true
 	}
 	name := strings.TrimSuffix(st.Self.DNSName, ".")
-	if name == "" || !slices.ContainsFunc(st.CertDomains, func(d string) bool { return strings.EqualFold(d, name) }) {
+	matchesName := func(d string) bool { return strings.EqualFold(d, name) }
+	if name == "" || !slices.ContainsFunc(st.CertDomains, matchesName) {
 		return "", true
 	}
 	return name, true
@@ -446,11 +447,11 @@ func certDomain(st *ipnstate.Status) (domain string, available bool) {
 // httpURL uses the IP rather than the MagicDNS name: browsers' HTTPS-First
 // mode warns on the name but treats the CGNAT range as private.
 func httpURL(self *selfInfo) string {
-	if self.IPv4 != "" {
+	switch {
+	case self.IPv4 != "":
 		return "http://" + self.IPv4 + "/"
-	}
-	if ip, err := netip.ParseAddr(self.IPv6); err == nil {
-		return "http://[" + ip.String() + "]/"
+	case self.IPv6 != "":
+		return "http://[" + self.IPv6 + "]/"
 	}
 	return ""
 }

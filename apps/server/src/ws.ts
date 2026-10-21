@@ -316,7 +316,7 @@ export const reachabilityUpdates = <E, R>(
     }),
     reachability,
   ).pipe(
-    Stream.changesWith((previous, next) => Equal.equals(previous, next)),
+    Stream.changes,
     Stream.drop(1),
     Stream.map((payload) => ({
       version: 1 as const,

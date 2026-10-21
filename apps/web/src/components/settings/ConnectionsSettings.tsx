@@ -1152,12 +1152,11 @@ const AdvertisedEndpointListRow = memo(function AdvertisedEndpointListRow({
             <span className="rounded-md border border-primary/30 bg-primary/10 px-1 py-0.5 text-3xs text-primary">
               Default
             </span>
-          ) : null}
-          {!isDefault ? (
+          ) : (
             <Button size="xs" variant="outline" onClick={() => onSetDefault(endpoint)}>
               Set as default
             </Button>
-          ) : null}
+          )}
         </div>
       </div>
     </div>
@@ -1897,10 +1896,6 @@ export function ConnectionsSettings() {
       );
     }
     setIsUpdatingTailscaleServe(false);
-  };
-
-  const handleStartTailscaleServeDisable = () => {
-    setDisableTailscaleServeDialogOpen(true);
   };
 
   const handleRevokeDesktopPairingLink = async (id: string) => {
@@ -2782,7 +2777,7 @@ export function ConnectionsSettings() {
             size="sm"
             variant="outline"
             disabled={isUpdatingTailscaleServe}
-            onClick={handleStartTailscaleServeDisable}
+            onClick={() => setDisableTailscaleServeDialogOpen(true)}
           >
             {isUpdatingTailscaleServe ? "Turning off…" : "Turn off"}
           </Button>

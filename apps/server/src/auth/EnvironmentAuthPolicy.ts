@@ -33,29 +33,19 @@ export const make = Effect.gen(function* () {
     development: config.devUrl !== undefined,
   });
 
-  const describe = (isRemoteReachable: boolean): ServerAuthDescriptor => {
-    const policy =
-      config.mode === "desktop"
-        ? isRemoteReachable
-          ? "remote-reachable"
-          : "desktop-managed-local"
-        : isRemoteReachable
-          ? "remote-reachable"
-          : "loopback-browser";
-    return {
-      policy,
-      bootstrapMethods:
-        policy === "desktop-managed-local"
-          ? ["desktop-bootstrap"]
-          : config.mode === "desktop" && policy === "remote-reachable"
-            ? ["desktop-bootstrap", "one-time-token"]
-            : ["one-time-token"],
-      sessionMethods: ["browser-session-cookie", "bearer-access-token"],
-      sessionCookieName,
-    };
+  const isDesktop = config.mode === "desktop";
+  const local: ServerAuthDescriptor = {
+    policy: isDesktop ? "desktop-managed-local" : "loopback-browser",
+    bootstrapMethods: isDesktop ? ["desktop-bootstrap"] : ["one-time-token"],
+    sessionMethods: ["browser-session-cookie", "bearer-access-token"],
+    sessionCookieName,
   };
-  const local = describe(reachableByConfig);
-  const remote = describe(true);
+  const remote: ServerAuthDescriptor = {
+    policy: "remote-reachable",
+    bootstrapMethods: isDesktop ? ["desktop-bootstrap", "one-time-token"] : ["one-time-token"],
+    sessionMethods: ["browser-session-cookie", "bearer-access-token"],
+    sessionCookieName,
+  };
 
   return EnvironmentAuthPolicy.of({
     getDescriptor: Effect.fn("EnvironmentAuthPolicy.getDescriptor")(() =>

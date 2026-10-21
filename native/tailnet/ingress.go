@@ -150,8 +150,6 @@ func admit(upstream net.Conn, p preamble) bool {
 	return true
 }
 
-type closeWriter interface{ CloseWrite() error }
-
 // reject half-closes and drains before closing so the client reads the
 // response instead of a reset caused by its unread request bytes.
 func reject(client net.Conn, status, body string) {
@@ -160,10 +158,15 @@ func reject(client net.Conn, status, body string) {
 	if err != nil {
 		return
 	}
-	if cw, ok := client.(closeWriter); ok && cw.CloseWrite() == nil {
+	if closeWrite(client) {
 		client.SetReadDeadline(time.Now().Add(time.Second))
 		io.Copy(io.Discard, io.LimitReader(client, 64<<10))
 	}
+}
+
+func closeWrite(conn net.Conn) bool {
+	cw, ok := conn.(interface{ CloseWrite() error })
+	return ok && cw.CloseWrite() == nil
 }
 
 // relay copies both directions. Once one side finishes, the other gets a grace
@@ -181,7 +184,7 @@ func relay(client, upstream net.Conn) {
 
 func pump(dst, src net.Conn) {
 	_, err := io.Copy(dst, src)
-	if cw, ok := dst.(closeWriter); ok && err == nil && cw.CloseWrite() == nil {
+	if err == nil && closeWrite(dst) {
 		return
 	}
 	dst.Close()

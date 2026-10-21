@@ -364,8 +364,8 @@ jobs:
             exit 1
           fi
 
-      # Every release target is cross-compiled from Linux, so vet each OS's
-      # build here rather than discovering a Windows-only error at release.
+      # This job only runs on Linux, so vet each release OS's build here rather
+      # than discovering a Windows-only error at release.
       - name: Vet
         run: |
           for goos in linux darwin windows; do

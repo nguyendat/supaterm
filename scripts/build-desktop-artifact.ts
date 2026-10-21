@@ -155,18 +155,7 @@ const NODE_PLATFORMS = {
   win: "win32",
 } as const satisfies Record<typeof BuildPlatform.Type, NodeJS.Platform>;
 
-export function resolveTailnetTargets(
-  platform: typeof BuildPlatform.Type,
-  arch: typeof BuildArch.Type,
-): ReadonlyArray<{ readonly platform: NodeJS.Platform; readonly arch: "arm64" | "x64" }> {
-  const architectures = arch === "universal" ? (["arm64", "x64"] as const) : [arch];
-  return architectures.map((architecture) => ({
-    platform: NODE_PLATFORMS[platform],
-    arch: architecture,
-  }));
-}
-
-export function tailnetExecutableName(platform: typeof BuildPlatform.Type): string {
+function tailnetExecutableName(platform: typeof BuildPlatform.Type): string {
   return platform === "win" ? "supaterm-tailnet.exe" : "supaterm-tailnet";
 }
 
@@ -2204,10 +2193,12 @@ export const stageTailnet = Effect.fn("stageTailnet")(function* (input: {
   const node = yield* HostProcess.ExecutablePath;
   const executableName = tailnetExecutableName(input.platform);
   const reuseTailnet = yield* ReuseTailnetConfig;
+  const nodePlatform = NODE_PLATFORMS[input.platform];
+  const architectures = input.arch === "universal" ? (["arm64", "x64"] as const) : [input.arch];
   const builtBinaries: string[] = [];
 
-  for (const target of resolveTailnetTargets(input.platform, input.arch)) {
-    const targetKey = `${target.platform}-${target.arch}`;
+  for (const arch of architectures) {
+    const targetKey = `${nodePlatform}-${arch}`;
     const outputDirectory = path.join(input.repoRoot, "native/tailnet/dist", targetKey);
     if (reuseTailnet) {
       yield* Effect.log(`[desktop-artifact] Reusing cached Tailscale sidecar (${targetKey}).`);
@@ -2218,9 +2209,9 @@ export const stageTailnet = Effect.fn("stageTailnet")(function* (input: {
           [
             path.join(input.repoRoot, "scripts/build-tailnet.ts"),
             "--platform",
-            target.platform,
+            nodePlatform,
             "--arch",
-            target.arch,
+            arch,
             "--out",
             outputDirectory,
           ],

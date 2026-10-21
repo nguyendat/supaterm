@@ -111,7 +111,6 @@ const encodeCommand = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))
 
 export type TailnetSidecarCommand =
   | {
-      readonly v: typeof PROTOCOL_VERSION;
       readonly type: "configure";
       readonly dir: string;
       readonly hostname: string;
@@ -121,11 +120,11 @@ export type TailnetSidecarCommand =
       readonly ingress: { readonly address: string; readonly secret: string };
       readonly authKey?: string;
     }
-  | { readonly v: typeof PROTOCOL_VERSION; readonly type: "login" }
-  | { readonly v: typeof PROTOCOL_VERSION; readonly type: "setServe"; readonly enabled: boolean }
-  | { readonly v: typeof PROTOCOL_VERSION; readonly type: "setHostname"; readonly hostname: string }
-  | { readonly v: typeof PROTOCOL_VERSION; readonly type: "logout" }
-  | { readonly v: typeof PROTOCOL_VERSION; readonly type: "shutdown" };
+  | { readonly type: "login" }
+  | { readonly type: "setServe"; readonly enabled: boolean }
+  | { readonly type: "setHostname"; readonly hostname: string }
+  | { readonly type: "logout" }
+  | { readonly type: "shutdown" };
 
 class TailnetSidecarError extends Schema.TaggedError<TailnetSidecarError>()("TailnetSidecarError", {
   stage: Schema.Literals(["spawn", "write", "read", "protocol", "exit"]),
@@ -210,7 +209,7 @@ const make = Effect.gen(function* () {
       .pipe(Effect.mapError((cause) => new TailnetSidecarError({ stage: "spawn", cause })));
     const writeLock = yield* Semaphore.make(1);
     const send = (command: TailnetSidecarCommand) =>
-      encodeCommand(command).pipe(
+      encodeCommand({ v: PROTOCOL_VERSION, ...command }).pipe(
         Effect.flatMap((line) =>
           Stream.run(Stream.encodeText(Stream.make(`${line}\n`)), handle.stdin).pipe(
             writeLock.withPermit,
@@ -234,7 +233,7 @@ const make = Effect.gen(function* () {
     );
     // Runs before the spawner's own release, which kills whatever is still running.
     yield* Effect.addFinalizer(() =>
-      send({ v: PROTOCOL_VERSION, type: "shutdown" }).pipe(
+      send({ type: "shutdown" }).pipe(
         Effect.andThen(exitCode),
         Effect.timeout(SHUTDOWN_GRACE),
         Effect.ignore,

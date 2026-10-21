@@ -5,6 +5,7 @@ import {
   settlePromise,
   squashAtomCommandFailure,
 } from "@supaterm/client-runtime/state/runtime";
+import type { AsyncResult } from "effect/reactivity";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { serverEnvironment } from "~/state/server";
@@ -49,7 +50,11 @@ export function openTailnetLoginUrl(url: string | null) {
   window.open(safeUrl, "_blank", "noopener");
 }
 
-export function commandErrorMessage(error: unknown, fallback: string): string {
+export function commandFailureMessage(
+  failure: AsyncResult.Failure<unknown, unknown>,
+  fallback: string,
+): string {
+  const error = squashAtomCommandFailure(failure);
   return error instanceof Error && error.message.trim().length > 0 ? error.message : fallback;
 }
 
@@ -99,9 +104,8 @@ export function TailscaleSignInDialog({
 
   const resetEnrollment = async () => {
     const result = await cancelSignIn({ environmentId, input: {} });
-    return result._tag === "Success" || isAtomCommandInterrupted(result)
-      ? null
-      : commandErrorMessage(squashAtomCommandFailure(result), "Could not cancel the sign-in.");
+    if (result._tag === "Success" || isAtomCommandInterrupted(result)) return null;
+    return commandFailureMessage(result, "Could not cancel the sign-in.");
   };
 
   const submit = async () => {
@@ -124,18 +128,23 @@ export function TailscaleSignInDialog({
       return;
     }
     if (isAtomCommandInterrupted(result)) return;
-    setError(
-      commandErrorMessage(squashAtomCommandFailure(result), "Could not start Tailscale sign-in."),
-    );
+    setError(commandFailureMessage(result, "Could not start Tailscale sign-in."));
   };
 
   const waitingError = stage === "waiting" ? (status.message ?? error) : null;
-  const formError = stage === "form" ? error : null;
   const awaitingApproval = stage === "waiting" && status.phase === "needs-approval";
   const stopped =
     stage === "waiting" &&
     waitingError === null &&
     (status.phase === "signed-out" || status.phase === "unavailable");
+  const closesWhen = reauthenticating
+    ? `${machineLabel} reconnects`
+    : `${machineLabel} joins your tailnet`;
+  const description =
+    stage === "form"
+      ? `Choose a hostname and optional tags for ${machineLabel}.`
+      : `Finish signing in from your browser. This closes when ${closesWhen}.`;
+  const dismissLabel = stopped ? "Close" : "Cancel";
 
   const cancel = async () => {
     if (pending === "cancel") return;
@@ -184,22 +193,16 @@ export function TailscaleSignInDialog({
               <DialogTitle>
                 {reauthenticating ? "Sign in to Tailscale again" : "Sign in to Tailscale"}
               </DialogTitle>
-              <DialogDescription>
-                {stage === "form"
-                  ? `Choose a hostname and optional tags for ${machineLabel}.`
-                  : reauthenticating
-                    ? `Finish signing in from your browser. This closes when ${machineLabel} reconnects.`
-                    : `Finish signing in from your browser. This closes when ${machineLabel} joins your tailnet.`}
-              </DialogDescription>
+              <DialogDescription>{description}</DialogDescription>
             </div>
           </div>
         </DialogHeader>
         <DialogPanel>
           {stage === "form" ? (
             <>
-              {formError ? (
+              {error ? (
                 <Alert variant="error" role="status">
-                  <AlertDescription>{formError}</AlertDescription>
+                  <AlertDescription>{error}</AlertDescription>
                 </Alert>
               ) : null}
               <div className="space-y-2">
@@ -300,7 +303,7 @@ export function TailscaleSignInDialog({
         </DialogPanel>
         <DialogFooter variant="bare">
           <Button variant="outline" disabled={pending === "cancel"} onClick={() => void cancel()}>
-            {pending === "cancel" ? "Cancelling…" : stopped ? "Close" : "Cancel"}
+            {pending === "cancel" ? "Cancelling…" : dismissLabel}
           </Button>
           {stage === "form" ? (
             <Button type="submit" disabled={!canSubmit}>

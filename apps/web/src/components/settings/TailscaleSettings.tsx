@@ -5,10 +5,8 @@ import type {
   TailnetConfigureInput,
   TailnetStatus,
 } from "@supaterm/contracts";
-import {
-  isAtomCommandInterrupted,
-  squashAtomCommandFailure,
-} from "@supaterm/client-runtime/state/runtime";
+import { isAtomCommandInterrupted } from "@supaterm/client-runtime/state/runtime";
+import type { AsyncResult } from "effect/reactivity";
 import { type ReactNode, useState } from "react";
 
 import { requestConfirmDialog } from "~/confirmDialog";
@@ -35,11 +33,18 @@ import {
 import {
   TailscaleSignInDialog,
   type TailscaleSignInSession,
-  commandErrorMessage,
+  commandFailureMessage,
   openTailnetLoginUrl,
 } from "./TailscaleSignInDialog";
 
 const LOCKOUT_WARNING = "This page is open over Tailscale and may disconnect.";
+
+type StatusHeader = {
+  readonly title: string;
+  readonly description: string;
+  readonly status?: ReactNode;
+  readonly control?: ReactNode;
+};
 
 export function useTailnetStatus(environmentId: EnvironmentId | null) {
   return useEnvironmentQuery(
@@ -51,14 +56,43 @@ function confirmationMessage(question: string, ...details: ReadonlyArray<string 
   return [question, ...details.filter((detail) => detail !== null)].join("\n");
 }
 
-function reportTailnetFailure(title: string, error: unknown) {
+function reportTailnetFailure(title: string, failure: AsyncResult.Failure<unknown, unknown>) {
+  if (isAtomCommandInterrupted(failure)) return;
   toastManager.add(
     stackedThreadToast({
       type: "error",
       title,
-      description: commandErrorMessage(error, "Try again."),
+      description: commandFailureMessage(failure, "Try again."),
     }),
   );
+}
+
+function machineLabelFor(
+  environmentLabel: string | null,
+  serverConfig: Pick<ServerConfig, "environment"> | null,
+) {
+  const isLocal =
+    window.desktopBridge !== undefined || isLoopbackHostname(window.location.hostname);
+  if (!isLocal) return environmentLabel ?? "this machine";
+  return serverConfig?.environment.platform.os === "darwin" ? "this Mac" : "this machine";
+}
+
+function placeholderDescription(canRead: boolean, error: string | null) {
+  if (!canRead) return "This connection can't view Tailscale status.";
+  if (error !== null) return "Couldn't load Tailscale status.";
+  return "Loading…";
+}
+
+function keyExpiryWarning(days: number) {
+  const unit = days === 1 ? "day" : "days";
+  return `This device's Tailscale key expires in ${days} ${unit}. You can turn off key expiry for it in the Tailscale admin console.`;
+}
+
+function serveDescription(status: TailnetStatus, machineLabel: string) {
+  if (!status.serveEnabled) {
+    return `Connect to Supaterm on ${machineLabel} from devices on your tailnet.`;
+  }
+  return tailnetAddress(status) ?? "Opening the Tailscale address…";
 }
 
 function ExternalLink({ href, children }: { readonly href: string; readonly children: ReactNode }) {
@@ -72,6 +106,30 @@ function ExternalLink({ href, children }: { readonly href: string; readonly chil
       {children}
     </a>
   );
+}
+
+function httpsNote(status: TailnetStatus): ReactNode {
+  if (!status.serveEnabled) return null;
+  if (status.https === "disabled") {
+    return (
+      <span className="block">
+        Turn on HTTPS certificates in your{" "}
+        <ExternalLink href={TAILSCALE_DNS_ADMIN_URL}>Tailscale admin console</ExternalLink> for a
+        secure address.
+        {status.httpsMessage ? ` ${status.httpsMessage}` : null}
+      </span>
+    );
+  }
+  if (status.httpsMessage) return <span className="block">{status.httpsMessage}</span>;
+  if (status.https === "pending" && status.httpsUrl === undefined) {
+    return <span className="block">Getting an HTTPS certificate…</span>;
+  }
+  return null;
+}
+
+function hostnameStatus(error: string | null, renaming: boolean): ReactNode {
+  if (error !== null) return <span className="block text-destructive">{error}</span>;
+  return renaming ? "Renaming…" : null;
 }
 
 export function TailscaleSettings({
@@ -89,13 +147,7 @@ export function TailscaleSettings({
   readonly status: TailnetStatus | null;
   readonly error: string | null;
 }) {
-  const isLocal =
-    window.desktopBridge !== undefined || isLoopbackHostname(window.location.hostname);
-  const machineLabel = !isLocal
-    ? (environmentLabel ?? "this machine")
-    : serverConfig?.environment.platform.os === "darwin"
-      ? "this Mac"
-      : "this machine";
+  const machineLabel = machineLabelFor(environmentLabel, serverConfig);
   return (
     <SettingsSection {...searchableSetting("tailscale")}>
       {status !== null ? (
@@ -108,13 +160,7 @@ export function TailscaleSettings({
         <SettingsRow
           icon={<TailscaleLogo />}
           title="Tailscale"
-          description={
-            !canRead
-              ? "This connection can't view Tailscale status."
-              : error !== null
-                ? "Couldn't load Tailscale status."
-                : "Loading…"
-          }
+          description={placeholderDescription(canRead, error)}
           status={
             canRead && error !== null ? (
               <span className="block text-destructive">{error}</span>
@@ -173,52 +219,49 @@ function TailscaleStatusRows({
     const result = await configure({ environmentId, input: patch });
     setPendingPatch(null);
     if (result._tag === "Success") return true;
-    if (!isAtomCommandInterrupted(result)) {
-      reportTailnetFailure("Could not update Tailscale", squashAtomCommandFailure(result));
-    }
+    reportTailnetFailure("Could not update Tailscale", result);
     return false;
   };
 
-  const confirmIfServedHere = async (question: string, detail: string) =>
-    !servedHere ||
-    (await requestConfirmDialog(confirmationMessage(question, detail, LOCKOUT_WARNING), {
-      variant: "destructive",
-    })) === true;
+  const confirmIfServedHere = async (question: string, detail: string) => {
+    if (!servedHere) return true;
+    const confirmed = await requestConfirmDialog(
+      confirmationMessage(question, detail, LOCKOUT_WARNING),
+      { variant: "destructive" },
+    );
+    return confirmed === true;
+  };
 
   const setServeEnabled = async (serveEnabled: boolean) => {
-    if (
-      !serveEnabled &&
-      !(await confirmIfServedHere(
+    if (!serveEnabled) {
+      const confirmed = await confirmIfServedHere(
         "Stop serving over Tailscale?",
         "Devices connected over Tailscale lose access.",
-      ))
-    )
-      return;
+      );
+      if (!confirmed) return;
+    }
     await runConfigure({ serveEnabled });
   };
 
   const setRequireOwner = async (requireOwner: boolean) => {
-    if (
-      requireOwner &&
-      !(await confirmIfServedHere(
+    if (requireOwner) {
+      const confirmed = await confirmIfServedHere(
         "Limit access to your Tailscale account?",
         `Only devices signed in as ${self?.loginName ?? "your account"} can connect.`,
-      ))
-    )
-      return;
+      );
+      if (!confirmed) return;
+    }
     await runConfigure({ requireOwner });
   };
 
   const setLoggingAllowed = async (loggingAllowed: boolean) => {
-    if (
-      !loggingAllowed &&
-      status.loggingRequired &&
-      !(await confirmIfServedHere(
+    if (!loggingAllowed && status.loggingRequired) {
+      const confirmed = await confirmIfServedHere(
         "Turn off Tailscale logging?",
         "Your tailnet requires it, so Tailscale disconnects.",
-      ))
-    )
-      return;
+      );
+      if (!confirmed) return;
+    }
     await runConfigure({ loggingAllowed });
   };
 
@@ -235,19 +278,17 @@ function TailscaleStatusRows({
     setPendingAction("sign-out");
     const result = await signOut({ environmentId, input: {} });
     setPendingAction(null);
-    if (result._tag === "Success") {
-      if (!result.value.remoteLogoutConfirmed) {
-        toastManager.add({
-          type: "warning",
-          title: "Signed out on this machine",
-          description:
-            "Supaterm couldn't confirm the sign-out with Tailscale, so the device may still be listed in the Tailscale admin console.",
-        });
-      }
+    if (result._tag === "Failure") {
+      reportTailnetFailure("Could not sign out of Tailscale", result);
       return;
     }
-    if (!isAtomCommandInterrupted(result)) {
-      reportTailnetFailure("Could not sign out of Tailscale", squashAtomCommandFailure(result));
+    if (!result.value.remoteLogoutConfirmed) {
+      toastManager.add({
+        type: "warning",
+        title: "Signed out on this machine",
+        description:
+          "Supaterm couldn't confirm the sign-out with Tailscale, so the device may still be listed in the Tailscale admin console.",
+      });
     }
   };
 
@@ -255,23 +296,19 @@ function TailscaleStatusRows({
     setPendingAction("cancel");
     const result = await cancelSignIn({ environmentId, input: {} });
     setPendingAction(null);
-    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-      reportTailnetFailure("Could not cancel the sign-in", squashAtomCommandFailure(result));
-    }
+    if (result._tag === "Failure") reportTailnetFailure("Could not cancel the sign-in", result);
   };
 
   const resumeLogin = async (mode: "continue" | "reauthenticate") => {
     setPendingAction("reauthenticate");
     const result = await reauthenticate({ environmentId, input: {} });
     setPendingAction(null);
-    if (result._tag === "Success") {
-      openTailnetLoginUrl(result.value.loginUrl);
-      setDialog({ mode, loginUrl: result.value.loginUrl });
+    if (result._tag === "Failure") {
+      reportTailnetFailure("Could not start Tailscale sign-in", result);
       return;
     }
-    if (!isAtomCommandInterrupted(result)) {
-      reportTailnetFailure("Could not start Tailscale sign-in", squashAtomCommandFailure(result));
-    }
+    openTailnetLoginUrl(result.value.loginUrl);
+    setDialog({ mode, loginUrl: result.value.loginUrl });
   };
 
   const currentHostname = status.hostname ?? status.suggestedHostname;
@@ -321,12 +358,7 @@ function TailscaleStatusRows({
   const accountSummary = tailnetAccountSummary(self);
   const keyExpiryDays = phase === "running" ? tailnetKeyExpiryDays(self?.keyExpiry, nowMs) : null;
 
-  const header = ((): {
-    readonly title: string;
-    readonly description: string;
-    readonly status?: ReactNode;
-    readonly control?: ReactNode;
-  } => {
+  const header = ((): StatusHeader => {
     switch (phase) {
       case "unavailable":
         return {
@@ -409,7 +441,7 @@ function TailscaleStatusRows({
           status:
             keyExpiryDays === null ? null : (
               <span className="block text-warning-foreground">
-                {`This device's Tailscale key expires in ${keyExpiryDays} ${keyExpiryDays === 1 ? "day" : "days"}. You can turn off key expiry for it in the Tailscale admin console.`}
+                {keyExpiryWarning(keyExpiryDays)}
               </span>
             ),
           control: signOutButton,
@@ -431,23 +463,10 @@ function TailscaleStatusRows({
           status,
         })
       : null;
-  const address = tailnetAddress(status);
   const serveChecked = pendingPatch?.serveEnabled ?? status.serveEnabled;
   const requireOwnerChecked = pendingPatch?.requireOwner ?? status.requireOwner;
   const tagged = self?.tagged === true;
   const effectiveTags = self?.tags ?? status.tags;
-  const httpsNote = !status.serveEnabled ? null : status.https === "disabled" ? (
-    <span className="block">
-      Turn on HTTPS certificates in your{" "}
-      <ExternalLink href={TAILSCALE_DNS_ADMIN_URL}>Tailscale admin console</ExternalLink> for a
-      secure address.
-      {status.httpsMessage ? ` ${status.httpsMessage}` : null}
-    </span>
-  ) : status.httpsMessage ? (
-    <span className="block">{status.httpsMessage}</span>
-  ) : status.https === "pending" && status.httpsUrl === undefined ? (
-    <span className="block">Getting an HTTPS certificate…</span>
-  ) : null;
 
   return (
     <>
@@ -477,14 +496,8 @@ function TailscaleStatusRows({
         <>
           <SettingsRow
             title="Serve over Tailscale"
-            description={
-              status.serveEnabled && address !== null
-                ? address
-                : status.serveEnabled
-                  ? "Opening the Tailscale address…"
-                  : `Connect to Supaterm on ${machineLabel} from devices on your tailnet.`
-            }
-            status={httpsNote}
+            description={serveDescription(status, machineLabel)}
+            status={httpsNote(status)}
             control={
               <Switch
                 checked={serveChecked}
@@ -534,13 +547,7 @@ function TailscaleStatusRows({
                 ? `Used to generate the Tailscale address, now ${self.dnsName}.`
                 : "Used to generate the Tailscale address."
             }
-            status={
-              hostnameError !== null ? (
-                <span className="block text-destructive">{hostnameError}</span>
-              ) : pendingPatch?.hostname !== undefined ? (
-                "Renaming…"
-              ) : null
-            }
+            status={hostnameStatus(hostnameError, pendingPatch?.hostname !== undefined)}
             control={
               <div className="w-full @min-[32rem]/settings-row:w-64">
                 <Input

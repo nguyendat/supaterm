@@ -18,8 +18,6 @@ import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Equal from "effect/Equal";
-import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -27,7 +25,6 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
@@ -50,38 +47,20 @@ const FAST_FAILURE_WINDOW_MS = 60_000;
 const MAX_FAST_FAILURES = 5;
 const BASE32_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
 
-const TailnetConfigFile = Schema.Struct({
+const TailnetConfig = Schema.Struct({
   version: Schema.Literal(1),
-  enrolled: Schema.optionalKey(Schema.Boolean),
-  signedIn: Schema.optionalKey(Schema.Boolean),
+  enrolled: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
+  signedIn: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
   hostname: Schema.optionalKey(TailnetHostname),
-  tags: Schema.optionalKey(Schema.Array(TailnetTag)),
-  serveEnabled: Schema.optionalKey(Schema.Boolean),
-  requireOwner: Schema.optionalKey(Schema.Boolean),
-  loggingAllowed: Schema.optionalKey(Schema.Boolean),
+  tags: Schema.Array(TailnetTag).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+  serveEnabled: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),
+  requireOwner: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),
+  loggingAllowed: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
 });
-const decodeConfigFile = Schema.decodeUnknownEffect(Schema.fromJsonString(TailnetConfigFile));
-const encodeConfigFile = Schema.encodeEffect(fromJsonStringPretty(TailnetConfigFile));
-
-interface TailnetConfig {
-  readonly enrolled: boolean;
-  readonly signedIn: boolean;
-  readonly hostname: string | undefined;
-  readonly tags: ReadonlyArray<string>;
-  readonly serveEnabled: boolean;
-  readonly requireOwner: boolean;
-  readonly loggingAllowed: boolean;
-}
-
-const DEFAULT_CONFIG: TailnetConfig = {
-  enrolled: false,
-  signedIn: false,
-  hostname: undefined,
-  tags: [],
-  serveEnabled: true,
-  requireOwner: true,
-  loggingAllowed: false,
-};
+type TailnetConfig = typeof TailnetConfig.Type;
+const DEFAULT_CONFIG = Schema.decodeSync(TailnetConfig)({ version: 1 });
+const decodeConfigFile = Schema.decodeUnknownEffect(Schema.fromJsonString(TailnetConfig));
+const encodeConfigFile = Schema.encodeEffect(fromJsonStringPretty(TailnetConfig));
 
 type Runtime =
   | { readonly _tag: "Unavailable"; readonly message: string }
@@ -135,10 +114,7 @@ const statusOf = (state: NodeState, suggestedHostname: string): TailnetStatus =>
   const sidecar = sidecarOf(runtime);
   const phase = phaseOf(state);
   const serving = phase === "running" && config.serveEnabled;
-  const message =
-    runtime._tag === "Unavailable" || runtime._tag === "Restarting" || runtime._tag === "Failed"
-      ? runtime.message
-      : nonEmpty(sidecar?.errMessage);
+  const message = "message" in runtime ? runtime.message : nonEmpty(sidecar?.errMessage);
   const httpsMessage = nonEmpty(sidecar?.httpsMessage);
   const httpsUrl = serving ? nonEmpty(sidecar?.listening?.https) : undefined;
   const httpUrl = serving ? nonEmpty(sidecar?.listening?.http) : undefined;
@@ -268,15 +244,6 @@ const make = Effect.gen(function* () {
 
   const initialConfig = yield* fileSystem.readFileString(configPath).pipe(
     Effect.flatMap(decodeConfigFile),
-    Effect.map((file): TailnetConfig => ({
-      enrolled: file.enrolled ?? DEFAULT_CONFIG.enrolled,
-      signedIn: file.signedIn ?? DEFAULT_CONFIG.signedIn,
-      hostname: file.hostname,
-      tags: file.tags ?? DEFAULT_CONFIG.tags,
-      serveEnabled: file.serveEnabled ?? DEFAULT_CONFIG.serveEnabled,
-      requireOwner: file.requireOwner ?? DEFAULT_CONFIG.requireOwner,
-      loggingAllowed: file.loggingAllowed ?? DEFAULT_CONFIG.loggingAllowed,
-    })),
     Effect.catchTags({
       PlatformError: (error) =>
         error.reason._tag === "NotFound"
@@ -300,8 +267,7 @@ const make = Effect.gen(function* () {
 
   const mutation = yield* Semaphore.make(1);
   const configWrite = yield* Semaphore.make(1);
-  const supervisorScope = yield* Scope.make();
-  yield* Effect.addFinalizer(() => Scope.close(supervisorScope, Exit.void));
+  const layerScope = yield* Effect.scope;
   let supervisor: Fiber.Fiber<void> | undefined;
   let attached: TailnetSidecar.TailnetSidecarProcess | undefined;
   let pendingAuthKey: string | undefined;
@@ -336,16 +302,7 @@ const make = Effect.gen(function* () {
     yield* fileSystem.makeDirectory(tailnetDir, { recursive: true, mode: 0o700 });
     const suffix = Hex.encode(yield* crypto.randomBytes(6));
     const temporary = `${configPath}.${suffix}.tmp`;
-    const contents = yield* encodeConfigFile({
-      version: 1,
-      enrolled: next.enrolled,
-      signedIn: next.signedIn,
-      ...(next.hostname === undefined ? {} : { hostname: next.hostname }),
-      tags: next.tags,
-      serveEnabled: next.serveEnabled,
-      requireOwner: next.requireOwner,
-      loggingAllowed: next.loggingAllowed,
-    });
+    const contents = yield* encodeConfigFile(next);
     yield* fileSystem.writeFileString(temporary, `${contents}\n`, { mode: 0o600 });
     yield* fileSystem
       .rename(temporary, configPath)
@@ -428,7 +385,6 @@ const make = Effect.gen(function* () {
     const current = readState().config;
     const authKey = pendingAuthKey;
     yield* helper.send({
-      v: 1,
       type: "configure",
       dir: nodeDir,
       hostname: current.hostname ?? suggestedHostname,
@@ -507,7 +463,7 @@ const make = Effect.gen(function* () {
   const restartSupervisor = Effect.gen(function* () {
     yield* stopSupervisor;
     yield* setRuntime({ _tag: "Starting" });
-    supervisor = yield* supervise.pipe(Effect.forkIn(supervisorScope));
+    supervisor = yield* supervise.pipe(Effect.forkIn(layerScope));
   });
 
   /** Picks up a helper built after the server started. */
@@ -559,17 +515,25 @@ const make = Effect.gen(function* () {
     );
   /** The setting is already saved, and a helper that cannot take it is restarting with it. */
   const sendCommand = (command: TailnetSidecar.TailnetSidecarCommand) =>
-    Effect.suspend(() =>
-      attached === undefined
-        ? Effect.void
-        : attached
-            .send(command)
-            .pipe(
-              Effect.catch((error) =>
-                Effect.logWarning("Could not update the built-in Tailscale helper", { error }),
-              ),
-            ),
-    );
+    Effect.suspend(() => {
+      if (attached === undefined) return Effect.void;
+      return attached
+        .send(command)
+        .pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("Could not update the built-in Tailscale helper", { error }),
+          ),
+        );
+    });
+  const unenroll = Effect.suspend(() => {
+    pendingAuthKey = undefined;
+    return saveConfig((value) => ({ ...value, enrolled: false, signedIn: false }));
+  });
+  const stopAndWipeNode = Effect.gen(function* () {
+    yield* stopSupervisor;
+    yield* wipeNodeDirectory;
+    if (readState().runtime._tag !== "Unavailable") yield* setRuntime({ _tag: "Stopped" });
+  });
 
   const signIn = Effect.fn("TailnetNode.signIn")(function* (input: TailnetSignInInput) {
     const { config: current } = readState();
@@ -605,7 +569,7 @@ const make = Effect.gen(function* () {
       yield* ensureAvailable;
       yield* restartSupervisor;
     } else {
-      yield* sendCommand({ v: 1, type: "login" });
+      yield* sendCommand({ type: "login" });
     }
     return yield* awaitLogin;
   }).pipe(exclusive, Effect.withSpan("TailnetNode.reauthenticate"));
@@ -619,27 +583,22 @@ const make = Effect.gen(function* () {
         detail: "This environment is already signed in to Tailscale. Sign out instead.",
       });
     }
-    pendingAuthKey = undefined;
-    yield* saveConfig((value) => ({ ...value, enrolled: false, signedIn: false }));
-    yield* stopSupervisor;
-    yield* wipeNodeDirectory;
-    if (readState().runtime._tag !== "Unavailable") yield* setRuntime({ _tag: "Stopped" });
+    yield* unenroll;
+    yield* stopAndWipeNode;
   }).pipe(exclusive, Effect.withSpan("TailnetNode.cancelSignIn"));
 
   const signOut = Effect.gen(function* () {
     if (!readState().config.enrolled) return yield* new TailnetError({ reason: "not-signed-in" });
-    pendingAuthKey = undefined;
-    yield* saveConfig((value) => ({ ...value, enrolled: false, signedIn: false }));
+    yield* unenroll;
     yield* dropConnections;
     let remoteLogoutConfirmed = false;
     const helper = attached;
     if (helper !== undefined) {
       const waiter = yield* Deferred.make<boolean>();
       logoutWaiter = waiter;
-      remoteLogoutConfirmed = yield* helper.send({ v: 1, type: "logout" }).pipe(
+      remoteLogoutConfirmed = yield* helper.send({ type: "logout" }).pipe(
         Effect.andThen(Deferred.await(waiter)),
-        Effect.timeoutOption(LOGOUT_TIMEOUT),
-        Effect.map(Option.getOrElse(() => false)),
+        Effect.timeoutOrElse({ duration: LOGOUT_TIMEOUT, orElse: () => Effect.succeed(false) }),
         Effect.orElseSucceed(() => false),
         Effect.ensuring(
           Effect.sync(() => {
@@ -648,9 +607,7 @@ const make = Effect.gen(function* () {
         ),
       );
     }
-    yield* stopSupervisor;
-    yield* wipeNodeDirectory;
-    if (readState().runtime._tag !== "Unavailable") yield* setRuntime({ _tag: "Stopped" });
+    yield* stopAndWipeNode;
     return { remoteLogoutConfirmed } satisfies TailnetSignOutResult;
   }).pipe(exclusive, Effect.withSpan("TailnetNode.signOut"));
 
@@ -664,12 +621,12 @@ const make = Effect.gen(function* () {
       ...(input.loggingAllowed === undefined ? {} : { loggingAllowed: input.loggingAllowed }),
     }));
     if (input.serveEnabled !== undefined && input.serveEnabled !== before.serveEnabled) {
-      yield* sendCommand({ v: 1, type: "setServe", enabled: input.serveEnabled });
+      yield* sendCommand({ type: "setServe", enabled: input.serveEnabled });
       if (!input.serveEnabled) yield* dropConnections;
     }
     if (input.requireOwner === true && !before.requireOwner) yield* recheckConnections;
     if (input.hostname !== undefined && input.hostname !== before.hostname) {
-      yield* sendCommand({ v: 1, type: "setHostname", hostname: input.hostname });
+      yield* sendCommand({ type: "setHostname", hostname: input.hostname });
     }
     if (
       input.loggingAllowed !== undefined &&
@@ -680,33 +637,22 @@ const make = Effect.gen(function* () {
     }
   }, exclusive);
 
-  let started = false;
   const start = Effect.gen(function* () {
-    if (started) return;
-    started = true;
     const current = readState();
     if (!current.config.enrolled || current.runtime._tag === "Unavailable") return;
     if (supervisor === undefined) yield* restartSupervisor;
   }).pipe(mutation.withPermit, Effect.withSpan("TailnetNode.start"));
 
-  const status = SubscriptionRef.changes(state).pipe(
-    Stream.map((value) => statusOf(value, suggestedHostname)),
-    Stream.changesWith((previous, next) => Equal.equals(previous, next)),
-  );
+  const toStatus = (value: NodeState) => statusOf(value, suggestedHostname);
+  const currentStatus = SubscriptionRef.get(state).pipe(Effect.map(toStatus));
+  const status = SubscriptionRef.changes(state).pipe(Stream.map(toStatus), Stream.changes);
 
   return TailnetNode.of({
     start,
     status,
-    currentStatus: SubscriptionRef.get(state).pipe(
-      Effect.map((value) => statusOf(value, suggestedHostname)),
-    ),
-    exposure: SubscriptionRef.get(state).pipe(
-      Effect.map((value) => exposureOf(statusOf(value, suggestedHostname))),
-    ),
-    exposureChanges: status.pipe(
-      Stream.map(exposureOf),
-      Stream.changesWith((previous, next) => Equal.equals(previous, next)),
-    ),
+    currentStatus,
+    exposure: Effect.map(currentStatus, exposureOf),
+    exposureChanges: status.pipe(Stream.map(exposureOf), Stream.changes),
     signIn,
     cancelSignIn,
     reauthenticate,
