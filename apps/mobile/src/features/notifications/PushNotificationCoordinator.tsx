@@ -142,7 +142,15 @@ function IosPushNotificationCoordinator() {
     const launch = Notifications.getLastNotificationResponse();
     if (launch !== null) handleResponse(launch);
     const responses = Notifications.addNotificationResponseReceivedListener(handleResponse);
-    const tokens = Notifications.addPushTokenListener(() => sync());
+    // Reading the token re-registers with APNs, which emits this event again with the same
+    // token; syncing on every event would loop.
+    let lastToken: string | null = null;
+    const tokens = Notifications.addPushTokenListener((token) => {
+      if (token.data === lastToken) return;
+      const first = lastToken === null;
+      lastToken = token.data;
+      if (!first) sync();
+    });
     const appState = AppState.addEventListener("change", (state) => {
       if (state !== "active") return;
       void consumePresentedChallenges().catch(() => undefined);
