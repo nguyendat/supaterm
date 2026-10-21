@@ -87,11 +87,12 @@ const ensureUnrecordedSchema = Effect.fn("ensureUnrecordedSchema")(function* () 
     ON orchestration_v2_projection_turn_items(thread_id, run_id)
     WHERE type = 'run_interrupt_request'
   `;
-  // Shell resume groups this range by aggregate; covering it keeps payload pages unread.
+  // Shell resume groups a sequence range by aggregate. Covering it, without a predicate on
+  // the columns stored after the payload, keeps both the query and the first build off
+  // payload overflow pages.
   yield* sql`
-    CREATE INDEX IF NOT EXISTS idx_orchestration_events_application_changes
-    ON orchestration_events(sequence, aggregate_kind, stream_id, application_event_version)
-    WHERE aggregate_kind = 'project' OR (application_event_version = 2 AND aggregate_kind = 'thread')
+    CREATE INDEX IF NOT EXISTS idx_orchestration_events_sequence_aggregate
+    ON orchestration_events(sequence, aggregate_kind, stream_id)
   `;
 });
 

@@ -677,6 +677,103 @@ it.live("shell resume removes deleted and archived threads and deleted projects"
   }).pipe(Effect.provide(Layer.fresh(ReplayTestLayer))),
 );
 
+it.live("shell resume first resends threads that depend on a changed thread", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const now = "2026-01-05T00:00:00.000Z";
+    const insertThread = (threadId: string, forkedFrom: string | null) => sql`
+      INSERT INTO orchestration_v2_projection_threads (
+        thread_id, project_id, title, default_provider, runtime_mode, interaction_mode,
+        created_at, updated_at, payload_json
+      ) VALUES (
+        ${threadId}, 'project:resume', ${threadId}, 'codex', 'full-access', 'default',
+        ${now}, ${now},
+        ${JSON.stringify(forkedFrom === null ? {} : { forkedFrom: { type: "run", threadId: forkedFrom } })}
+      )
+    `;
+    const bind = (sessionId: string, threadId: string) => sql`
+      INSERT INTO orchestration_v2_projection_provider_session_bindings (provider_session_id, thread_id)
+      VALUES (${sessionId}, ${threadId})
+    `;
+    yield* insertThread("thread:source", null);
+    yield* insertThread("thread:fork", "thread:source");
+    yield* insertThread("thread:fork-of-fork", "thread:fork");
+    yield* insertThread("thread:sibling", null);
+    yield* insertThread("thread:unrelated", null);
+    yield* bind("session:shared", "thread:source");
+    yield* bind("session:shared", "thread:sibling");
+    yield* bind("session:other", "thread:unrelated");
+    const cursor = yield* insertResumeEvent("thread", "thread:unrelated");
+    const source = yield* insertResumeEvent("thread", "thread:source");
+    const shells = new Map(
+      ["thread:source", "thread:fork", "thread:fork-of-fork", "thread:sibling"].map(
+        (id) => [id, resumeShellFixture(id)] as const,
+      ),
+    );
+
+    const items = yield* collectShellResume({ afterSequence: cursor, shells });
+
+    assert.deepEqual(items.map(describeResumeItem), [
+      `thread.updated thread:sibling @${cursor}`,
+      `thread.updated thread:fork @${cursor}`,
+      `thread.updated thread:fork-of-fork @${cursor}`,
+      `thread.updated thread:source @${source}`,
+      "synchronized",
+    ]);
+  }).pipe(Effect.provide(Layer.fresh(ReplayTestLayer))),
+);
+
+it.live("shell resume refetches projects whose events this build does not know", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const cursor = yield* insertResumeEvent("thread", "thread:only");
+    const [future] = yield* sql<{ readonly sequence: number }>`
+      INSERT INTO orchestration_events (
+        event_id, aggregate_kind, stream_id, stream_version, event_type,
+        occurred_at, actor_kind, payload_json, metadata_json, application_event_version
+      ) VALUES (
+        'resume:future-project', 'project', 'project:future', 0, 'project.from-a-newer-build',
+        '2026-01-05T00:00:00.000Z', 'server', '{"unreadable":true}', '{}', 2
+      ) RETURNING sequence
+    `;
+    const projects = new Map([["project:future", resumeProjectFixture("project:future")]]);
+
+    const items = yield* collectShellResume({ afterSequence: cursor, projects });
+
+    assert.deepEqual(items.map(describeResumeItem), [
+      `project.updated project:future @${future!.sequence}`,
+      "synchronized",
+    ]);
+  }).pipe(Effect.provide(Layer.fresh(ReplayTestLayer))),
+);
+
+it.live("shell resume past a million sequences sends a snapshot without scanning them", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const cursor = yield* insertResumeEvent("thread", "thread:only");
+    const [head] = yield* sql<{ readonly sequence: number }>`
+      INSERT INTO orchestration_events (
+        sequence, event_id, aggregate_kind, stream_id, stream_version, event_type,
+        occurred_at, actor_kind, payload_json, metadata_json, application_event_version
+      ) VALUES (
+        ${cursor + 1_000_001}, 'resume:far', 'thread', 'thread:only', 1,
+        'provider-session.detached', '2026-01-05T00:00:00.000Z', 'server',
+        '{"providerSessionId":"session:resume","detachedAt":"2026-01-05T00:00:00.000Z"}', '{}', 2
+      ) RETURNING sequence
+    `;
+
+    const items = yield* collectShellResume({
+      afterSequence: cursor,
+      snapshotThreads: [resumeShellFixture("thread:only")],
+    });
+
+    assert.deepEqual(items.map(describeResumeItem), [
+      `snapshot 1 threads @${head!.sequence}`,
+      "synchronized",
+    ]);
+  }).pipe(Effect.provide(Layer.fresh(ReplayTestLayer))),
+);
+
 it.live("shell resume sends a snapshot once more than 500 threads changed", () =>
   Effect.gen(function* () {
     const cursor = yield* insertResumeEvent("thread", "thread:before");

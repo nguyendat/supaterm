@@ -14,6 +14,7 @@ import {
   ThreadId,
   type OrchestrationV2DomainEvent,
 } from "@supaterm/contracts";
+import * as NodeSqliteClient from "@supaterm/shared/nodeSqliteClient";
 import * as Context from "effect/Context";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlSchema from "effect/sql/SqlSchema";
@@ -92,9 +93,10 @@ export class OrchestrationEventStore extends Context.Service<
     readonly latestApplicationSequence: Effect.Effect<number, OrchestrationEventStoreError>;
 
     /**
-     * Each project or thread with an application event in the range, at its
-     * newest sequence, oldest first. Reads no payloads, so unknown event types
-     * from a newer build are included rather than failing the read.
+     * Each project or thread with an event in the range, at its newest
+     * sequence, oldest first. Reads no payloads, so unknown event types from a
+     * newer build are included rather than failing the read. Legacy thread rows
+     * are included too; refetching an aggregate is idempotent.
      */
     readonly readChangedApplicationAggregates: (input: {
       readonly afterSequence: number;
@@ -667,17 +669,15 @@ const makeEventStore = Effect.gen(function* () {
           aggregate_kind AS "aggregateKind",
           stream_id AS "aggregateId",
           MAX(sequence) AS "sequence"
-        FROM orchestration_events INDEXED BY idx_orchestration_events_application_changes
+        FROM orchestration_events INDEXED BY idx_orchestration_events_sequence_aggregate
         WHERE sequence > ${input.afterSequence}
           AND sequence <= ${input.throughSequence}
-          AND (
-            aggregate_kind = 'project'
-            OR (application_event_version = 2 AND aggregate_kind = 'thread')
-          )
         GROUP BY aggregate_kind, stream_id
         ORDER BY "sequence" ASC
         LIMIT ${input.limit}
       `.pipe(
+        // GROUP BY scans the whole range before LIMIT applies; keep it off the writer.
+        NodeSqliteClient.readOnly,
         Effect.mapError(
           toPersistenceSqlError("OrchestrationEventStore.readChangedApplicationAggregates:query"),
         ),

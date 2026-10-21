@@ -133,7 +133,12 @@ export function applyShellStreamEvent(
     | { readonly kind: "unknown-item" }
   >,
 ): OrchestrationV2ShellSnapshot {
-  if (event.sequence <= snapshot.snapshotSequence) return snapshot;
+  // A thread row at the cursor's own sequence is one the server re-read because
+  // another thread it depends on changed, sent without moving the cursor.
+  const stale =
+    event.sequence < snapshot.snapshotSequence ||
+    (event.sequence === snapshot.snapshotSequence && !event.kind.startsWith("thread."));
+  if (stale) return snapshot;
 
   switch (event.kind) {
     case "project.updated": {

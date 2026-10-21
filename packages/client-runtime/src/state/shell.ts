@@ -104,14 +104,14 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
   });
   const awaitingCompletion = yield* Ref.make(false);
   const lastAuthoritativeSession = yield* Ref.make<RpcSession | null>(null);
-  // The server run whose stream last brought this in-memory shell to `synchronized`.
-  // Only a shell completed in this process qualifies, never one loaded from disk.
+  // The server run whose stream last brought this in-memory shell to `synchronized`
+  // since its last authoritative snapshot. A shell loaded from disk never qualifies.
   const completedGeneration = yield* Ref.make<string | null>(null);
-  const sessionGenerations = new WeakMap<RpcSession, string | null>();
   // An unknown item still advances the cursor past rows this build could not
   // apply, so a resume would never resend them.
   let skippedUnknownItem = false;
   const activeSubscriptionSession = yield* Ref.make<RpcSession | null>(null);
+  const activeSubscriptionGeneration = yield* Ref.make<string | null>(null);
   const latestLiveSnapshot = yield* Ref.make<Option.Option<OrchestrationV2ShellSnapshot>>(
     Option.none(),
   );
@@ -204,17 +204,18 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
     const initial = yield* SubscriptionRef.get(state);
     let waiting = yield* Ref.get(awaitingCompletion);
     let generation = yield* Ref.get(completedGeneration);
+    const activeSession = yield* Ref.get(activeSubscriptionSession);
+    // Items still buffered from a replaced session say nothing about the current one.
+    const fromReplacedSession = options?.source !== undefined && options.source !== activeSession;
     let next = initial;
     let receivedSnapshot = false;
     for (const item of items) {
       if (item.kind === "synchronized") {
+        if (fromReplacedSession) continue;
         waiting = false;
         if (Option.isSome(next.snapshot)) {
           next = { snapshot: next.snapshot, status: "live", error: Option.none() };
-          generation =
-            skippedUnknownItem || options?.source === undefined
-              ? null
-              : (sessionGenerations.get(options.source) ?? null);
+          generation = skippedUnknownItem ? null : yield* Ref.get(activeSubscriptionGeneration);
         }
         continue;
       }
@@ -225,6 +226,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       }
       if (item.kind === "snapshot" && item.resolvedRepositoryIdentityRoots === undefined) {
         skippedUnknownItem = false;
+        generation = null;
       }
       const nextSnapshot =
         item.kind === "snapshot"
@@ -240,7 +242,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
           : Option.match(next.snapshot, {
               onNone: () => null,
               onSome: (snapshot) =>
-                item.sequence > snapshot.snapshotSequence
+                item.sequence >= snapshot.snapshotSequence
                   ? applyShellStreamEvent(snapshot, item)
                   : snapshot,
             });
@@ -265,11 +267,9 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       yield* Ref.set(latestLiveSnapshot, next.snapshot);
     }
     yield* SubscriptionRef.set(state, next);
-    if (receivedSnapshot) {
-      const session = yield* Ref.get(activeSubscriptionSession);
-      if (session !== null) {
-        yield* Ref.set(lastAuthoritativeSession, session);
-      }
+    const snapshotSession = options?.source ?? activeSession;
+    if (receivedSnapshot && snapshotSession !== null) {
+      yield* Ref.set(lastAuthoritativeSession, snapshotSession);
     }
     if (next.snapshot !== initial.snapshot && Option.isSome(next.snapshot)) {
       yield* Queue.offer(persistence, next.snapshot.value);
@@ -349,9 +349,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       service.changes.pipe(
         // The OS may end a backgrounded app before the throttled write runs.
         Stream.tap((reason) =>
-          reason === "application-background"
-            ? Effect.forkIn(flushLiveShellSnapshot, stateScope)
-            : Effect.void,
+          reason === "application-background" ? Effect.forkIn(persist(), stateScope) : Effect.void,
         ),
         Stream.filter(ConnectionWakeups.shouldResubscribeAfterWakeup),
       ),
@@ -372,7 +370,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
           onNone: () => null,
           onSome: (config) => config.shellSyncGeneration ?? null,
         });
-        sessionGenerations.set(session, generation);
+        yield* Ref.set(activeSubscriptionGeneration, generation);
         yield* Ref.set(awaitingCompletion, supportsCompletionMarker);
         yield* setSynchronizing;
 

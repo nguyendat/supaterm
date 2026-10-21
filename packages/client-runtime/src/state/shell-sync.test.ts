@@ -1553,6 +1553,23 @@ describe("resuming the shell on a new connection", () => {
     }),
   );
 
+  it.effect("forgets a completed run once another run's snapshot replaced the shell", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const first = yield* harness.connect("run-1");
+      yield* Queue.offerAll(first.events, [harness.update(12), { kind: "synchronized" }]);
+      yield* harness.awaitLive;
+
+      // Another server process answers for the same environment, then drops before completing.
+      const other = yield* harness.connect("run-2");
+      expect(other.afterSequence).toBe(20);
+
+      const back = yield* harness.connect("run-1");
+      expect(back.afterSequence).toBe(30);
+      expect(yield* Ref.get(harness.loaderCalls)).toBe(3);
+    }),
+  );
+
   it.effect("keeps the cursor a resumed session reached before it dropped", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();
@@ -1569,6 +1586,34 @@ describe("resuming the shell on a new connection", () => {
       const third = yield* harness.connect("run-1");
       expect(third.afterSequence).toBe(14);
       expect(yield* Ref.get(harness.loaderCalls)).toBe(1);
+    }),
+  );
+
+  it.effect("applies thread rows the server resends at the cursor without moving it", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const first = yield* harness.connect("run-1");
+      yield* Queue.offerAll(first.events, [harness.update(12), { kind: "synchronized" }]);
+      yield* harness.awaitLive;
+
+      const second = yield* harness.connect("run-1");
+      expect(second.afterSequence).toBe(12);
+      // A fork whose source changed arrives first, at the cursor itself.
+      yield* Queue.offer(second.events, {
+        kind: "thread.updated",
+        sequence: 12,
+        location: "active",
+        thread: { ...v2ThreadShell, title: "dependent refreshed" },
+      });
+      const refreshed = yield* SubscriptionRef.changes(harness.shellState).pipe(
+        Stream.filter((value) =>
+          Option.exists(value.snapshot, (snapshot) =>
+            snapshot.threads.some((thread) => thread.title === "dependent refreshed"),
+          ),
+        ),
+        Stream.runHead,
+      );
+      expect(Option.getOrThrow(Option.getOrThrow(refreshed).snapshot).snapshotSequence).toBe(12);
     }),
   );
 

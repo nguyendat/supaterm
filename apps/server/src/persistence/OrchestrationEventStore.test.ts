@@ -843,7 +843,7 @@ it.effect("lists each changed project and thread once at its newest sequence, ol
       streamId: "thread:a",
       version: 0,
     });
-    yield* insertApplicationRow({
+    const legacy = yield* insertApplicationRow({
       id: "changed:legacy",
       aggregateKind: "thread",
       streamId: "thread:legacy",
@@ -878,6 +878,7 @@ it.effect("lists each changed project and thread once at its newest sequence, ol
     // A project and a thread may share an id; they are separate aggregates.
     assert.deepEqual(changed, [
       { aggregateKind: "project", aggregateId: "thread:a", sequence: project },
+      { aggregateKind: "thread", aggregateId: "thread:legacy", sequence: legacy },
       { aggregateKind: "thread", aggregateId: "thread:b", sequence: threadB },
       { aggregateKind: "thread", aggregateId: "thread:a", sequence: threadA2 },
     ]);
@@ -888,9 +889,9 @@ it.effect("lists each changed project and thread once at its newest sequence, ol
       yield* store.readChangedApplicationAggregates({
         afterSequence: cursor,
         throughSequence: threadA2,
-        limit: 2,
+        limit: 3,
       }),
-      changed.slice(0, 2),
+      changed.slice(0, 3),
     );
     assert.deepEqual(
       yield* store.readChangedApplicationAggregates({

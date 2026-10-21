@@ -81,16 +81,13 @@ describe("runMigrations", () => {
         yield* runMigrations();
         const changes = yield* sql<{ readonly detail: string }>`
         EXPLAIN QUERY PLAN SELECT aggregate_kind, stream_id, MAX(sequence)
-        FROM orchestration_events INDEXED BY idx_orchestration_events_application_changes
+        FROM orchestration_events INDEXED BY idx_orchestration_events_sequence_aggregate
         WHERE sequence > 1 AND sequence <= 9
-          AND (aggregate_kind = 'project' OR (application_event_version = 2 AND aggregate_kind = 'thread'))
         GROUP BY aggregate_kind, stream_id
       `;
         assert.isTrue(
           changes.some((row) =>
-            row.detail.includes(
-              "USING COVERING INDEX idx_orchestration_events_application_changes",
-            ),
+            row.detail.includes("USING COVERING INDEX idx_orchestration_events_sequence_aggregate"),
           ),
         );
         const interrupt = yield* sql<{ readonly detail: string }>`
