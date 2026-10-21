@@ -100,25 +100,17 @@ function stabilizeOptionFunctions(
   value: unknown,
   path: string,
   latestFunctions: Map<string, (...args: unknown[]) => unknown>,
-  wrappers: Map<string, (...args: unknown[]) => unknown>,
   seen = new WeakSet<object>(),
 ): unknown {
   if (typeof value === "function") {
     latestFunctions.set(path, value as (...args: unknown[]) => unknown);
-    let wrapper = wrappers.get(path);
-    if (!wrapper) {
-      wrapper = (...args: unknown[]) => {
-        return latestFunctions.get(path)?.(...args);
-      };
-      wrappers.set(path, wrapper);
-    }
-    return wrapper;
+    return (...args: unknown[]) => latestFunctions.get(path)?.(...args);
   }
   if (Array.isArray(value)) {
     if (seen.has(value)) return value;
     seen.add(value);
     return value.map((entry, index) =>
-      stabilizeOptionFunctions(entry, `${path}[${index}]`, latestFunctions, wrappers, seen),
+      stabilizeOptionFunctions(entry, `${path}[${index}]`, latestFunctions, seen),
     );
   }
   if (value !== null && typeof value === "object") {
@@ -127,7 +119,7 @@ function stabilizeOptionFunctions(
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
         key,
-        stabilizeOptionFunctions(entry, `${path}.${key}`, latestFunctions, wrappers, seen),
+        stabilizeOptionFunctions(entry, `${path}.${key}`, latestFunctions, seen),
       ]),
     );
   }
@@ -149,7 +141,6 @@ export function NativeStackScreenOptions(props: {
   const tabActive = use(NativeWorkspaceTabActivityContext)?.active ?? true;
   const lastAppliedOptionsSignatureRef = useRef<string | undefined>(undefined);
   const latestOptionFunctionsRef = useRef(new Map<string, (...args: unknown[]) => unknown>());
-  const optionFunctionWrappersRef = useRef(new Map<string, (...args: unknown[]) => unknown>());
   const normalizedOptions = useMemo(() => normalizeScreenOptions(props.options), [props.options]);
 
   useLayoutEffect(() => {
@@ -160,22 +151,19 @@ export function NativeStackScreenOptions(props: {
     if (!navigation || !normalizedOptions) {
       return;
     }
-    const stabilize = () =>
-      stabilizeOptionFunctions(
-        normalizedOptions,
-        "options",
-        latestOptionFunctionsRef.current,
-        optionFunctionWrappersRef.current,
-      ) as NativeStackNavigationOptions;
-    const signature = optionsSignature([stabilize(), props.optionsVersion]);
+    // Wrappers are recreated on every apply: React Navigation keeps a screen's previous options
+    // while every value is identical, so a reused factory would hide changed items.
+    const stableOptions = stabilizeOptionFunctions(
+      normalizedOptions,
+      "options",
+      latestOptionFunctionsRef.current,
+    ) as NativeStackNavigationOptions;
+    const signature = optionsSignature([stableOptions, props.optionsVersion]);
     if (lastAppliedOptionsSignatureRef.current === signature) {
       return;
     }
     lastAppliedOptionsSignatureRef.current = signature;
-    // React Navigation keeps a screen's previous options while every value is identical,
-    // so a stable factory would hide the changed items from the header.
-    optionFunctionWrappersRef.current = new Map();
-    navigation.setOptions(stabilize());
+    navigation.setOptions(stableOptions);
   }, [navigation, normalizedOptions, props.optionsVersion, tabActive]);
 
   useEffect(() => {
