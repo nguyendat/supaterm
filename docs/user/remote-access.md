@@ -314,9 +314,8 @@ threads on an environment through its MCP server. See
 The iOS app can alert you when an agent needs approval or input, finishes, fails,
 or hits a usage limit, even while the app is closed. Open **Settings →
 Notifications** in the app, choose what the lock screen shows, and turn on
-**Notify me**. iOS asks for permission once. Every saved environment is set up the
-next time it connects, and its row shows whether alerts are on. **Send test**
-checks the whole path.
+**Notify me**. Every saved environment is set up the next time it connects, and
+**Send test** checks the whole path.
 
 **Hidden** shows only what happened, **Titles** adds the thread and project names,
 and **Full** adds the command, question, or last message. **Hide content on this
@@ -324,17 +323,16 @@ device** overrides the choice for this phone. You will not get an alert for a
 thread you are actively using on another device.
 
 Alerts are encrypted on your machine to a key that never leaves your phone. Apple
-and the Supaterm push gateway see that a notification was sent to your device and
-when, but not thread names, questions, or messages. The gateway knows your
-device's push token and which machines may notify it.
+and the Supaterm push gateway see when a notification was sent to your device, but
+not thread names, questions, or messages. The gateway knows your device's push
+token and which machines may notify it.
 
 On the machine, push is on by default under **Settings → General → Push
-notifications**, which also lists registered devices with **Send test** and
-**Remove**. To stop alerts from one machine, turn notifications off in the app,
-remove the environment, remove the device there, or revoke the phone's session in
-**Settings → Connections**. If an environment reports that it does not allow a
-notification service, add that service's address to the machine's push gateways in
-the same section.
+notifications**, which also lists registered devices. To stop alerts from one
+machine, turn notifications off in the app, remove the environment, remove the
+device there, or revoke the phone's session in **Settings → Connections**. If an
+environment reports that it does not allow a notification service, add that
+service's address to the machine's push gateways in the same section.
 
 ## Manage or revoke access
 

@@ -46,7 +46,11 @@ import {
 } from "./providerInstance.ts";
 import { PullRequestMergeMethod } from "./pullRequest.ts";
 import { DEFAULT_PUBLIC_RELAY_URL, RelayServerUrl } from "./relay.ts";
-import { DEFAULT_PUSH_GATEWAY_ORIGIN, PushGatewayOrigin } from "./push.ts";
+import {
+  DEFAULT_PUSH_GATEWAY_ORIGIN,
+  MAX_PUSH_GATEWAY_ORIGINS,
+  PushGatewayOrigin,
+} from "./push.ts";
 
 export const TimestampFormat = Schema.Literals(["locale", "12-hour", "24-hour"]);
 export type TimestampFormat = typeof TimestampFormat.Type;
@@ -1356,7 +1360,7 @@ export const ServerSettingsPatch = Schema.Struct({
   publicRelayUrl: Schema.optionalKey(RelayServerUrl),
   pushNotificationsEnabled: Schema.optionalKey(Schema.Boolean),
   pushGatewayOrigins: Schema.optionalKey(
-    Schema.Array(PushGatewayOrigin).check(Schema.isMaxLength(32)),
+    Schema.Array(PushGatewayOrigin).check(Schema.isMaxLength(MAX_PUSH_GATEWAY_ORIGINS)),
   ),
   setModelFavorites: Schema.optionalKey(
     Schema.Array(Schema.Struct({ ...ModelFavorite.fields, favorite: Schema.Boolean })),

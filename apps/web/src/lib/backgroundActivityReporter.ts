@@ -171,9 +171,9 @@ export function retainedBackgroundScopes(
 }
 
 /**
- * The host holds a completion push for two seconds and drops it when a client reports,
- * after the event, that it shows the thread and had input just before. This sends that
- * report at once instead of on the next 25 second tick.
+ * The host briefly holds a completion push and drops it when a client reports, after the
+ * event, that it shows the thread and had input just before. This sends that report at
+ * once instead of on the next interval.
  */
 export function reportShownThreadAttention(environmentId: EnvironmentId, threadId: ThreadId): void {
   if (!retainedScopes.has(stableScopeKey(environmentId, { type: "thread", threadId }))) return;

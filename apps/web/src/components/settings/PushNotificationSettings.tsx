@@ -9,7 +9,7 @@ import * as DateTime from "effect/DateTime";
 import { XIcon } from "lucide-react";
 import { useState } from "react";
 
-import { useEnvironmentQuery } from "../../state/query";
+import { type EnvironmentQueryView, useEnvironmentQuery } from "../../state/query";
 import { pushEnvironment } from "../../state/push";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
@@ -222,17 +222,7 @@ function PushDevices({
     <SettingsRow
       id={searchAnchor ? searchProps.id : undefined}
       title={title}
-      description={
-        !canRead
-          ? "This connection cannot view push devices."
-          : query.error
-            ? query.error
-            : query.isPending && query.data === null
-              ? "Loading devices…"
-              : registrations.length === 0
-                ? "No devices yet. Turn on notifications in the Supaterm iOS app to add one."
-                : "Phones that receive this environment's notifications."
-      }
+      description={describeDevices(canRead, query, registrations.length)}
     >
       {registrations.length > 0 ? (
         <div className="divide-y divide-border/60 border-y border-border/60">
@@ -290,6 +280,19 @@ function PushDevices({
       ) : null}
     </SettingsRow>
   );
+}
+
+function describeDevices(
+  canRead: boolean,
+  query: EnvironmentQueryView<unknown>,
+  count: number,
+): string {
+  if (!canRead) return "This connection cannot view push devices.";
+  if (query.error) return query.error;
+  if (query.isPending && query.data === null) return "Loading devices…";
+  if (count === 0)
+    return "No devices yet. Turn on notifications in the Supaterm iOS app to add one.";
+  return "Phones that receive this environment's notifications.";
 }
 
 function describeRegistration(registration: PushRegistrationSummary): string {

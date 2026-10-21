@@ -1,12 +1,12 @@
-import { AuthSessionId, type PushRegistrationSummary } from "@supaterm/contracts";
+import {
+  AuthSessionId,
+  MAX_PUSH_GATEWAY_ORIGINS,
+  type PushRegistrationSummary,
+} from "@supaterm/contracts";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  activePushSessionIds,
-  addPushGatewayOrigin,
-  MAX_PUSH_GATEWAY_ORIGINS,
-} from "./PushNotificationSettings.logic";
+import { activePushSessionIds, addPushGatewayOrigin } from "./PushNotificationSettings.logic";
 
 describe("addPushGatewayOrigin", () => {
   it("stores the normalized origin", () => {

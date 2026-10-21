@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 import { AuthSessionId, NonNegativeInt, TrimmedString } from "./baseSchemas.ts";
 
 export const DEFAULT_PUSH_GATEWAY_ORIGIN = "https://push.supaterm.com";
+export const MAX_PUSH_GATEWAY_ORIGINS = 32;
 
 const LOCAL_PUSH_GATEWAY_HOSTS = new Set(["localhost", "127.0.0.1"]);
 

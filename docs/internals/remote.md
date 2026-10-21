@@ -100,38 +100,34 @@ Push reaches an iPhone through Apple, so the design keeps Apple and the push
 gateway blind. The host seals each notification with HPKE to the phone's
 per-environment X25519 key and signs it with a dedicated `push-identity` key, never
 `relay-identity`. The gateway (`push.supaterm.com` by default) holds APNs tokens and
-host-scoped handles; the host holds handles and never an APNs token. Apple and the
-gateway see a generic alert and an envelope padded to one of three sizes.
+host-scoped handles; the host holds only handles. Apple and the gateway see a
+generic alert and an envelope padded to one of three sizes.
 
-A registration belongs to the auth session that created it. Revoking that session,
-or finding it expired at startup, retires the registration and drops its gateway
-handle. Clients cannot move a registration between sessions.
+A registration belongs to the auth session that created it and cannot move to
+another. Revoking that session, or finding it expired at startup, retires the
+registration and drops its gateway handle.
 
 The [candidate reactor](../../apps/server/src/notifications/PushCandidateReactor.ts)
 reads committed events from its own cursor instead of hooking the event sink, so a
-slow or failing gateway can never delay a commit. On first boot the cursor starts
-at the head, so history never notifies. It recomputes attention with the shared
-classifier that desktop notifications use, so the two surfaces agree, and records
-the last attention key per thread. A thread it has never seen only notifies when
-the batch carries that occurrence's run or request, otherwise an old completion
-would alert the first time anything touches the thread. Runs reconciled during a
-server restart update the key without notifying.
+slow gateway can never delay a commit. Its cursor starts at the head on first boot,
+so history never notifies. It classifies attention with the same shared function as
+desktop notifications, so the two surfaces agree, and records the last attention key
+per thread. A thread it has never seen only
+notifies when the batch carries that occurrence's run or request; otherwise an old
+completion would alert the first time anything touches the thread. Runs reconciled
+during a server restart update the key without notifying.
 
 The [delivery worker](../../apps/server/src/notifications/PushDeliveryWorker.ts)
-rechecks the registration, session, setting, and current attention before every
-attempt. It persists the sealed envelope before the first send and keeps its
-notification ID on retries, so a send that reached the phone but timed out here
-is dropped by the phone's replay ledger. Completions expire 10 minutes after the
-event; approvals and questions last until they resolve or auto-dismiss, with each
-envelope capped at 24 hours.
+persists the sealed envelope before the first send and reuses its notification ID
+on retries, so a send that reached the phone but timed out here is dropped by the
+phone's replay ledger.
 
 Suppression uses thread activity leases and the client's last real input, never
 `thread.visit`, which reports pane ownership rather than visibility. A client that
-shows a thread sends one activity report when new attention lands there, instead
-of streaming input; the host drops a completion only when a report made after the
-event shows input from at most 10 seconds before it, and holds approvals while the
-thread is watched. When the signals disagree the result is a duplicate alert, never
-a lost one.
+shows a thread sends one activity report when new attention lands there instead of
+streaming input. The host drops a completion only when a report made after the
+event shows input just before it, and holds approvals while the thread is watched.
+When the signals disagree the result is a duplicate alert, never a lost one.
 
 The host contacts only origins in `pushGatewayOrigins`: HTTPS, or HTTP on
 localhost for development. It rejects origins that resolve to private or

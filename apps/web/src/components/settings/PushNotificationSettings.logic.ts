@@ -1,6 +1,8 @@
-import { normalizePushGatewayOrigin, type PushRegistrationSummary } from "@supaterm/contracts";
-
-export const MAX_PUSH_GATEWAY_ORIGINS = 32;
+import {
+  MAX_PUSH_GATEWAY_ORIGINS,
+  normalizePushGatewayOrigin,
+  type PushRegistrationSummary,
+} from "@supaterm/contracts";
 
 export function addPushGatewayOrigin(
   origins: ReadonlyArray<string>,
