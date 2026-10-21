@@ -309,6 +309,31 @@ Claude Code, Codex, ChatGPT and other agents Supaterm did not start can drive
 threads on an environment through its MCP server. See
 [outside agents](./outside-agents.md) for setup.
 
+## Push notifications on iPhone
+
+The iOS app can alert you when an agent needs an approval or an answer, finishes,
+fails, or hits a usage limit, even while the app is closed.
+
+To turn it on, open **Settings → Notifications** in the app, pick how much the
+lock screen shows, and allow notifications. **Titles** shows the thread and
+project names; **Full** adds the question or last message; **Hidden** shows only
+"Supaterm" and the kind of alert. The app then registers with each environment it
+can reach. The environment must have push turned on in its own **Settings →
+Notifications**, which is the default.
+
+Notification text is encrypted on your machine to a key that never leaves your
+phone. Apple and the Supaterm push gateway see that a notification was sent to
+your device and when, but not thread names, questions, or messages. The gateway
+knows your device's push token and which machines may notify it.
+
+You will not get an alert for a thread you are actively using on another device.
+
+To stop notifications from one machine, turn push off on the phone, or remove the
+device under **Settings → Notifications** on the machine. Revoking the phone's
+session in **Settings → Connections** also stops its notifications. If you run
+your own push gateway, add its address to the machine's gateway origins in the
+same settings section.
+
 ## Manage or revoke access
 
 On the host, **Settings → Connections** lets authorized administrators create
