@@ -1,6 +1,7 @@
 import type {
   OrchestrationV2PendingRuntimeRequestSummary,
   OrchestrationV2ThreadShell,
+  RunId,
   RuntimeRequestId,
   ThreadId,
 } from "@supaterm/contracts";
@@ -79,6 +80,7 @@ export function liftSubagentRequests<T extends SubagentRequestInput>(
 
 export type ThreadNotificationAttentionInput = Pick<
   OrchestrationV2ThreadShell,
+  | "id"
   | "archivedAt"
   | "deletedAt"
   | "lineage"
@@ -91,10 +93,52 @@ export type ThreadNotificationAttentionInput = Pick<
   | "pendingBackgroundTasks"
 >;
 
-export interface ThreadNotificationAttention {
-  readonly kind: PushNotificationKind;
+export type ThreadNotificationRequestAttention = {
+  readonly kind: Extract<PushNotificationKind, "approval" | "input">;
   /** Changes whenever a new occurrence needs the user, so a transition is a key change. */
   readonly key: string;
+  /** The thread that asked: the notifying thread, or a subagent whose request was lifted. */
+  readonly sourceThreadId: ThreadId;
+  readonly requestId: RuntimeRequestId;
+};
+
+type ThreadNotificationRunAttention = {
+  readonly kind: Exclude<PushNotificationKind, "approval" | "input">;
+  readonly key: string;
+  readonly sourceThreadId: ThreadId;
+  readonly runId: RunId;
+};
+
+export type ThreadNotificationAttention =
+  | ThreadNotificationRequestAttention
+  | ThreadNotificationRunAttention;
+
+/** Attention for a request `sourceThreadId` asked, notifying on `threadId`. */
+export function requestAttention(
+  kind: ThreadNotificationRequestAttention["kind"],
+  threadId: ThreadId,
+  sourceThreadId: ThreadId,
+  requestId: RuntimeRequestId,
+): ThreadNotificationRequestAttention {
+  const key =
+    sourceThreadId === threadId ? `${kind}:${requestId}` : `${kind}:${sourceThreadId}:${requestId}`;
+  return { kind, key, sourceThreadId, requestId };
+}
+
+export function runAttention(
+  kind: ThreadNotificationRunAttention["kind"],
+  threadId: ThreadId,
+  runId: RunId,
+): ThreadNotificationRunAttention {
+  return { kind, key: `${kind}:${runId}`, sourceThreadId: threadId, runId };
+}
+
+/** Which notification a pending request of this kind asks for, if any. */
+export function runtimeRequestAttentionKind(
+  kind: RuntimeRequestKind,
+): ThreadNotificationRequestAttention["kind"] | null {
+  if (kind === "user_input") return "input";
+  return runtimeRequestNeedsApproval(kind) ? "approval" : null;
 }
 
 // Mirrors the client's shell runtime: background work that wakes the agent
@@ -127,27 +171,25 @@ export function threadNotificationAttention(
   const status = runtimeStatus(thread);
   const request = thread.pendingRuntimeRequest;
   if (request !== null && runtimeRequestNeedsApproval(request.kind)) {
-    return { kind: "approval", key: `approval:${request.id}` };
+    return requestAttention("approval", thread.id, thread.id, request.id);
   }
   if (subagent?.kind === "approval") {
-    return { kind: "approval", key: `approval:${subagent.threadId}:${subagent.requestId}` };
+    return requestAttention("approval", thread.id, subagent.threadId, subagent.requestId);
   }
   const working = status === "preparing" || status === "starting" || status === "running";
   // A non-blocking question only waits on the user once the run stops working past it.
   if (request?.kind === "user_input" && (request.blocking !== false || !working)) {
-    return { kind: "input", key: `input:${request.id}` };
+    return requestAttention("input", thread.id, thread.id, request.id);
   }
   if (subagent?.kind === "user_input") {
-    return { kind: "input", key: `input:${subagent.threadId}:${subagent.requestId}` };
+    return requestAttention("input", thread.id, subagent.threadId, subagent.requestId);
   }
   if (thread.latestRunId === null) return null;
   if (status === "failed") {
     const kind = thread.lastErrorClass === "usage_limit" ? "usage-limit" : "failure";
-    return { kind, key: `${kind}:${thread.latestRunId}` };
+    return runAttention(kind, thread.id, thread.latestRunId);
   }
-  return status === "completed"
-    ? { kind: "completion", key: `completion:${thread.latestRunId}` }
-    : null;
+  return status === "completed" ? runAttention("completion", thread.id, thread.latestRunId) : null;
 }
 
 /** Attention for every top-level thread that needs the user, keyed by thread. */

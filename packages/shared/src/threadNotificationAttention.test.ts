@@ -85,7 +85,12 @@ describe("threadNotificationAttention", () => {
       threadNotificationAttention(
         thread({ ...running, pendingRuntimeRequest: request("command") }),
       ),
-    ).toEqual({ kind: "approval", key: "approval:request-1" });
+    ).toEqual({
+      kind: "approval",
+      key: "approval:request-1",
+      sourceThreadId: parentId,
+      requestId: "request-1",
+    });
   });
 
   it.each(["auth_refresh", "dynamic_tool_call"] as const)("never alerts for %s", (kind) => {
@@ -99,7 +104,12 @@ describe("threadNotificationAttention", () => {
       threadNotificationAttention(
         thread({ ...running, pendingRuntimeRequest: request("user_input") }),
       ),
-    ).toEqual({ kind: "input", key: "input:request-1" });
+    ).toEqual({
+      kind: "input",
+      key: "input:request-1",
+      sourceThreadId: parentId,
+      requestId: "request-1",
+    });
     const asyncQuestion = request("user_input", "request-1", false);
     expect(
       threadNotificationAttention(thread({ ...running, pendingRuntimeRequest: asyncQuestion })),
@@ -107,14 +117,16 @@ describe("threadNotificationAttention", () => {
     expect(
       threadNotificationAttention(
         thread({ status: "waiting", pendingRuntimeRequest: asyncQuestion }),
-      ),
-    ).toEqual({ kind: "input", key: "input:request-1" });
+      )?.key,
+    ).toBe("input:request-1");
   });
 
   it("reports a finished run once per run", () => {
     expect(threadNotificationAttention(thread())).toEqual({
       kind: "completion",
       key: "completion:run-1",
+      sourceThreadId: parentId,
+      runId,
     });
     expect(threadNotificationAttention(thread({ latestRunId: RunId.make("run-2") }))?.key).toBe(
       "completion:run-2",
@@ -147,10 +159,7 @@ describe("threadNotificationAttention", () => {
   it("splits failures from usage limits", () => {
     expect(
       threadNotificationAttention(thread({ status: "failed", lastErrorClass: "provider_error" })),
-    ).toEqual({
-      kind: "failure",
-      key: "failure:run-1",
-    });
+    ).toEqual({ kind: "failure", key: "failure:run-1", sourceThreadId: parentId, runId });
     expect(
       threadNotificationAttention(
         thread({
@@ -158,8 +167,8 @@ describe("threadNotificationAttention", () => {
           lastErrorClass: "usage_limit",
           pendingBackgroundTasks: [{ taskId: "task", kind: "subagent" }],
         }),
-      ),
-    ).toEqual({ kind: "usage-limit", key: "usage-limit:run-1" });
+      )?.key,
+    ).toBe("usage-limit:run-1");
   });
 
   it("skips archived, deleted, and subagent threads", () => {
@@ -184,6 +193,8 @@ describe("threadNotificationAttentionByThread", () => {
     expect(attention.get(parentId)).toEqual({
       kind: "approval",
       key: "approval:leaf:leaf-request",
+      sourceThreadId: leaf.id,
+      requestId: "leaf-request",
     });
     expect(attention.has(middle.id)).toBe(false);
     expect(attention.has(leaf.id)).toBe(false);
