@@ -23,8 +23,8 @@ vi.mock("@react-navigation/native", () => {
       const merged = { ...harness.appliedOptions, ...options };
       // React Navigation reuses a screen's descriptor while every option value is identical.
       if (
-        Object.keys(merged).every((key) =>
-          Object.is(harness.appliedOptions[key], merged[key as keyof typeof merged]),
+        Object.entries(merged).every(([key, value]) =>
+          Object.is(harness.appliedOptions[key], value),
         )
       )
         return;
