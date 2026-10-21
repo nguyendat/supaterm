@@ -1,7 +1,8 @@
 import { isRelayedRequest } from "./relay/RelayIngress.ts";
 import * as RelayAccess from "./relay/RelayAccess.ts";
+import * as PushNotifications from "./notifications/PushNotifications.ts";
 import * as OrchestrationSkills from "./provider/OrchestrationSkills.ts";
-import { OrchestrationDispatchCommandError, PushNotificationError } from "@supaterm/contracts";
+import { OrchestrationDispatchCommandError } from "@supaterm/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 
@@ -1279,6 +1280,7 @@ export const layerWsRpc = (
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
       const relayAccess = yield* RelayAccess.RelayAccess;
+      const pushNotifications = yield* PushNotifications.PushNotifications;
       const rpcClientIds = yield* Ref.make(new Set<RpcClientId>());
       yield* Effect.addFinalizer(() =>
         Ref.get(rpcClientIds).pipe(
@@ -3034,13 +3036,13 @@ export const layerWsRpc = (
           ),
         [WS_METHODS.subscribeRelayStatus]: (_input) => relayAccess.status,
         [WS_METHODS.prepareRelay]: (_input) => relayAccess.prepare,
-        // Placeholders until the PushNotifications service lands.
-        [WS_METHODS.pushDescribe]: (_input) => pushUnavailable,
-        [WS_METHODS.pushRegister]: (_input) => pushUnavailable,
-        [WS_METHODS.pushUnregister]: (_input) => pushUnavailable,
-        [WS_METHODS.pushList]: (_input) => pushUnavailable,
-        [WS_METHODS.pushRevoke]: (_input) => pushUnavailable,
-        [WS_METHODS.pushTest]: (_input) => pushUnavailable,
+        [WS_METHODS.pushDescribe]: (_input) => pushNotifications.describe,
+        [WS_METHODS.pushRegister]: (input) => pushNotifications.register(currentSessionId, input),
+        [WS_METHODS.pushUnregister]: (input) =>
+          pushNotifications.unregister(currentSessionId, input).pipe(Effect.as({})),
+        [WS_METHODS.pushList]: (_input) => pushNotifications.list(currentSessionId),
+        [WS_METHODS.pushRevoke]: (input) => pushNotifications.revoke(input).pipe(Effect.as({})),
+        [WS_METHODS.pushTest]: (input) => pushNotifications.test(input),
         [WS_METHODS.subscribeResourceTelemetry]: (_input) =>
           Stream.unwrap(
             Effect.map(resourceTelemetry.subscribe, ({ latest, changes }) =>
@@ -3051,8 +3053,6 @@ export const layerWsRpc = (
       return handlers;
     }),
   );
-
-const pushUnavailable = Effect.fail(new PushNotificationError({ reason: "unavailable" }));
 
 // RpcServer's default sends a socket-level Defect frame instead, and the client
 // ends every pending request on the socket with it.

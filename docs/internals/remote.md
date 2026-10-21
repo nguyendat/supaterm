@@ -93,3 +93,43 @@ auth and platform-managed discovery are skipped and only saved environments (pai
 This is possible because the desktop renderer is not served by the backend: the `supaterm://` scheme
 serves the bundled client from disk (Vite in development) and API traffic always goes to the
 environment's own URL.
+
+## Push notifications
+
+Push reaches an iPhone through Apple, so the design keeps Apple and the push
+gateway blind. The host seals each notification with HPKE to the phone's
+per-environment X25519 key and signs it with a dedicated `push-identity` key, never
+`relay-identity`. The gateway (`push.supaterm.com` by default) holds APNs tokens and
+host-scoped handles; the host holds handles and never an APNs token. Apple and the
+gateway see a generic alert and an envelope padded to one of three sizes.
+
+A registration belongs to the auth session that created it. Revoking that session,
+or finding it expired at startup, retires the registration and drops its gateway
+handle. Clients cannot move a registration between sessions.
+
+The [candidate reactor](../../apps/server/src/notifications/PushCandidateReactor.ts)
+reads committed events from its own cursor instead of hooking the event sink, so a
+slow or failing gateway can never delay a commit. On first boot the cursor starts
+at the head, so history never notifies. It recomputes attention with the shared
+classifier that desktop notifications use, so the two surfaces agree, and records
+the last attention key per thread. A thread it has never seen only notifies when
+the batch carries that occurrence's run or request, otherwise an old completion
+would alert the first time anything touches the thread. Runs reconciled during a
+server restart update the key without notifying.
+
+The [delivery worker](../../apps/server/src/notifications/PushDeliveryWorker.ts)
+rechecks the registration, session, setting, and current attention before every
+attempt. It persists the sealed envelope before the first send and keeps its
+notification ID on retries, so a send that reached the phone but timed out here
+is dropped by the phone's replay ledger. Completions expire 10 minutes after the
+event; approvals and questions last until they resolve or auto-dismiss, with each
+envelope capped at 24 hours.
+
+Suppression uses thread activity leases and the client's last real input, never
+`thread.visit`, which reports pane ownership rather than visibility. When the
+signals disagree the result is a duplicate alert, never a lost one.
+
+The host contacts only origins in `pushGatewayOrigins`: HTTPS, or HTTP on
+localhost for development. It rejects origins that resolve to private or
+link-local addresses and follows no redirects. The address check is not pinned to
+the connection; that is acceptable because only the host owner edits the list.
