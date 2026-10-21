@@ -41,7 +41,7 @@ session share its last error, and a provider-thread move changes the previous
 owner. Those rows have no event of their own, so neither resume nor the live tail
 resends them. A full reload on every reconnect used to repair them; instead, once a
 shell that resumed across connections reaches `synchronized` and its last
-authoritative snapshot is ten minutes old, the client reloads that snapshot quietly
+authoritative snapshot is an hour old, the client reloads that snapshot quietly
 while keeping the rows live.
 
 The native mobile relay, not the supervisor, decides when a backgrounded tunnel

@@ -1622,22 +1622,29 @@ describe("resuming the shell on a new connection", () => {
     }),
   );
 
-  it.effect("quietly reloads a resumed shell whose last snapshot is ten minutes old", () =>
+  it.effect("quietly reloads a resumed shell whose last snapshot is an hour old", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();
       const first = yield* harness.connect("run-1");
       yield* Queue.offerAll(first.events, [harness.update(12), { kind: "synchronized" }]);
       yield* harness.awaitLive;
-      yield* TestClock.adjust("11 minutes");
+      yield* TestClock.adjust("61 minutes");
 
       const second = yield* harness.connect("run-1");
       expect(second.afterSequence).toBe(12);
       yield* Queue.offer(second.events, { kind: "synchronized" });
+      yield* harness.awaitLive;
+      const statuses = yield* Ref.make<ReadonlyArray<string>>([]);
+      yield* SubscriptionRef.changes(harness.shellState).pipe(
+        Stream.runForEach((value) => Ref.update(statuses, (seen) => [...seen, value.status])),
+        Effect.forkScoped,
+      );
 
       const subscriptions = yield* harness.awaitSubscriptions(3);
       expect(subscriptions.at(-1)).toBe(20);
+      yield* harness.awaitSequence(20);
       expect(yield* Ref.get(harness.loaderCalls)).toBe(2);
-      expect((yield* SubscriptionRef.get(harness.shellState)).status).toBe("live");
+      expect(yield* Ref.get(statuses)).not.toContain("synchronizing");
 
       // The reload took a fresh snapshot, so the next resume does not reload again.
       yield* Queue.offer(second.events, { kind: "synchronized" });
@@ -1657,7 +1664,7 @@ describe("resuming the shell on a new connection", () => {
       const first = yield* harness.connect("run-1");
       yield* Queue.offerAll(first.events, [harness.update(12), { kind: "synchronized" }]);
       yield* harness.awaitLive;
-      yield* TestClock.adjust("5 minutes");
+      yield* TestClock.adjust("59 minutes");
 
       const second = yield* harness.connect("run-1");
       yield* Queue.offer(second.events, { kind: "synchronized" });

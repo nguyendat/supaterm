@@ -43,10 +43,10 @@ import { followStreamInEnvironment } from "./runtime.ts";
 export type EnvironmentShellStatus = "empty" | "cached" | "synchronizing" | "live";
 
 // Resuming from a cursor misses rows that read another thread's state, such as a
-// fork's item count or a shared provider session's error. A shell that resumed
-// across connections reloads the authoritative snapshot quietly once its last one
-// is this old, so those rows heal on a schedule rather than on every reconnect.
-const SHELL_AUTHORITATIVE_RELOAD_AFTER_MS = 10 * 60 * 1000;
+// fork's item count or a shared provider session's error. That state rarely
+// changes, so a shell that resumed across connections reloads the authoritative
+// snapshot quietly only once its last one is this old.
+const SHELL_AUTHORITATIVE_RELOAD_AFTER_MS = 60 * 60 * 1000;
 
 function groupConsecutiveBySource<A>(
   entries: ReadonlyArray<readonly [RpcSession, A]>,
@@ -119,7 +119,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
   let skippedUnknownItem = false;
   let lastAuthoritativeAt = 0;
   let resumedAcrossSessions = false;
-  let reloadQuietly = false;
+  let reloadQuietlyOn: RpcSession | null = null;
   const quietReloads = yield* Queue.unbounded<void>();
   const activeSubscriptionSession = yield* Ref.make<RpcSession | null>(null);
   const activeSubscriptionGeneration = yield* Ref.make<string | null>(null);
@@ -230,7 +230,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
           const snapshotAge = (yield* Clock.currentTimeMillis) - lastAuthoritativeAt;
           if (resumedAcrossSessions && snapshotAge >= SHELL_AUTHORITATIVE_RELOAD_AFTER_MS) {
             resumedAcrossSessions = false;
-            reloadQuietly = true;
+            reloadQuietlyOn = activeSession;
             yield* Queue.offer(quietReloads, undefined);
           }
         }
@@ -265,7 +265,8 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
                   : snapshot,
             });
       if (nextSnapshot === null) continue;
-      receivedSnapshot ||= item.kind === "snapshot";
+      receivedSnapshot ||=
+        item.kind === "snapshot" && item.resolvedRepositoryIdentityRoots === undefined;
       next = {
         snapshot: Option.some(nextSnapshot),
         status: waiting ? "synchronizing" : "live",
@@ -390,8 +391,9 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         });
         yield* Ref.set(activeSubscriptionGeneration, generation);
         // A quiet reload replaces rows that are already live, so it keeps showing them as live.
-        const quiet = reloadQuietly;
-        reloadQuietly = false;
+        // A reconnect that races the scheduled reload is an ordinary resubscription.
+        const quiet = reloadQuietlyOn === session;
+        reloadQuietlyOn = null;
         yield* Ref.set(awaitingCompletion, supportsCompletionMarker && !quiet);
         if (!quiet) yield* setSynchronizing;
 
