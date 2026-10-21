@@ -319,6 +319,7 @@ import { isPreviewFocused } from "../lib/previewFocus";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
 import { findReusableProjectScriptTerminal } from "../lib/projectScriptTerminal";
 import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
+import { retainBackgroundScope } from "../lib/backgroundActivityReporter";
 import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
@@ -7908,6 +7909,7 @@ export default function ChatView(props: ChatViewProps) {
 
       <RevertConfirmHost threadKey={routeThreadKey} onConfirm={onConfirmRevertStable} />
       <ThreadVisitWatermark threadRef={routeThreadRef} />
+      <ThreadActivityScope threadRef={routeThreadRef} />
       <ExpandedImageDialogHost threadKey={routeThreadKey} />
     </div>
   );
@@ -7920,6 +7922,18 @@ export default function ChatView(props: ChatViewProps) {
       {content}
     </FileMetadataThreadProvider>
   );
+}
+
+// The host holds back push alerts for the thread a client reports, so only the pane the user is in
+// reports one, the same rule as the visit watermark.
+function ThreadActivityScope(props: { readonly threadRef: ScopedThreadRef }) {
+  const reading = useIsPaneInputOwner();
+  const { environmentId, threadId } = props.threadRef;
+  useEffect(() => {
+    if (!reading) return;
+    return retainBackgroundScope(environmentId, { type: "thread", threadId });
+  }, [reading, environmentId, threadId]);
+  return null;
 }
 
 function PreviewSessionSync(props: { readonly threadRef: ScopedThreadRef }) {

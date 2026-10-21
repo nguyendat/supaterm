@@ -25,6 +25,9 @@ const CLIENT_ID_STORAGE_KEY = "supaterm.backgroundActivity.clientId";
 const REPORT_INTERVAL_MS = 25_000;
 const LEASE_TTL_MS = 45_000;
 const RECENT_INTERACTION_WINDOW_MS = LEASE_TTL_MS;
+// The host drops a completion push when a lease shows interaction after it, checked
+// two seconds after the event, so input on a shown thread must reach the host sooner.
+const THREAD_INTERACTION_REPORT_INTERVAL_MS = 1_000;
 const BASELINE_SCOPES: ReadonlyArray<BackgroundScope> = [{ type: "provider-status" }];
 
 interface RetainedScope {
@@ -82,9 +85,21 @@ export function wasRecentlyInteracted(lastInteractionAtMs: number, observedAtMs:
   );
 }
 
-function createActivityReport(
+function holdsThreadScope(environmentId?: EnvironmentId): boolean {
+  for (const entry of retainedScopes.values()) {
+    if (
+      entry.scope.type === "thread" &&
+      (environmentId === undefined || entry.environmentId === environmentId)
+    )
+      return true;
+  }
+  return false;
+}
+
+export function createActivityReport(
   environmentId: EnvironmentId,
   lastInteractionAtMs: number,
+  lastInputAtMs: number | null,
   observedAtMs: number,
 ): ClientActivityReportInput {
   const scopes = [...BASELINE_SCOPES];
@@ -104,6 +119,7 @@ function createActivityReport(
     scopes,
     ttlMs: LEASE_TTL_MS,
     observedAt: DateTime.makeUnsafe(observedAtMs),
+    ...(lastInputAtMs === null ? {} : { lastInteractionAt: DateTime.makeUnsafe(lastInputAtMs) }),
   };
 }
 
@@ -121,7 +137,10 @@ function scopeForSubscription(
   return typeof input.cwd === "string" ? { type: "vcs-status", cwd: input.cwd } : null;
 }
 
-function retainBackgroundScope(environmentId: EnvironmentId, scope: BackgroundScope): () => void {
+export function retainBackgroundScope(
+  environmentId: EnvironmentId,
+  scope: BackgroundScope,
+): () => void {
   const key = stableScopeKey(environmentId, scope);
   const existing = retainedScopes.get(key);
   if (existing) {
@@ -179,14 +198,28 @@ export const layer = Layer.effectDiscard(
     const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
     const clock = yield* Clock.Clock;
     const reportRequests = yield* Queue.sliding<void>(1);
-    const requestReport = () => Queue.offerUnsafe(reportRequests, undefined);
+    let reportAll = true;
+    const requestReport = () => {
+      reportAll = true;
+      Queue.offerUnsafe(reportRequests, undefined);
+    };
     let lastInteractionAtMs = clock.currentTimeMillisUnsafe();
+    // Real input only; the value above starts at load so a fresh window counts as recent.
+    let lastInputAtMs: number | null = null;
+    let reportedInputAtMs = Number.NEGATIVE_INFINITY;
     const recordInteraction = () => {
       const observedAtMs = clock.currentTimeMillisUnsafe();
       const wasRecent = wasRecentlyInteracted(lastInteractionAtMs, observedAtMs);
       lastInteractionAtMs = observedAtMs;
+      lastInputAtMs = observedAtMs;
       if (!wasRecent) {
         requestReport();
+      } else if (
+        observedAtMs - reportedInputAtMs >= THREAD_INTERACTION_REPORT_INTERVAL_MS &&
+        holdsThreadScope()
+      ) {
+        reportedInputAtMs = observedAtMs;
+        Queue.offerUnsafe(reportRequests, undefined);
       }
     };
     const passiveListenerOptions = { passive: true } as const;
@@ -194,15 +227,25 @@ export const layer = Layer.effectDiscard(
     const report = Effect.gen(function* () {
       const observedAtMs = yield* Clock.currentTimeMillis;
       const entries = yield* SubscriptionRef.get(registry.entries);
+      const all = reportAll;
+      reportAll = false;
+      if (lastInputAtMs !== null) reportedInputAtMs = Math.max(reportedInputAtMs, lastInputAtMs);
       yield* Effect.forEach(
-        entries.keys(),
+        Array.from(entries.keys()).filter(
+          (environmentId) => all || holdsThreadScope(environmentId),
+        ),
         (environmentId) =>
           registry
             .run(
               environmentId,
               request(
                 WS_METHODS.serverReportClientActivity,
-                createActivityReport(environmentId, lastInteractionAtMs, observedAtMs),
+                createActivityReport(
+                  environmentId,
+                  lastInteractionAtMs,
+                  lastInputAtMs,
+                  observedAtMs,
+                ),
               ),
             )
 
