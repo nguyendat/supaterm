@@ -27,8 +27,8 @@ import * as PushRegistrations from "./PushRegistrations.ts";
 
 const CURSOR_NAME = "push-candidates";
 const PAGE_SIZE = 256;
-export const COMPLETION_FRESHNESS_MS = 10 * 60_000;
-export const REQUEST_ELIGIBILITY_MS = 24 * 60 * 60_000;
+const COMPLETION_FRESHNESS_MS = 10 * 60_000;
+const REQUEST_ELIGIBILITY_MS = 24 * 60 * 60_000;
 
 // Turn items and messages are the bulk of the event volume and never change attention.
 const ATTENTION_EVENT_TYPES: ReadonlySet<OrchestrationV2DomainEvent["type"]> = new Set([

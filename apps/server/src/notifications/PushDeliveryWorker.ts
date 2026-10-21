@@ -14,7 +14,6 @@ import * as FiberHandle from "effect/FiberHandle";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Random from "effect/Random";
-import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
@@ -36,7 +35,7 @@ const LEASE_MS = 60_000;
 export const COMPLETION_GRACE_MS = 2_000;
 const BACKOFF_MS = [2_000, 5_000, 15_000, 60_000, 300_000] as const;
 /** How long after a client's last input it still counts as watching the thread. */
-export const RECENT_INTERACTION_MS = 45_000;
+const RECENT_INTERACTION_MS = 45_000;
 const SETTLED_RETENTION_MS = 7 * 24 * 60 * 60_000;
 
 const DeliveryRow = Schema.Struct({
@@ -58,8 +57,7 @@ const encodeEnvelope = Schema.encodeEffect(Schema.fromJsonString(PushEnvelope));
 
 const storageError = (cause: unknown) => new PushNotificationError({ reason: "storage", cause });
 
-export const isRequestKind = (kind: PushNotificationKind) =>
-  kind === "approval" || kind === "input";
+const isRequestKind = (kind: PushNotificationKind) => kind === "approval" || kind === "input";
 
 const watchesThread = (lease: ClientActivityLease, threadId: ThreadId, now: number) =>
   lease.visible &&
@@ -120,9 +118,14 @@ const make = Effect.gen(function* () {
     return (yield* decodeDeliveryRows(rows))[0];
   });
 
-  const finish = (row: DeliveryRow, status: "sent" | "cancelled" | "expired" | "failed") =>
+  const finish = (
+    row: DeliveryRow,
+    status: "sent" | "cancelled" | "expired" | "failed",
+    attempted = status === "sent" || status === "failed",
+  ) =>
     sql`
-      UPDATE push_deliveries SET status = ${status}, lease_until = NULL
+      UPDATE push_deliveries
+      SET status = ${status}, lease_until = NULL, attempts = attempts + ${attempted ? 1 : 0}
       WHERE delivery_id = ${row.deliveryId} AND status = 'leased'
     `.pipe(Effect.asVoid);
 
@@ -142,7 +145,7 @@ const make = Effect.gen(function* () {
     const base = BACKOFF_MS[Math.min(row.attempts, BACKOFF_MS.length - 1)]!;
     const jittered = base * (0.8 + 0.4 * (yield* Random.next));
     const next = now + Math.max(jittered, retryAfterMs ?? 0);
-    yield* next >= row.expiresAt ? finish(row, "expired") : reschedule(row, next, true);
+    yield* next >= row.expiresAt ? finish(row, "expired", true) : reschedule(row, next, true);
   });
 
   /** When a client still watching the thread should hold the alert back, or null to send now. */
@@ -313,13 +316,8 @@ const make = Effect.gen(function* () {
     )
     .pipe(Effect.mapError(storageError));
 
-  const scheduled = yield* Ref.make(false);
-  const worker = yield* makeDrainableWorker(() =>
-    Ref.set(scheduled, false).pipe(Effect.andThen(processDue)),
-  );
-  const wake: PushDeliveryWorker["Service"]["wake"] = Ref.getAndSet(scheduled, true).pipe(
-    Effect.flatMap((already) => (already ? Effect.void : worker.enqueue(undefined))),
-  );
+  const worker = yield* makeDrainableWorker(() => processDue);
+  const wake: PushDeliveryWorker["Service"]["wake"] = worker.enqueue(undefined);
 
   // A request held back for a watching client is re-checked as soon as client activity changes.
   const hastenDeferredRequests = Effect.gen(function* () {
