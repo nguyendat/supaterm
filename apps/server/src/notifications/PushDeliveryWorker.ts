@@ -2,7 +2,7 @@ import { type ClientActivityLease, ThreadId } from "@supaterm/contracts";
 import {
   PushEnvelope,
   PushNotificationError,
-  type PushNotificationKind,
+  PushNotificationKind,
 } from "@supaterm/contracts/push";
 import { makeDrainableWorker } from "@supaterm/shared/DrainableWorker";
 import { PUSH_MAX_LIFETIME_MS } from "@supaterm/shared/push/envelope";
@@ -45,7 +45,7 @@ const DeliveryRow = Schema.Struct({
   registrationId: Schema.String,
   threadId: ThreadId,
   attentionKey: Schema.String,
-  kind: Schema.Literals(["approval", "input", "completion", "failure", "usage-limit"]),
+  kind: PushNotificationKind,
   occurredAt: Schema.Number,
   expiresAt: Schema.Number,
   attempts: Schema.Number,
@@ -58,8 +58,6 @@ const decodeDeliveryRows = Schema.decodeUnknownEffect(Schema.Array(DeliveryRow))
 const encodeEnvelope = Schema.encodeEffect(Schema.fromJsonString(PushEnvelope));
 
 const storageError = (cause: unknown) => new PushNotificationError({ reason: "storage", cause });
-
-const isRequestKind = (kind: PushNotificationKind) => kind === "approval" || kind === "input";
 
 const watchesThread = (lease: ClientActivityLease, threadId: ThreadId, now: number) =>
   lease.visible &&
@@ -154,7 +152,7 @@ const make = Effect.gen(function* () {
   const suppression = Effect.fnUntraced(function* (row: DeliveryRow, now: number) {
     const { leases } = yield* backgroundPolicy.snapshot;
     const watching = leases.filter((lease) => watchesThread(lease, row.threadId, now));
-    if (!isRequestKind(row.kind)) {
+    if (!PushAttention.isRequestKind(row.kind)) {
       const seenAfterEvent = watching.some(
         (lease) =>
           lease.lastInteractionAt !== undefined &&
@@ -241,7 +239,7 @@ const make = Effect.gen(function* () {
     if (state === null || state.attention?.key !== row.attentionKey) {
       return yield* finish(row, "cancelled");
     }
-    if (!isRequestKind(row.kind) && now < row.occurredAt + COMPLETION_GRACE_MS) {
+    if (!PushAttention.isRequestKind(row.kind) && now < row.occurredAt + COMPLETION_GRACE_MS) {
       return yield* reschedule(row, row.occurredAt + COMPLETION_GRACE_MS, false);
     }
     const held = yield* suppression(row, now);
@@ -255,7 +253,7 @@ const make = Effect.gen(function* () {
         handle: registration.handle,
         payload: envelope,
         expiration: Math.floor(envelope.expiresAt / 1000),
-        priority: isRequestKind(row.kind) ? 10 : 5,
+        priority: PushAttention.isRequestKind(row.kind) ? 10 : 5,
         collapseId: yield* identity.collapseId({
           registrationId: registration.registrationId,
           threadId: row.threadId,

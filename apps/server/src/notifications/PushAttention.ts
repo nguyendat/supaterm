@@ -29,6 +29,9 @@ export interface PushThreadAttentionState {
   readonly attention: PushThreadAttention | null;
 }
 
+export const isRequestKind = (kind: PushNotificationKind) =>
+  kind === "approval" || kind === "input";
+
 const SETTLED_SUBAGENT_STATUSES = new Set(["completed", "failed", "cancelled", "interrupted"]);
 const MAX_SUBAGENT_DEPTH = 8;
 
@@ -109,16 +112,18 @@ const make = Effect.gen(function* () {
           : (liftSubagentRequests([thread, ...descendants]).get(thread.id) ?? null);
       const attention = threadNotificationAttention(thread, lifted);
       if (attention === null) return { thread, attention: null };
-      if (attention.kind !== "approval" && attention.kind !== "input") {
+      if (!isRequestKind(attention.kind)) {
         return { thread, attention: { ...attention, request: null } };
       }
       const own = thread.pendingRuntimeRequest;
+      if (own !== null && attention.key === `${attention.kind}:${own.id}`) {
+        return {
+          thread,
+          attention: { ...attention, request: { threadId: thread.id, requestId: own.id } },
+        };
+      }
       const request =
-        own !== null && attention.key === `${attention.kind}:${own.id}`
-          ? { threadId: thread.id, requestId: own.id }
-          : lifted === null
-            ? null
-            : { threadId: lifted.threadId, requestId: lifted.requestId };
+        lifted === null ? null : { threadId: lifted.threadId, requestId: lifted.requestId };
       return { thread, attention: { ...attention, request } };
     },
   );

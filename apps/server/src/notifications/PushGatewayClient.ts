@@ -163,18 +163,12 @@ const make = Effect.gen(function* () {
   });
 
   const send: PushGatewayClient["Service"]["send"] = Effect.fn("PushGatewayClient.send")(
-    function* (input) {
-      const body = yield* encodeSendBody({
-        handle: input.handle,
-        payload: input.payload,
-        expiration: input.expiration,
-        priority: input.priority,
-        collapseId: input.collapseId,
-      }).pipe(
+    function* ({ origin, ...fields }) {
+      const body = yield* encodeSendBody(fields).pipe(
         Effect.mapError((cause) => new PushGatewayUnavailableError({ operation: "send", cause })),
       );
       const response = yield* execute({
-        origin: input.origin,
+        origin,
         operation: "send",
         method: "POST",
         path: "/v1/send",

@@ -215,7 +215,7 @@ const make = Effect.gen(function* () {
 
       const now = DateTime.toEpochMillis(yield* DateTime.now);
       const occurredAt = Math.min(entry.occurredAt, now);
-      const isRequest = current.kind === "approval" || current.kind === "input";
+      const isRequest = PushAttention.isRequestKind(current.kind);
       const deadline = isRequest ? yield* attention.requestDeadline(current) : null;
       const expiresAt = isRequest
         ? Math.min(deadline ?? Number.POSITIVE_INFINITY, occurredAt + REQUEST_ELIGIBILITY_MS)

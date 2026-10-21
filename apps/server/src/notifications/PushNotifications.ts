@@ -77,12 +77,6 @@ const make = Effect.gen(function* () {
     return current;
   });
 
-  const requireRegistration = Effect.fnUntraced(function* (registrationId: string) {
-    const existing = yield* registrations.get(registrationId);
-    if (Option.isNone(existing)) return yield* new PushNotificationError({ reason: "not_found" });
-    return existing.value;
-  });
-
   // Best effort: the phone can also drop its handle, and the gateway expires unused ones.
   const dropHandle = (registration: PushRegistrations.PushRegistrationRecord) =>
     gateway
@@ -187,22 +181,25 @@ const make = Effect.gen(function* () {
   const test: PushNotifications["Service"]["test"] = Effect.fn("PushNotifications.test")(
     function* (input) {
       yield* requireEnabled;
-      const registration = yield* requireRegistration(input.registrationId);
+      const registration = Option.getOrUndefined(yield* registrations.get(input.registrationId));
+      if (registration === undefined) {
+        return yield* new PushNotificationError({ reason: "not_found" });
+      }
       if (registration.status !== "active") return { status: "gone" } as const;
       const now = DateTime.toEpochMillis(yield* DateTime.now);
+      const notificationId = yield* crypto
+        .randomUUIDv4()
+        .pipe(
+          Effect.mapError((cause) => new PushNotificationError({ reason: "unavailable", cause })),
+        );
+      const failed = () => Effect.succeed({ type: "failed" } as const);
       const outcome = yield* Effect.gen(function* () {
         const envelope = yield* identity.seal({
           recipientPublicKey: registration.recipientPublicKey,
           metadata: {
             registrationId: registration.registrationId,
             keyId: registration.keyId,
-            notificationId: yield* crypto
-              .randomUUIDv4()
-              .pipe(
-                Effect.mapError(
-                  (cause) => new PushNotificationError({ reason: "unavailable", cause }),
-                ),
-              ),
+            notificationId,
             createdAt: now,
             expiresAt: now + TEST_LIFETIME_MS,
           },
@@ -221,11 +218,10 @@ const make = Effect.gen(function* () {
         });
       }).pipe(
         Effect.catchTags({
-          PushGatewayOriginError: () => Effect.succeed({ type: "rejected", status: 0 } as const),
-          PushGatewayUnavailableError: () =>
-            Effect.succeed({ type: "retry", retryAfterMs: null } as const),
-          PushIdentityError: () => Effect.succeed({ type: "rejected", status: 0 } as const),
-          PushSealError: () => Effect.succeed({ type: "rejected", status: 0 } as const),
+          PushGatewayOriginError: failed,
+          PushGatewayUnavailableError: failed,
+          PushIdentityError: failed,
+          PushSealError: failed,
         }),
       );
       switch (outcome.type) {
