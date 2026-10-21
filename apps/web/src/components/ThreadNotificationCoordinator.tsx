@@ -13,7 +13,6 @@ import {
 import { useEffect, useRef } from "react";
 
 import { getClientSettings, useClientSettings } from "../hooks/useSettings";
-import { reportShownThreadAttention } from "../lib/backgroundActivityReporter";
 import { useEnvironmentIds } from "../state/environments";
 import { environmentShell } from "../state/shell";
 import {
@@ -147,7 +146,6 @@ function EnvironmentNotifications({
         (attention.kind === "completion" && key === prior.completion)
       )
         continue;
-      reportShownThreadAttention(environmentId, thread.id);
       const kind = attention.kind;
       const title = NOTIFICATION_TITLES[kind];
       if (hasNotificationSound(mode)) {

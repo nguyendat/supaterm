@@ -13,7 +13,7 @@ import {
   createActivityReport,
   layer,
   observeBackgroundActivitySubscription,
-  reportShownThreadAttention,
+  observeShownThreadAttention,
   retainBackgroundScope,
   retainedBackgroundScopes,
   wasRecentlyInteracted,
@@ -126,7 +126,7 @@ describe("reporting", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("reports at once to the environment whose shown thread got new attention", () =>
+  it.effect("reports once to the environment whose shown thread got new attention", () =>
     Effect.gen(function* () {
       const shown = EnvironmentId.make("environment-showing-thread");
       const other = EnvironmentId.make("environment-without-thread");
@@ -149,19 +149,29 @@ describe("reporting", () => {
         layer.pipe(Layer.provide(Layer.succeed(EnvironmentRegistry.EnvironmentRegistry, registry))),
       );
       const release = retainBackgroundScope(shown, { type: "thread", threadId });
+      observeShownThreadAttention(shown, threadId, "completion:run-1");
       yield* TestClock.adjust("1 second");
       calls.length = 0;
 
       window.dispatchEvent(new Event("keydown"));
       window.dispatchEvent(new Event("pointermove"));
-      reportShownThreadAttention(other, threadId);
+      observeShownThreadAttention(other, threadId, "approval:request-1");
+      observeShownThreadAttention(shown, threadId, "completion:run-1");
+      observeShownThreadAttention(shown, threadId, null);
       yield* TestClock.adjust("1 second");
       expect(calls).toEqual([]);
 
-      reportShownThreadAttention(shown, threadId);
+      observeShownThreadAttention(shown, threadId, "approval:request-2");
+      observeShownThreadAttention(shown, threadId, "approval:request-2");
       yield* TestClock.adjust("1 second");
       expect(calls).toEqual([shown]);
+
       release();
+      yield* TestClock.adjust("1 second");
+      calls.length = 0;
+      observeShownThreadAttention(shown, threadId, "completion:run-2");
+      yield* TestClock.adjust("1 second");
+      expect(calls).toEqual([]);
     }).pipe(Effect.scoped),
   );
 

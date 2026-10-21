@@ -32,6 +32,8 @@ interface RetainedScope {
   readonly environmentId: EnvironmentId;
   readonly scope: BackgroundScope;
   refCount: number;
+  /** For a shown thread, the attention last observed; undefined until the first observation. */
+  attentionKey?: string | null;
 }
 
 const retainedScopes = new Map<string, RetainedScope>();
@@ -172,11 +174,20 @@ export function retainedBackgroundScopes(
 
 /**
  * The host briefly holds a completion push and drops it when a client reports, after the
- * event, that it shows the thread and had input just before. This sends that report at
- * once instead of on the next interval.
+ * event, that it shows the thread and had input just before. A shown thread whose attention
+ * changes reports at once instead of on the next interval. The first observation only records
+ * the key, since retaining the scope already reported.
  */
-export function reportShownThreadAttention(environmentId: EnvironmentId, threadId: ThreadId): void {
-  if (!retainedScopes.has(stableScopeKey(environmentId, { type: "thread", threadId }))) return;
+export function observeShownThreadAttention(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  attentionKey: string | null,
+): void {
+  const entry = retainedScopes.get(stableScopeKey(environmentId, { type: "thread", threadId }));
+  if (entry === undefined) return;
+  const prior = entry.attentionKey;
+  entry.attentionKey = attentionKey;
+  if (prior === undefined || attentionKey === null || attentionKey === prior) return;
   for (const listener of shownAttentionListeners) listener(environmentId);
 }
 

@@ -319,7 +319,10 @@ import { isPreviewFocused } from "../lib/previewFocus";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
 import { findReusableProjectScriptTerminal } from "../lib/projectScriptTerminal";
 import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
-import { retainBackgroundScope } from "../lib/backgroundActivityReporter";
+import {
+  observeShownThreadAttention,
+  retainBackgroundScope,
+} from "../lib/backgroundActivityReporter";
 import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
@@ -368,7 +371,7 @@ import {
   primaryServerKeybindingsAtom,
   serverEnvironment,
 } from "../state/server";
-import { threadEnvironment } from "../state/threads";
+import { environmentThreadAttentionAtom, threadEnvironment } from "../state/threads";
 import { resolveProviderSkillsForCwd } from "@supaterm/client-runtime/providerSkills";
 import { vcsEnvironment } from "../state/vcs";
 import { sourceControlEnvironment } from "../state/sourceControl";
@@ -7928,11 +7931,23 @@ export default function ChatView(props: ChatViewProps) {
 // reports one, the same rule as the visit watermark.
 function ThreadActivityScope(props: { readonly threadRef: ScopedThreadRef }) {
   const reading = useIsPaneInputOwner();
+  return reading ? <ShownThreadActivityScope threadRef={props.threadRef} /> : null;
+}
+
+// Mounted whatever the notification settings, since push suppression depends on these reports.
+function ShownThreadActivityScope(props: { readonly threadRef: ScopedThreadRef }) {
   const { environmentId, threadId } = props.threadRef;
+  const attentionKey = useAtomValue(
+    environmentThreadAttentionAtom(environmentId),
+    (attention) => attention.get(threadId)?.key ?? null,
+  );
+  useEffect(
+    () => retainBackgroundScope(environmentId, { type: "thread", threadId }),
+    [environmentId, threadId],
+  );
   useEffect(() => {
-    if (!reading) return;
-    return retainBackgroundScope(environmentId, { type: "thread", threadId });
-  }, [reading, environmentId, threadId]);
+    observeShownThreadAttention(environmentId, threadId, attentionKey);
+  }, [environmentId, threadId, attentionKey]);
   return null;
 }
 
