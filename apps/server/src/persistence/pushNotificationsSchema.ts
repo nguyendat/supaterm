@@ -1,11 +1,12 @@
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 
-export default Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+export const ensurePushNotificationsSchema = Effect.fn("ensurePushNotificationsSchema")(
+  function* () {
+    const sql = yield* SqlClient.SqlClient;
 
-  yield* sql`
-    CREATE TABLE push_registrations (
+    yield* sql`
+    CREATE TABLE IF NOT EXISTS push_registrations (
       registration_id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL,
       gateway_origin TEXT NOT NULL,
@@ -21,19 +22,19 @@ export default Effect.gen(function* () {
       last_delivery_at TEXT
     )
   `;
-  yield* sql`
-    CREATE INDEX push_registrations_session_idx ON push_registrations(session_id)
+    yield* sql`
+    CREATE INDEX IF NOT EXISTS push_registrations_session_idx ON push_registrations(session_id)
   `;
-  yield* sql`
-    CREATE TABLE push_thread_attention (
+    yield* sql`
+    CREATE TABLE IF NOT EXISTS push_thread_attention (
       thread_id TEXT PRIMARY KEY,
       attention_key TEXT,
       kind TEXT,
       updated_sequence INTEGER NOT NULL
     )
   `;
-  yield* sql`
-    CREATE TABLE push_deliveries (
+    yield* sql`
+    CREATE TABLE IF NOT EXISTS push_deliveries (
       delivery_id INTEGER PRIMARY KEY AUTOINCREMENT,
       registration_id TEXT NOT NULL,
       thread_id TEXT NOT NULL,
@@ -51,10 +52,11 @@ export default Effect.gen(function* () {
       UNIQUE (registration_id, thread_id, attention_key)
     )
   `;
-  yield* sql`
-    CREATE INDEX push_deliveries_due_idx ON push_deliveries(status, next_attempt_at)
+    yield* sql`
+    CREATE INDEX IF NOT EXISTS push_deliveries_due_idx ON push_deliveries(status, next_attempt_at)
   `;
-  yield* sql`
-    CREATE INDEX push_deliveries_thread_idx ON push_deliveries(thread_id, status)
+    yield* sql`
+    CREATE INDEX IF NOT EXISTS push_deliveries_thread_idx ON push_deliveries(thread_id, status)
   `;
-});
+  },
+);

@@ -3,17 +3,14 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import Migration0001 from "./Migrations/001_Baseline.ts";
-import Migration0002 from "./Migrations/002_PushNotifications.ts";
+import { ensurePushNotificationsSchema } from "./pushNotificationsSchema.ts";
 
 /**
  * Add a schema change as a new entry with the next id. Never edit, renumber, or
  * remove a shipped entry: the migrator skips every id up to the highest one a
  * database recorded.
  */
-const migrationEntries = [
-  [1, "Baseline", Migration0001],
-  [2, "PushNotifications", Migration0002],
-] as const;
+const migrationEntries = [[1, "Baseline", Migration0001]] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
 
@@ -86,6 +83,7 @@ const ensureUnrecordedSchema = Effect.fn("ensureUnrecordedSchema")(function* () 
     )
     WHERE type = 'error' AND status = 'failed'
   `;
+  yield* ensurePushNotificationsSchema();
 });
 
 const run = Migrator.make({});

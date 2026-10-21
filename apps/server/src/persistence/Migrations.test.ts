@@ -108,8 +108,8 @@ describe("runMigrations", () => {
       const sql = yield* SqlClient.SqlClient;
       yield* runMigrations();
       const newer = [
-        [3, "ThreadFailureLookupIndex"],
-        [4, "FromANewerBuild"],
+        [2, "ThreadFailureLookupIndex"],
+        [3, "FromANewerBuild"],
       ] as const;
       for (const [id, name] of newer) {
         yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (${id}, ${name})`;
