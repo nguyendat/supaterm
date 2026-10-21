@@ -780,6 +780,40 @@ export function createEnvironmentRpcQueryAtomFamily<
   });
 }
 
+/** A query over a guarded RPC: each fetch checks the destination grant, like a command does. */
+export function createEnvironmentGuardedRpcQueryAtomFamily<
+  R,
+  ER,
+  TTag extends Extract<EnvironmentUnaryRpcTag, ClientGuardedRpcTag>,
+>(
+  runtime: Atom.AtomRuntime<EnvironmentRegistry.EnvironmentRegistry | R, ER>,
+  options: {
+    readonly label: string;
+    readonly tag: TTag;
+    readonly staleTimeMs?: number;
+    readonly idleTtlMs?: number;
+  },
+) {
+  const permissions = createCommandPermissions(runtime, options.tag);
+  const query = createEnvironmentQueryAtomFamily(runtime, {
+    label: options.label,
+    ...(options.staleTimeMs === undefined ? {} : { staleTimeMs: options.staleTimeMs }),
+    ...(options.idleTtlMs === undefined ? {} : { idleTtlMs: options.idleTtlMs }),
+    execute: (input: EnvironmentRpcInput<TTag>) =>
+      AtomRegistry.AtomRegistry.pipe(
+        Effect.flatMap((registry) =>
+          requestGuarded(options.tag, input).pipe(
+            Effect.provideService(RpcPermissionGuard, {
+              authorize: (id, method, payload) =>
+                createCommandPermissions(runtime, method).authorize(registry, id, payload),
+            }),
+          ),
+        ),
+      ),
+  });
+  return Object.assign(query, { permissionAtom: permissions.permissionAtom });
+}
+
 export function createEnvironmentRpcSubscriptionAtomFamily<
   R,
   ER,
