@@ -104,15 +104,10 @@ export class OrchestrationEventStore extends Context.Service<
       readonly limit: number;
     }) => Effect.Effect<ReadonlyArray<ChangedApplicationAggregate>, OrchestrationEventStoreError>;
 
-    /**
-     * A row whose `event_type` this build does not know fails the read unless
-     * `skipUnknownEventTypes` is set, which logs and drops it instead. Anything
-     * that builds server state stays strict.
-     */
+    /** A row whose `event_type` this build does not know fails the read. */
     readonly readApplicationEvents: (input: {
       readonly afterSequence: number;
       readonly throughSequence: number;
-      readonly skipUnknownEventTypes?: boolean;
     }) => Stream.Stream<ApplicationStoredEvent, OrchestrationEventStoreError>;
 
     /** Publish only after the surrounding event/projection transaction commits. */
@@ -687,7 +682,6 @@ const makeEventStore = Effect.gen(function* () {
   const catchUpApplicationEvents = (input: {
     readonly afterSequence: number;
     readonly throughSequence: number;
-    readonly skipUnknownEventTypes?: boolean;
   }): Stream.Stream<ApplicationStoredEvent, OrchestrationEventStoreError> =>
     Stream.paginate(input.afterSequence, (afterSequence) =>
       readApplicationRows({
@@ -711,7 +705,6 @@ const makeEventStore = Effect.gen(function* () {
         }),
       ),
     ).pipe(
-      Stream.filterEffect((row) => keepReplayRow(row, input.skipUnknownEventTypes)),
       Stream.mapEffect((row) =>
         rowToApplicationStoredEvent(row).pipe(
           Effect.mapError(

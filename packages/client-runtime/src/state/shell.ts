@@ -48,6 +48,26 @@ export type EnvironmentShellStatus = "empty" | "cached" | "synchronizing" | "liv
 // snapshot quietly only once its last one is this old.
 const SHELL_AUTHORITATIVE_RELOAD_AFTER_MS = 60 * 60 * 1000;
 
+interface ShellResumeState {
+  // The server run whose stream last brought this in-memory shell to `synchronized`
+  // since its last authoritative snapshot. A shell loaded from disk never qualifies.
+  readonly completedGeneration: string | null;
+  // An unknown item still advances the cursor past rows this build could not
+  // apply, so a resume would never resend them.
+  readonly skippedUnknownItem: boolean;
+  readonly lastAuthoritativeAt: number;
+  readonly resumedAcrossSessions: boolean;
+  readonly quietReloadOn: RpcSession | null;
+}
+
+const INITIAL_SHELL_RESUME_STATE: ShellResumeState = {
+  completedGeneration: null,
+  skippedUnknownItem: false,
+  lastAuthoritativeAt: 0,
+  resumedAcrossSessions: false,
+  quietReloadOn: null,
+};
+
 function groupConsecutiveBySource<A>(
   entries: ReadonlyArray<readonly [RpcSession, A]>,
 ): ReadonlyArray<readonly [RpcSession, ReadonlyArray<A>]> {
@@ -111,18 +131,13 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
   });
   const awaitingCompletion = yield* Ref.make(false);
   const lastAuthoritativeSession = yield* Ref.make<RpcSession | null>(null);
-  // The server run whose stream last brought this in-memory shell to `synchronized`
-  // since its last authoritative snapshot. A shell loaded from disk never qualifies.
-  const completedGeneration = yield* Ref.make<string | null>(null);
-  // An unknown item still advances the cursor past rows this build could not
-  // apply, so a resume would never resend them.
-  let skippedUnknownItem = false;
-  let lastAuthoritativeAt = 0;
-  let resumedAcrossSessions = false;
-  let reloadQuietlyOn: RpcSession | null = null;
+  // Written by applyItems and by subscription setup, both under snapshotWriteLock.
+  const resume = yield* Ref.make(INITIAL_SHELL_RESUME_STATE);
   const quietReloads = yield* Queue.unbounded<void>();
-  const activeSubscriptionSession = yield* Ref.make<RpcSession | null>(null);
-  const activeSubscriptionGeneration = yield* Ref.make<string | null>(null);
+  const activeSubscription = yield* Ref.make<{
+    readonly session: RpcSession;
+    readonly generation: string | null;
+  } | null>(null);
   const latestLiveSnapshot = yield* Ref.make<Option.Option<OrchestrationV2ShellSnapshot>>(
     Option.none(),
   );
@@ -214,8 +229,11 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
   ) {
     const initial = yield* SubscriptionRef.get(state);
     let waiting = yield* Ref.get(awaitingCompletion);
-    let generation = yield* Ref.get(completedGeneration);
-    const activeSession = yield* Ref.get(activeSubscriptionSession);
+    let resumeState = yield* Ref.get(resume);
+    let scheduleQuietReload = false;
+    const now = yield* Clock.currentTimeMillis;
+    const subscription = yield* Ref.get(activeSubscription);
+    const activeSession = subscription?.session ?? null;
     // Items still buffered from a replaced session say nothing about the current one.
     const fromReplacedSession = options?.source !== undefined && options.source !== activeSession;
     let next = initial;
@@ -226,25 +244,32 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         waiting = false;
         if (Option.isSome(next.snapshot)) {
           next = { snapshot: next.snapshot, status: "live", error: Option.none() };
-          generation = skippedUnknownItem ? null : yield* Ref.get(activeSubscriptionGeneration);
-          const snapshotAge = (yield* Clock.currentTimeMillis) - lastAuthoritativeAt;
-          if (resumedAcrossSessions && snapshotAge >= SHELL_AUTHORITATIVE_RELOAD_AFTER_MS) {
-            resumedAcrossSessions = false;
-            reloadQuietlyOn = activeSession;
-            yield* Queue.offer(quietReloads, undefined);
-          }
+          const reload =
+            resumeState.resumedAcrossSessions &&
+            now - resumeState.lastAuthoritativeAt >= SHELL_AUTHORITATIVE_RELOAD_AFTER_MS;
+          scheduleQuietReload ||= reload;
+          resumeState = {
+            ...resumeState,
+            completedGeneration: resumeState.skippedUnknownItem
+              ? null
+              : (subscription?.generation ?? null),
+            resumedAcrossSessions: resumeState.resumedAcrossSessions && !reload,
+            quietReloadOn: reload ? activeSession : resumeState.quietReloadOn,
+          };
         }
         continue;
       }
       if (item.kind === "unknown-item") {
-        skippedUnknownItem = true;
-        generation = null;
+        resumeState = { ...resumeState, skippedUnknownItem: true, completedGeneration: null };
         continue;
       }
       if (item.kind === "snapshot" && item.resolvedRepositoryIdentityRoots === undefined) {
-        skippedUnknownItem = false;
-        generation = null;
-        lastAuthoritativeAt = yield* Clock.currentTimeMillis;
+        resumeState = {
+          ...resumeState,
+          skippedUnknownItem: false,
+          completedGeneration: null,
+          lastAuthoritativeAt: now,
+        };
       }
       const nextSnapshot =
         item.kind === "snapshot"
@@ -274,7 +299,8 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       };
     }
     yield* Ref.set(awaitingCompletion, waiting);
-    yield* Ref.set(completedGeneration, generation);
+    yield* Ref.set(resume, resumeState);
+    if (scheduleQuietReload) yield* Queue.offer(quietReloads, undefined);
     if (next === initial) return;
     const pendingLinkIds = options?.pendingLinkIds;
     if (pendingLinkIds !== undefined && Option.isSome(next.snapshot)) {
@@ -379,7 +405,6 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
     subscribeDynamicWithSession(
       ORCHESTRATION_V2_WS_METHODS.subscribeShell,
       Effect.fn("EnvironmentShellState.makeSubscribeInput")(function* (session) {
-        yield* Ref.set(activeSubscriptionSession, session);
         const initialConfig = yield* session.initialConfig.pipe(Effect.option);
         const supportsCompletionMarker = Option.exists(
           initialConfig,
@@ -389,22 +414,33 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
           onNone: () => null,
           onSome: (config) => config.shellSyncGeneration ?? null,
         });
-        yield* Ref.set(activeSubscriptionGeneration, generation);
-        // A quiet reload replaces rows that are already live, so it keeps showing them as live.
-        // A reconnect that races the scheduled reload is an ordinary resubscription.
-        const quiet = reloadQuietlyOn === session;
-        reloadQuietlyOn = null;
-        yield* Ref.set(awaitingCompletion, supportsCompletionMarker && !quiet);
-        if (!quiet) yield* setSynchronizing;
-
         // A resubscription on the same live session, or a new session to the
         // same server run after this shell synchronized, resumes from the
         // in-memory cursor. Otherwise reload the authoritative HTTP snapshot so
-        // a valid cursor cannot preserve incomplete cached data.
-        const sameSession = (yield* Ref.get(lastAuthoritativeSession)) === session;
-        const sameRun = generation !== null && (yield* Ref.get(completedGeneration)) === generation;
-        const hasAuthoritativeSnapshot = !quiet && (sameSession || sameRun);
-        resumedAcrossSessions = hasAuthoritativeSnapshot && !sameSession;
+        // a valid cursor cannot preserve incomplete cached data. A quiet reload
+        // replaces rows that are already live, so it keeps showing them as live;
+        // a reconnect that races it is an ordinary resubscription.
+        const { quiet, hasAuthoritativeSnapshot } = yield* snapshotWriteLock.withPermit(
+          Effect.gen(function* () {
+            yield* Ref.set(activeSubscription, { session, generation });
+            const sameSession = (yield* Ref.get(lastAuthoritativeSession)) === session;
+            return yield* Ref.modify(resume, (current) => {
+              const quiet = current.quietReloadOn === session;
+              const sameRun = generation !== null && current.completedGeneration === generation;
+              const resumable = !quiet && (sameSession || sameRun);
+              return [
+                { quiet, hasAuthoritativeSnapshot: resumable },
+                {
+                  ...current,
+                  quietReloadOn: null,
+                  resumedAcrossSessions: resumable && !sameSession,
+                },
+              ];
+            });
+          }),
+        );
+        yield* Ref.set(awaitingCompletion, supportsCompletionMarker && !quiet);
+        if (!quiet) yield* setSynchronizing;
         let canResume = hasAuthoritativeSnapshot;
         let current = yield* SubscriptionRef.get(state);
         if (!hasAuthoritativeSnapshot || Option.isNone(current.snapshot)) {
