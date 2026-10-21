@@ -259,13 +259,15 @@ function EnvironmentPushRow(props: {
   readonly state: PushEnvironmentState | undefined;
 }) {
   const canTest = useAtomValue(pushCommands.test.permissionAtom(props.environmentId));
-  const [sending, setSending] = useState(false);
+  const canRegister = useAtomValue(pushCommands.register.permissionAtom(props.environmentId));
+  const [pending, setPending] = useState(false);
   const active = props.state?.state === "active";
+  const revoked = props.state?.state === "revoked";
 
   const sendTest = () => {
     const registrar = pushRegistrar();
     if (!registrar) return;
-    setSending(true);
+    setPending(true);
     void registrar
       .sendTest(props.environmentId)
       .then((result) => {
@@ -278,18 +280,34 @@ function EnvironmentPushRow(props: {
         );
       })
       .catch((error: unknown) => Dialog.alert("Test notification", errorText(error)))
-      .finally(() => setSending(false));
+      .finally(() => setPending(false));
+  };
+
+  const turnOnAgain = () => {
+    const registrar = pushRegistrar();
+    if (!registrar) return;
+    setPending(true);
+    void registrar
+      .resumeEnvironment(props.environmentId)
+      .catch((error: unknown) => Dialog.alert("Notifications", errorText(error)))
+      .finally(() => setPending(false));
   };
 
   return (
     <SettingsActionRow
       label={props.label}
       description={describePushEnvironmentState(props.state)}
-      detail={active ? "Send test" : undefined}
-      disabled={!active || !canTest}
-      loading={sending}
-      accessibilityHint={active ? "Sends a test notification to this device" : undefined}
-      onPress={sendTest}
+      detail={active ? "Send test" : revoked ? "Turn on again" : undefined}
+      disabled={active ? !canTest : !revoked || !canRegister}
+      loading={pending}
+      accessibilityHint={
+        active
+          ? "Sends a test notification to this device"
+          : revoked
+            ? "Registers this device with the environment again"
+            : undefined
+      }
+      onPress={revoked ? turnOnAgain : sendTest}
     />
   );
 }

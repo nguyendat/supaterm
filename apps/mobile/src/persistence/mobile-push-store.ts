@@ -42,6 +42,10 @@ export const MobilePushSettings = Schema.Struct({
   kinds: PushKinds,
   registrations: Schema.Array(MobilePushRegistration),
   retiredHandles: Schema.Array(MobilePushRetiredHandle),
+  /** Environments whose owner removed this device; they stay off until the user turns them on again. */
+  revokedEnvironments: Schema.Array(EnvironmentId).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+  ),
 });
 export type MobilePushSettings = typeof MobilePushSettings.Type;
 
@@ -51,6 +55,7 @@ export const DEFAULT_MOBILE_PUSH_SETTINGS: MobilePushSettings = {
   kinds: DEFAULT_PUSH_KINDS,
   registrations: [],
   retiredHandles: [],
+  revokedEnvironments: [],
 };
 
 const SETTINGS_KEY = "supaterm.push.settings";

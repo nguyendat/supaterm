@@ -41,6 +41,7 @@ const settings: MobilePushStore.MobilePushSettings = {
     },
   ],
   retiredHandles: [{ installationId: "installation-1", handle: "BBBBBBBBBBBBBBBBBBBBBB" }],
+  revokedEnvironments: ["environment-2" as never],
 };
 
 beforeEach(() => values.clear());
@@ -62,6 +63,15 @@ describe("mobile push store", () => {
       const store = yield* makeStore;
       yield* store.save(settings);
       expect(yield* store.load).toEqual(settings);
+    }),
+  );
+
+  it.effect("reads settings saved before environments could be turned off one by one", () =>
+    Effect.gen(function* () {
+      const { revokedEnvironments: _, ...older } = settings;
+      values.set("supaterm.push.settings", JSON.stringify(older));
+      const store = yield* makeStore;
+      expect(yield* store.load).toEqual({ ...older, revokedEnvironments: [] });
     }),
   );
 

@@ -35,8 +35,16 @@ const uuid = (index: number) => `00000000-0000-4000-8000-${index.toString(16).pa
 function harness(options: { permission?: PushPermission; token?: string } = {}) {
   let counter = 0;
   const next = () => ++counter;
-  const challenges = createPushChallengeMailbox();
+  const mailbox = createPushChallengeMailbox();
   const calls: Array<string> = [];
+  let challengeWaits = 0;
+  const challenges: typeof mailbox = {
+    ...mailbox,
+    wait: (enrollmentId, timeoutMs) => {
+      challengeWaits += 1;
+      return mailbox.wait(enrollmentId, timeoutMs);
+    },
+  };
 
   const device = {
     permission: options.permission ?? "granted",
@@ -50,6 +58,8 @@ function harness(options: { permission?: PushPermission; token?: string } = {}) 
     down: false,
     enrollFailure: null as PushGatewayError | null,
     pending: new Map<string, { installationId?: string }>(),
+    beforeEnroll: null as (() => Promise<void>) | null,
+    beforeCreateHandle: null as (() => void) | null,
   };
   const host = {
     enabled: true,
@@ -75,11 +85,12 @@ function harness(options: { permission?: PushPermission; token?: string } = {}) 
     origin: ORIGIN,
     enroll: async (_request, owner) => {
       calls.push(owner ? "gateway.enroll(owner)" : "gateway.enroll");
+      await gateway.beforeEnroll?.();
       if (gateway.enrollFailure) throw gateway.enrollFailure;
       if (owner) ownerCheck(owner);
       const enrollmentId = `enrollment-${next()}`;
       gateway.pending.set(enrollmentId, owner ? { installationId: owner.installationId } : {});
-      queueMicrotask(() => challenges.deliver({ enrollmentId, code: `code-${enrollmentId}` }));
+      queueMicrotask(() => mailbox.deliver({ enrollmentId, code: `code-${enrollmentId}` }));
       return { enrollmentId, expiresAt: Date.now() + 600_000 };
     },
     confirm: async (enrollmentId, code) => {
@@ -102,6 +113,7 @@ function harness(options: { permission?: PushPermission; token?: string } = {}) 
     },
     createHandle: async (owner) => {
       calls.push("gateway.createHandle");
+      gateway.beforeCreateHandle?.();
       const installation = ownerCheck(owner);
       const handle = `${next()}`.padStart(22, "h");
       installation.handles.add(handle);
@@ -211,10 +223,40 @@ function harness(options: { permission?: PushPermission; token?: string } = {}) 
       snapshots.at(-1)?.environments.get(id),
     deviceState: () => snapshots.at(-1)?.device,
     clearCalls: () => calls.splice(0),
+    challengeWaits: () => challengeWaits,
     advance: (ms: number) => {
       clock.now += ms;
     },
+    /** The host owner removing this device, as `push.revoke` does. */
+    revokeOnHost: (registration: {
+      registrationId: string;
+      installationId: string;
+      handle: string;
+    }) => {
+      host.registrations.delete(registration.registrationId);
+      gateway.installations.get(registration.installationId)?.handles.delete(registration.handle);
+    },
   };
+}
+
+function deferred() {
+  let resolve: () => void = () => {};
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+/** Holds the next enrollment request open until released, and reports when it started. */
+function holdEnrollment(test: ReturnType<typeof harness>) {
+  const started = deferred();
+  const released = deferred();
+  test.gateway.beforeEnroll = () => {
+    test.gateway.beforeEnroll = null;
+    started.resolve();
+    return released.promise;
+  };
+  return { started: started.promise, release: released.resolve };
 }
 
 async function enabled(options?: Parameters<typeof harness>[0]) {
@@ -384,6 +426,36 @@ describe("push registrar", () => {
     expect(test.state(environmentId)).toMatchObject({ state: "active" });
   });
 
+  it("registers every environment again when the gateway loses the installation mid-pass", async () => {
+    const test = harness();
+    await test.registrar.sync(test.environments([environmentId, otherEnvironmentId]));
+    let minted = 0;
+    test.gateway.beforeCreateHandle = () => {
+      minted += 1;
+      if (minted === 2) test.gateway.installations.clear();
+    };
+
+    await test.registrar.enable("titles");
+
+    const installationId = test.device.installation!.installationId;
+    const handles = test.gateway.installations.get(installationId)!.handles;
+    const registrations = test.stored().registrations;
+    expect(registrations.map((registration) => registration.environmentId).sort()).toEqual(
+      [environmentId, otherEnvironmentId].sort(),
+    );
+    for (const registration of registrations) {
+      expect(registration.installationId).toBe(installationId);
+      expect(handles.has(registration.handle)).toBe(true);
+      expect(test.host.registrations.get(registration.registrationId)?.handle).toBe(
+        registration.handle,
+      );
+      expect(test.state(registration.environmentId)).toEqual({
+        state: "active",
+        lastDeliveryAt: null,
+      });
+    }
+  });
+
   it("re-mints the handle when the host marked the registration gone", async () => {
     const test = await enabled();
     const [before] = test.stored().registrations;
@@ -406,6 +478,39 @@ describe("push registrar", () => {
     expect(test.gateway.installations.get(after!.installationId)!.handles.has(before!.handle)).toBe(
       false,
     );
+    expect(test.stored().revokedEnvironments).toEqual([]);
+    expect(test.state(environmentId)).toMatchObject({ state: "active" });
+  });
+
+  it("stays off for an environment whose owner removed this device until the user turns it on", async () => {
+    const test = await enabled();
+    const [removed] = test.stored().registrations;
+    test.revokeOnHost(removed!);
+
+    await test.registrar.sync(test.environments([environmentId]));
+
+    expect(test.state(environmentId)).toEqual({ state: "revoked" });
+    expect(test.stored()).toMatchObject({
+      registrations: [],
+      revokedEnvironments: [environmentId],
+    });
+    expect(test.device.bindings.has(removed!.registrationId)).toBe(false);
+    expect(test.host.registrations.size).toBe(0);
+
+    test.clearCalls();
+    await test.registrar.sync(test.environments([environmentId]));
+    expect(test.calls).toEqual([]);
+    expect(test.state(environmentId)).toEqual({ state: "revoked" });
+
+    await test.registrar.resumeEnvironment(environmentId);
+
+    const [resumed] = test.stored().registrations;
+    expect(resumed!.registrationId).not.toBe(removed!.registrationId);
+    expect(test.host.registrations.get(resumed!.registrationId)).toMatchObject({
+      handle: resumed!.handle,
+    });
+    expect(test.stored().revokedEnvironments).toEqual([]);
+    expect(test.state(environmentId)).toEqual({ state: "active", lastDeliveryAt: null });
   });
 
   it("re-registers when the user changes what to receive", async () => {
@@ -504,6 +609,46 @@ describe("push registrar", () => {
     expect(test.stored().retiredHandles).toEqual([]);
     expect(test.device.installation).toBeNull();
     expect(test.gateway.installations.size).toBe(0);
+  });
+
+  it("turns off at once while the enrollment request is still pending", async () => {
+    const test = harness();
+    await test.registrar.sync(test.environments([environmentId]));
+    const enrollment = holdEnrollment(test);
+    const enabling = test.registrar.enable("titles");
+    await enrollment.started;
+
+    await test.registrar.disable();
+
+    expect(test.stored().enabled).toBe(false);
+    expect(test.state(environmentId)).toEqual({ state: "off" });
+    enrollment.release();
+    await enabling;
+    await test.registrar.sync(test.environments([environmentId]));
+    expect(test.challengeWaits()).toBe(0);
+    expect(test.calls).not.toContain("gateway.confirm");
+    expect(test.device.installation).toBeNull();
+  });
+
+  it("forgets an environment without waiting for a pending enrollment", async () => {
+    const test = await enabled();
+    test.device.token = "dd44";
+    const enrollment = holdEnrollment(test);
+    const syncing = test.registrar.sync(test.environments([environmentId]));
+    await enrollment.started;
+
+    const waitsBefore = test.challengeWaits();
+
+    await test.registrar.forgetEnvironment(environmentId);
+
+    expect(test.host.registrations.size).toBe(0);
+    expect(test.stored().registrations).toEqual([]);
+    enrollment.release();
+    await syncing;
+    await test.registrar.sync(test.environments([]));
+    // Only the pass after the forget verified the new token; the cancelled one stopped at its response.
+    expect(test.challengeWaits()).toBe(waitsBefore + 1);
+    expect(test.device.installation).toMatchObject({ token: "dd44" });
   });
 
   it("deletes the installation when notification permission is revoked", async () => {

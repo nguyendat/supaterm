@@ -17,6 +17,8 @@ export function describePushEnvironmentState(state: PushEnvironmentState | undef
       return state.lastDeliveryAt === null
         ? "On"
         : `On · last alert ${new Date(state.lastDeliveryAt).toLocaleString()}`;
+    case "revoked":
+      return "Removed on the host";
     case "origin-not-allowed":
       return `The host does not allow ${state.origin}. Add it in the host's notification settings.`;
     case "host-unsupported":

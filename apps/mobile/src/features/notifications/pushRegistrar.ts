@@ -17,6 +17,7 @@ import type {
 
 import type {
   MobilePushRegistration,
+  MobilePushRetiredHandle,
   MobilePushSettings,
 } from "../../persistence/mobile-push-store";
 import { PushGatewayError, type PushGatewayClient } from "./pushGateway";
@@ -28,6 +29,7 @@ export type PushEnvironmentState =
   | { readonly state: "verifying" }
   | { readonly state: "waiting" }
   | { readonly state: "active"; readonly lastDeliveryAt: string | null }
+  | { readonly state: "revoked" }
   | { readonly state: "origin-not-allowed"; readonly origin: string }
   | { readonly state: "host-unsupported" }
   | { readonly state: "host-disabled" }
@@ -170,7 +172,52 @@ function gatewayFailureState(error: unknown): PushSetupFailure {
   return { state: "error", message: errorMessage(error, "Push notification setup failed.") };
 }
 
-class InstallationLostError extends Error {}
+class InstallationLostError extends Error {
+  constructor(readonly gatewayError: unknown) {
+    super("The push gateway no longer knows this device.");
+  }
+}
+
+class PushCancelledError extends Error {}
+
+const noop = () => {};
+
+/** One reconciliation pass. Turning push off or forgetting an environment cancels the active one. */
+interface Pass {
+  readonly cancelled: () => boolean;
+  /** Stops the pass before its next step once it was cancelled. */
+  readonly check: () => void;
+  /**
+   * Abandoning an enrollment step leaves nothing behind but a gateway enrollment that expires,
+   * so a cancelled pass stops waiting on one at once instead of after the HTTP response or challenge.
+   */
+  readonly abandonable: <A>(start: () => Promise<A>) => Promise<A>;
+  readonly cancel: () => void;
+}
+
+function createPass(): Pass {
+  let cancelled = false;
+  let reject: (error: PushCancelledError) => void = noop;
+  const cancellation = new Promise<never>((_, onCancel) => {
+    reject = onCancel;
+  });
+  cancellation.catch(noop);
+  const check = () => {
+    if (cancelled) throw new PushCancelledError();
+  };
+  return {
+    cancelled: () => cancelled,
+    check,
+    abandonable: async (start) => {
+      check();
+      return Promise.race([cancellation, start()]);
+    },
+    cancel: () => {
+      cancelled = true;
+      reject(new PushCancelledError());
+    },
+  };
+}
 
 const installationLost = (error: unknown) =>
   error instanceof PushGatewayError && error.installationLost;
@@ -217,6 +264,7 @@ export interface PushRegistrar {
   /** Like sync, but enrolls again at once instead of waiting out a recent enrollment failure. */
   readonly retry: (environments: PushEnvironments) => Promise<void>;
   readonly enable: (preview: PushPreviewLevel) => Promise<void>;
+  /** Saves the choice and cancels any setup in progress before cleaning up. */
   readonly disable: () => Promise<void>;
   readonly updatePreferences: (patch: {
     readonly preview?: PushPreviewLevel;
@@ -224,10 +272,10 @@ export interface PushRegistrar {
   }) => Promise<void>;
   /** Removes the environment's registration before the environment itself is forgotten. */
   readonly forgetEnvironment: (environmentId: EnvironmentId) => Promise<void>;
+  /** Registers an environment again after its owner removed this device there. */
+  readonly resumeEnvironment: (environmentId: EnvironmentId) => Promise<void>;
   readonly sendTest: (environmentId: EnvironmentId) => Promise<PushTestResult["status"]>;
 }
-
-const noop = () => {};
 
 const sameKinds = (left: PushKinds, right: PushKinds) =>
   left.approval === right.approval &&
@@ -236,23 +284,30 @@ const sameKinds = (left: PushKinds, right: PushKinds) =>
   left.failure === right.failure &&
   left["usage-limit"] === right["usage-limit"];
 
+const withoutEnvironment = (
+  environments: PushEnvironments,
+  environmentId: EnvironmentId,
+): PushEnvironments => ({
+  saved: new Set([...environments.saved].filter((id) => id !== environmentId)),
+  connected: new Set([...environments.connected].filter((id) => id !== environmentId)),
+});
+
 export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
   const now = deps.now ?? Date.now;
   let enrollFailure: { readonly until: number; readonly error: unknown } | null = null;
-  let queue: Promise<unknown> = Promise.resolve();
+  let passes: Promise<unknown> = Promise.resolve();
+  let mutations: Promise<unknown> = Promise.resolve();
   let environments: PushEnvironments = { saved: new Set(), connected: new Set() };
-  // Reconnects can fire in bursts; syncs that have not started yet collapse into one.
+  // Reconnects can fire in bursts; passes that have not started yet collapse into one.
   let latestEnvironments = environments;
-  let queuedSync: Promise<void> | null = null;
+  let queuedPass: Promise<void> | null = null;
+  let activePass: Pass | null = null;
+  // Environments being forgotten are unregistered from the host while it still answers; their
+  // callers wait only for that, not for the rest of the pass.
+  const forgetting = new Map<EnvironmentId, Array<() => void>>();
   let settings: MobilePushSettings | null = null;
   let device: PushDeviceState = { state: "off" };
   const states = new Map<EnvironmentId, PushEnvironmentState>();
-
-  const serial = <A>(operation: () => Promise<A>): Promise<A> => {
-    const run = queue.then(operation, operation);
-    queue = run.then(noop, noop);
-    return run;
-  };
 
   const publish = () => {
     for (const environmentId of states.keys()) {
@@ -267,14 +322,20 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
     publish();
   };
 
-  const denyPermission = () => settleAll({ state: "permission-denied" });
-
   const load = async () => (settings ??= await deps.store.load());
 
-  const commit = async (next: MobilePushSettings) => {
-    settings = next;
-    await deps.store.save(next);
+  /** Every write goes through here, so a pass and the user's own changes never overwrite each other. */
+  const update = (change: (current: MobilePushSettings) => MobilePushSettings): Promise<void> => {
+    const run = mutations.then(async () => {
+      const next = change(await load());
+      settings = next;
+      await deps.store.save(next);
+    });
+    mutations = run.then(noop, noop);
+    return run;
   };
+
+  const read = () => mutations.then(load);
 
   const findRegistration = async (environmentId: EnvironmentId) =>
     (await load()).registrations.find((candidate) => candidate.environmentId === environmentId);
@@ -287,27 +348,33 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
       await deps.gateway.deleteHandle(installation, handle);
     } catch (error) {
       if (installationLost(error)) return;
-      const current = await load();
-      await commit({
+      await update((current) => ({
         ...current,
         retiredHandles: [...current.retiredHandles, { installationId, handle }],
-      });
+      }));
     }
   };
 
   const retryRetiredHandles = async (installation: PushInstallation | null) => {
-    const current = await load();
-    if (current.retiredHandles.length === 0) return;
-    const remaining = [];
-    for (const retired of current.retiredHandles) {
-      if (installation?.installationId !== retired.installationId) continue;
+    const retired = (await load()).retiredHandles;
+    if (retired.length === 0) return;
+    const settled = new Set<MobilePushRetiredHandle>();
+    for (const entry of retired) {
+      if (installation?.installationId !== entry.installationId) {
+        settled.add(entry);
+        continue;
+      }
       try {
-        await deps.gateway.deleteHandle(installation, retired.handle);
+        await deps.gateway.deleteHandle(installation, entry.handle);
+        settled.add(entry);
       } catch (error) {
-        if (!installationLost(error)) remaining.push(retired);
+        if (installationLost(error)) settled.add(entry);
       }
     }
-    await commit({ ...(await load()), retiredHandles: remaining });
+    await update((current) => ({
+      ...current,
+      retiredHandles: current.retiredHandles.filter((entry) => !settled.has(entry)),
+    }));
   };
 
   const retire = async (registration: MobilePushRegistration, options: { host: boolean }) => {
@@ -317,13 +384,12 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
         .catch(noop);
     }
     await deps.native.deleteBinding(registration.registrationId).catch(noop);
-    const current = await load();
-    await commit({
+    await update((current) => ({
       ...current,
       registrations: current.registrations.filter(
         (candidate) => candidate.registrationId !== registration.registrationId,
       ),
-    });
+    }));
     await dropHandle(registration.installationId, registration.handle);
   };
 
@@ -350,9 +416,13 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
     await deps.native.deleteOrphanKeys().catch(noop);
   };
 
-  const ensureInstallation = async (config: SupportedConfiguration): Promise<PushInstallation> => {
-    const token = await deps.deviceToken();
+  const ensureInstallation = async (
+    pass: Pass,
+    config: SupportedConfiguration,
+  ): Promise<PushInstallation> => {
+    const token = await pass.abandonable(deps.deviceToken);
     const current = await deps.native.getInstallation();
+    pass.check();
     const sameDestination =
       current !== null &&
       current.topic === config.topic &&
@@ -361,8 +431,9 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
 
     if (enrollFailure !== null && now() < enrollFailure.until) throw enrollFailure.error;
     device = { state: "verifying" };
+    const { revokedEnvironments } = await load();
     for (const environmentId of environments.saved) {
-      if (environments.connected.has(environmentId))
+      if (environments.connected.has(environmentId) && !revokedEnvironments.includes(environmentId))
         states.set(environmentId, { state: "verifying" });
     }
     publish();
@@ -373,21 +444,23 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
     try {
       let enrollment;
       try {
-        enrollment = await deps.gateway.enroll(request, owner ?? undefined);
+        enrollment = await pass.abandonable(() => deps.gateway.enroll(request, owner ?? undefined));
       } catch (error) {
         if (owner === null || !installationLost(error)) {
           throw error;
         }
         owner = null;
-        enrollment = await deps.gateway.enroll(request);
+        enrollment = await pass.abandonable(() => deps.gateway.enroll(request));
       }
+      const { enrollmentId, expiresAt } = enrollment;
       const waitMs = Math.min(
         CHALLENGE_MAX_WAIT_MS,
-        Math.max(CHALLENGE_MIN_WAIT_MS, enrollment.expiresAt - now()),
+        Math.max(CHALLENGE_MIN_WAIT_MS, expiresAt - now()),
       );
-      const code = await deps.challenges.wait(enrollment.enrollmentId, waitMs);
-      confirmed = await deps.gateway.confirm(enrollment.enrollmentId, code);
+      const code = await pass.abandonable(() => deps.challenges.wait(enrollmentId, waitMs));
+      confirmed = await pass.abandonable(() => deps.gateway.confirm(enrollmentId, code));
     } catch (error) {
+      pass.check();
       const waitMs =
         error instanceof PushGatewayError && error.retryAfterMs !== null
           ? Math.max(error.retryAfterMs, ENROLL_RETRY_MS)
@@ -407,10 +480,12 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
       topic: config.topic,
       environment: config.apnsEnvironment,
     };
+    // Kept even when cancelled meanwhile, so the cleanup that follows deletes it at the gateway.
     await deps.native.setInstallation(next);
     if (current !== null && current.installationId !== next.installationId) {
       await deps.gateway.deleteInstallation(current).catch(noop);
     }
+    pass.check();
     return next;
   };
 
@@ -418,7 +493,7 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
     try {
       return await deps.gateway.createHandle(installation, hostKey);
     } catch (error) {
-      throw installationLost(error) ? new InstallationLostError() : error;
+      throw installationLost(error) ? new InstallationLostError(error) : error;
     }
   };
 
@@ -438,9 +513,8 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
     ...(deps.deviceName ? { deviceName: deps.deviceName.slice(0, 64) } : {}),
   });
 
-  const saveRegistration = async (registration: MobilePushRegistration) => {
-    const current = await load();
-    await commit({
+  const saveRegistration = (registration: MobilePushRegistration) =>
+    update((current) => ({
       ...current,
       registrations: [
         ...current.registrations.filter(
@@ -448,10 +522,10 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
         ),
         registration,
       ],
-    });
-  };
+    }));
 
   const refreshRegistration = async (
+    pass: Pass,
     existing: MobilePushRegistration,
     installation: PushInstallation,
   ): Promise<PushEnvironmentState | null> => {
@@ -459,13 +533,27 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
     const remote = (await deps.host.list(existing.environmentId)).registrations.find(
       (registration) => registration.registrationId === existing.registrationId,
     );
+    pass.check();
+    // The host deletes a registration only when its owner removes it; one marked gone instead
+    // lost its handle at the gateway and is set up again below.
+    if (remote === undefined) {
+      await retire(existing, { host: false });
+      await update((settings) => ({
+        ...settings,
+        revokedEnvironments: [
+          ...settings.revokedEnvironments.filter((id) => id !== existing.environmentId),
+          existing.environmentId,
+        ],
+      }));
+      return { state: "revoked" };
+    }
     const handleUsable =
-      existing.installationId === installation.installationId && remote?.status !== "gone";
+      existing.installationId === installation.installationId && remote.status !== "gone";
     const lastDeliveryAt =
-      remote?.lastDeliveryAt === undefined ? null : DateTime.formatIso(remote.lastDeliveryAt);
+      remote.lastDeliveryAt === undefined ? null : DateTime.formatIso(remote.lastDeliveryAt);
     if (
       handleUsable &&
-      remote?.status === "active" &&
+      remote.status === "active" &&
       existing.preview === current.preview &&
       sameKinds(existing.kinds, current.kinds)
     ) {
@@ -474,6 +562,10 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
     const handle = handleUsable
       ? existing.handle
       : await mintHandle(installation, existing.hostKey);
+    if (pass.cancelled()) {
+      if (handle !== existing.handle) await dropHandle(installation.installationId, handle);
+      pass.check();
+    }
     try {
       await deps.host.register(
         existing.environmentId,
@@ -501,6 +593,7 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
   };
 
   const createRegistration = async (
+    pass: Pass,
     environmentId: EnvironmentId,
     describe: PushDescribeResult,
     installation: PushInstallation,
@@ -508,6 +601,10 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
     const current = await load();
     const key = await deps.native.generateRecipientKey();
     const handle = await mintHandle(installation, describe.hostKey);
+    if (pass.cancelled()) {
+      await dropHandle(installation.installationId, handle);
+      pass.check();
+    }
     const registration: MobilePushRegistration = {
       environmentId,
       registrationId: deps.randomId().toLowerCase(),
@@ -534,11 +631,13 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
       await dropHandle(installation.installationId, handle);
       throw error;
     }
+    // Saved even when cancelled meanwhile, so the cleanup that follows unregisters it.
     await saveRegistration(registration);
     return { state: "active", lastDeliveryAt: null };
   };
 
   const registerEnvironment = async (
+    pass: Pass,
     environmentId: EnvironmentId,
     installation: PushInstallation,
   ): Promise<PushEnvironmentState> => {
@@ -548,6 +647,7 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
     } catch (error) {
       return hostFailureState(error);
     }
+    pass.check();
     if (!describe.enabled) return { state: "host-disabled" };
     if (!describe.gatewayOrigins.includes(deps.gateway.origin)) {
       return { state: "origin-not-allowed", origin: deps.gateway.origin };
@@ -566,24 +666,88 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
         ) {
           await retire(existing, { host: true });
         } else {
-          const refreshed = await refreshRegistration(existing, installation);
+          const refreshed = await refreshRegistration(pass, existing, installation);
           if (refreshed !== null) return refreshed;
         }
       }
-      return await createRegistration(environmentId, describe, installation);
+      pass.check();
+      return await createRegistration(pass, environmentId, describe, installation);
     } catch (error) {
-      if (error instanceof InstallationLostError) throw error;
+      if (error instanceof InstallationLostError || error instanceof PushCancelledError) {
+        throw error;
+      }
       if (error instanceof PushGatewayError) return gatewayFailureState(error);
       return hostFailureState(error);
     }
   };
 
-  const runSync = async () => {
-    const current = await load();
+  /** Brings every saved environment up to date with one installation, or stops when the gateway lost it. */
+  const registerEnvironments = async (
+    pass: Pass,
+    installation: PushInstallation,
+  ): Promise<InstallationLostError | null> => {
+    for (const environmentId of environments.saved) {
+      pass.check();
+      let state: PushEnvironmentState;
+      if ((await load()).revokedEnvironments.includes(environmentId)) {
+        state = { state: "revoked" };
+      } else if (!environments.connected.has(environmentId)) {
+        const registration = await findRegistration(environmentId);
+        state =
+          registration?.installationId === installation.installationId
+            ? { state: "active", lastDeliveryAt: null }
+            : { state: "waiting" };
+      } else {
+        try {
+          state = await registerEnvironment(pass, environmentId, installation);
+        } catch (error) {
+          if (error instanceof InstallationLostError) return error;
+          throw error;
+        }
+      }
+      pass.check();
+      states.set(environmentId, state);
+      publish();
+    }
+    return null;
+  };
+
+  const enrollDevice = async (
+    pass: Pass,
+    config: SupportedConfiguration,
+  ): Promise<PushInstallation | null> => {
+    let installation: PushInstallation;
+    try {
+      installation = await ensureInstallation(pass, config);
+    } catch (error) {
+      if (error instanceof PushCancelledError) throw error;
+      settleAll(gatewayFailureState(error));
+      return null;
+    }
+    device = { state: "ready" };
+    await retryRetiredHandles(installation);
+    return installation;
+  };
+
+  const reconcile = async (pass: Pass) => {
+    const current = await read();
     for (const registration of current.registrations) {
       if (!environments.saved.has(registration.environmentId)) {
-        await retire(registration, { host: false });
+        await retire(registration, { host: forgetting.has(registration.environmentId) });
       }
+    }
+    for (const [environmentId, waiters] of forgetting) {
+      if (environments.saved.has(environmentId)) continue;
+      forgetting.delete(environmentId);
+      for (const resolve of waiters) resolve();
+    }
+    if (current.revokedEnvironments.some((id) => !environments.saved.has(id))) {
+      await update((settings) => ({
+        ...settings,
+        revokedEnvironments: settings.revokedEnvironments.filter((id) =>
+          environments.saved.has(id),
+        ),
+      }));
     }
     const config = deps.native.configuration();
     if (!current.enabled || !config.supported) {
@@ -603,112 +767,108 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
 
     if ((await deps.permissions.get()) !== "granted") {
       await deleteInstallation();
-      denyPermission();
+      settleAll({ state: "permission-denied" });
       return;
     }
+    pass.check();
 
-    let installation: PushInstallation;
-    try {
-      installation = await ensureInstallation(config);
-    } catch (error) {
-      settleAll(gatewayFailureState(error));
-      return;
-    }
-    device = { state: "ready" };
-    await retryRetiredHandles(installation);
-
-    let reenrolled = false;
-    for (const environmentId of environments.saved) {
-      if (!environments.connected.has(environmentId)) {
-        const registration = await findRegistration(environmentId);
-        states.set(
-          environmentId,
-          registration?.installationId === installation.installationId
-            ? { state: "active", lastDeliveryAt: null }
-            : { state: "waiting" },
-        );
-        continue;
+    let installation = await enrollDevice(pass, config);
+    if (installation === null) return;
+    let lost = await registerEnvironments(pass, installation);
+    if (lost !== null) {
+      // A lost installation takes every handle with it, including those minted earlier in this
+      // pass, so recovery enrolls once more and brings every environment up again.
+      await deps.native.clearInstallation();
+      installation = await enrollDevice(pass, config);
+      if (installation === null) return;
+      lost = await registerEnvironments(pass, installation);
+      if (lost !== null) {
+        settleAll(gatewayFailureState(lost.gatewayError));
+        return;
       }
-      let state: PushEnvironmentState;
-      try {
-        state = await registerEnvironment(environmentId, installation);
-      } catch (error) {
-        if (!(error instanceof InstallationLostError) || reenrolled) {
-          state = gatewayFailureState(error);
-        } else {
-          reenrolled = true;
-          await deps.native.clearInstallation();
-          try {
-            installation = await ensureInstallation(config);
-            state = await registerEnvironment(environmentId, installation);
-          } catch (retryError) {
-            state = gatewayFailureState(retryError);
-          }
-        }
-      }
-      states.set(environmentId, state);
-      publish();
     }
     await removeStrayBindings();
     publish();
   };
 
-  const syncLatest = async () => {
+  const runPass = async () => {
     environments = latestEnvironments;
-    await runSync();
+    const pass = createPass();
+    activePass = pass;
+    try {
+      await reconcile(pass);
+    } catch (error) {
+      if (!(error instanceof PushCancelledError)) throw error;
+    } finally {
+      if (activePass === pass) activePass = null;
+    }
+  };
+
+  const requestPass = (): Promise<void> => {
+    if (queuedPass !== null) return queuedPass;
+    const run = passes.then(() => {
+      queuedPass = null;
+      return runPass();
+    });
+    passes = run.then(noop, noop);
+    queuedPass = run;
+    return run;
+  };
+
+  /** A pass already waiting on enrollment would otherwise hold the queue for up to ten minutes. */
+  const cancelActivePass = () => {
+    activePass?.cancel();
+    deps.challenges.abort();
   };
 
   return {
     sync: (next) => {
       latestEnvironments = next;
-      queuedSync ??= serial(async () => {
-        queuedSync = null;
-        await syncLatest();
-      });
-      return queuedSync;
+      return requestPass();
     },
     retry: (next) => {
       enrollFailure = null;
       latestEnvironments = next;
-      return serial(syncLatest);
+      return requestPass();
     },
-    enable: (preview) =>
-      serial(async () => {
-        enrollFailure = null;
-        const current = await load();
-        await commit({ ...current, enabled: true, preview });
-        if ((await deps.permissions.request()) !== "granted") {
-          denyPermission();
-          return;
-        }
-        await runSync();
-      }),
-    disable: () => {
-      deps.challenges.abort();
-      return serial(async () => {
-        await commit({ ...(await load()), enabled: false });
-        await runSync();
+    enable: async (preview) => {
+      enrollFailure = null;
+      await update((current) => ({ ...current, enabled: true, preview }));
+      await deps.permissions.request();
+      await requestPass();
+    },
+    disable: async () => {
+      cancelActivePass();
+      await update((current) => ({ ...current, enabled: false }));
+      await requestPass();
+    },
+    updatePreferences: async (patch) => {
+      await update((current) => ({ ...current, ...patch }));
+      await requestPass();
+    },
+    forgetEnvironment: (environmentId) => {
+      cancelActivePass();
+      latestEnvironments = withoutEnvironment(latestEnvironments, environmentId);
+      const forgotten = new Promise<void>((resolve) => {
+        forgetting.set(environmentId, [...(forgetting.get(environmentId) ?? []), resolve]);
       });
+      return Promise.race([forgotten, requestPass()]);
     },
-    updatePreferences: (patch) =>
-      serial(async () => {
-        await commit({ ...(await load()), ...patch });
-        await runSync();
-      }),
-    forgetEnvironment: (environmentId) =>
-      serial(async () => {
-        const registration = await findRegistration(environmentId);
-        if (registration !== undefined) await retire(registration, { host: true });
-      }),
-    sendTest: (environmentId) =>
-      serial(async () => {
-        const registration = await findRegistration(environmentId);
-        if (registration === undefined) {
-          throw new Error("Notifications are not set up for this environment yet.");
-        }
-        const result = await deps.host.test(environmentId, registration.registrationId);
-        if (result.status === "gone") await runSync();
-        return result.status;
-      }),
+    resumeEnvironment: async (environmentId) => {
+      await update((current) => ({
+        ...current,
+        revokedEnvironments: current.revokedEnvironments.filter((id) => id !== environmentId),
+      }));
+      await requestPass();
+    },
+    sendTest: async (environmentId) => {
+      const registration = await findRegistration(environmentId);
+      if (registration === undefined) {
+        throw new Error("Notifications are not set up for this environment yet.");
+      }
+      const result = await deps.host.test(environmentId, registration.registrationId);
+      if (result.status === "gone") await requestPass();
+      return result.status;
+    },
   };
 }
