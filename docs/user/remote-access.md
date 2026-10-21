@@ -309,6 +309,24 @@ Claude Code, Codex, ChatGPT and other agents Supaterm did not start can drive
 threads on an environment through its MCP server. See
 [outside agents](./outside-agents.md) for setup.
 
+## Push notifications on iPhone
+
+The iOS app can alert you when an agent needs approval or input, finishes, fails,
+or hits a usage limit. Open **Settings → Notifications** in the app, choose what
+the lock screen shows, and turn on **Notify me**. iOS asks for permission once.
+Every saved environment is set up the next time it connects, and its row shows
+whether alerts are on. **Send test** checks the whole path.
+
+Alerts are encrypted by your environment and decrypted on the phone. The
+notification service only relays them and cannot read them. **Hidden** shows only
+what happened, **Titles** adds the thread and project names, and **Full** adds the
+command, question, or last message. **Hide content on this device** overrides the
+choice for this phone. You will not get alerts for the thread you are looking at.
+
+An environment that reports "does not allow" a notification service needs that
+service's address added to its notification settings. Turn notifications off in
+the app, or remove the environment, to stop its alerts.
+
 ## Manage or revoke access
 
 On the host, **Settings → Connections** lets authorized administrators create
