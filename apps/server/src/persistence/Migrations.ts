@@ -89,7 +89,14 @@ const ensureUnrecordedSchema = Effect.fn("ensureUnrecordedSchema")(function* () 
   `;
   // Shell resume groups a sequence range by aggregate. Covering it, without a predicate on
   // the columns stored after the payload, keeps both the query and the first build off
-  // payload overflow pages.
+  // payload overflow pages. The first build still reads every event once.
+  const sequenceAggregateIndex = yield* sql`
+    SELECT 1 FROM sqlite_master
+    WHERE type = 'index' AND name = 'idx_orchestration_events_sequence_aggregate'
+  `;
+  if (sequenceAggregateIndex.length === 0) {
+    yield* Effect.log("Indexing orchestration events for shell resume; this runs once");
+  }
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_orchestration_events_sequence_aggregate
     ON orchestration_events(sequence, aggregate_kind, stream_id)
