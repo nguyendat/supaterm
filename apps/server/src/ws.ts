@@ -128,7 +128,6 @@ import {
   composeShellStreamWithEnrichment,
   dedupeShellEnrichment,
   loadShellSnapshotParts,
-  readShellDependentThreadIds,
   shellApplicationEventFromChangedAggregate,
   shellStreamItemFromEnrichmentRefresh,
   shellStreamItemFromThreadShell,
@@ -1001,32 +1000,6 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
       );
     });
 
-    // Rows that depend on a changed thread have no event of their own. They go
-    // first, labelled with the client's cursor so they apply without moving it:
-    // if the stream drops, a later resume still covers every trigger it missed.
-    const readResumeAggregates = Effect.fn("ws.orchestrationV2.readResumeAggregates")(function* (
-      afterSequence: number,
-      highWater: number,
-    ) {
-      const changed = (yield* applicationEvents.readChangedApplicationAggregates({
-        afterSequence,
-        throughSequence: highWater,
-        limit: SHELL_RESUME_MAX_CHANGED_AGGREGATES + 1,
-      })).map(shellApplicationEventFromChangedAggregate);
-      if (changed.length > SHELL_RESUME_MAX_CHANGED_AGGREGATES) return changed;
-      const dependents = yield* readShellDependentThreadIds({
-        sql,
-        threadIds: changed.flatMap((stored) => ("event" in stored ? [stored.event.threadId] : [])),
-      });
-      return [
-        ...dependents.map((threadId): ShellApplicationEvent => ({
-          sequence: afterSequence,
-          event: { threadId: ThreadId.make(threadId) },
-        })),
-        ...changed,
-      ];
-    });
-
     const toShellStream = <E, R>(stream: Stream.Stream<ShellApplicationEvent, E, R>) =>
       stream.pipe(
         Stream.groupedWithin(512, Duration.millis(50)),
@@ -1127,7 +1100,11 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
       const changed =
         gap < 0 || gap > SHELL_RESUME_MAX_SCANNED_SEQUENCES
           ? undefined
-          : yield* readResumeAggregates(input.afterSequence, highWater);
+          : yield* applicationEvents.readChangedApplicationAggregates({
+              afterSequence: input.afterSequence,
+              throughSequence: highWater,
+              limit: SHELL_RESUME_MAX_CHANGED_AGGREGATES + 1,
+            });
       if (changed === undefined || changed.length > SHELL_RESUME_MAX_CHANGED_AGGREGATES) {
         const loaded = yield* loadSnapshot();
         return composeShellStreamWithEnrichment({
@@ -1138,7 +1115,9 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
       }
 
       const loaded = yield* loadProjectMetadataSnapshot(highWater);
-      const replay = toShellStream(Stream.fromIterable(changed));
+      const replay = toShellStream(
+        Stream.fromIterable(changed.map(shellApplicationEventFromChangedAggregate)),
+      );
       return composeShellStreamWithEnrichment({
         initial: initialEnrichmentItems(loaded),
         tail: Stream.concat(Stream.concat(replay, completionMarker), liveFrom(highWater)),

@@ -1471,11 +1471,20 @@ describe("resuming the shell on a new connection", () => {
       thread: { ...v2ThreadShell, title: `at ${sequence}` },
     });
 
+    const awaitSubscriptions = (count: number) =>
+      SubscriptionRef.changes(inputs).pipe(
+        Stream.filter((captured) => captured.length >= count),
+        Stream.runHead,
+        Effect.map((captured) => Option.getOrThrow(captured)),
+      );
+
     return {
       connect,
       awaitSequence,
       awaitLive,
+      awaitSubscriptions,
       update,
+      inputs,
       loaderCalls,
       saves,
       wakeups,
@@ -1589,34 +1598,6 @@ describe("resuming the shell on a new connection", () => {
     }),
   );
 
-  it.effect("applies thread rows the server resends at the cursor without moving it", () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness();
-      const first = yield* harness.connect("run-1");
-      yield* Queue.offerAll(first.events, [harness.update(12), { kind: "synchronized" }]);
-      yield* harness.awaitLive;
-
-      const second = yield* harness.connect("run-1");
-      expect(second.afterSequence).toBe(12);
-      // A fork whose source changed arrives first, at the cursor itself.
-      yield* Queue.offer(second.events, {
-        kind: "thread.updated",
-        sequence: 12,
-        location: "active",
-        thread: { ...v2ThreadShell, title: "dependent refreshed" },
-      });
-      const refreshed = yield* SubscriptionRef.changes(harness.shellState).pipe(
-        Stream.filter((value) =>
-          Option.exists(value.snapshot, (snapshot) =>
-            snapshot.threads.some((thread) => thread.title === "dependent refreshed"),
-          ),
-        ),
-        Stream.runHead,
-      );
-      expect(Option.getOrThrow(Option.getOrThrow(refreshed).snapshot).snapshotSequence).toBe(12);
-    }),
-  );
-
   it.effect("reloads after skipping an unknown item, then resumes again", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();
@@ -1638,6 +1619,52 @@ describe("resuming the shell on a new connection", () => {
       const third = yield* harness.connect("run-1");
       expect(third.afterSequence).toBe(20);
       expect(yield* Ref.get(harness.loaderCalls)).toBe(2);
+    }),
+  );
+
+  it.effect("quietly reloads a resumed shell whose last snapshot is ten minutes old", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const first = yield* harness.connect("run-1");
+      yield* Queue.offerAll(first.events, [harness.update(12), { kind: "synchronized" }]);
+      yield* harness.awaitLive;
+      yield* TestClock.adjust("11 minutes");
+
+      const second = yield* harness.connect("run-1");
+      expect(second.afterSequence).toBe(12);
+      yield* Queue.offer(second.events, { kind: "synchronized" });
+
+      const subscriptions = yield* harness.awaitSubscriptions(3);
+      expect(subscriptions.at(-1)).toBe(20);
+      expect(yield* Ref.get(harness.loaderCalls)).toBe(2);
+      expect((yield* SubscriptionRef.get(harness.shellState)).status).toBe("live");
+
+      // The reload took a fresh snapshot, so the next resume does not reload again.
+      yield* Queue.offer(second.events, { kind: "synchronized" });
+      for (let attempt = 0; attempt < 20; attempt += 1) yield* Effect.yieldNow;
+      const third = yield* harness.connect("run-1");
+      expect(third.afterSequence).toBe(20);
+      yield* Queue.offer(third.events, { kind: "synchronized" });
+      yield* harness.awaitLive;
+      for (let attempt = 0; attempt < 20; attempt += 1) yield* Effect.yieldNow;
+      expect((yield* SubscriptionRef.get(harness.inputs)).length).toBe(4);
+    }),
+  );
+
+  it.effect("keeps resuming without a reload while the last snapshot is recent", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const first = yield* harness.connect("run-1");
+      yield* Queue.offerAll(first.events, [harness.update(12), { kind: "synchronized" }]);
+      yield* harness.awaitLive;
+      yield* TestClock.adjust("5 minutes");
+
+      const second = yield* harness.connect("run-1");
+      yield* Queue.offer(second.events, { kind: "synchronized" });
+      yield* harness.awaitLive;
+      for (let attempt = 0; attempt < 20; attempt += 1) yield* Effect.yieldNow;
+      expect(yield* SubscriptionRef.get(harness.inputs)).toEqual([10, 12]);
+      expect(yield* Ref.get(harness.loaderCalls)).toBe(1);
     }),
   );
 

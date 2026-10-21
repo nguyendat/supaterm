@@ -94,47 +94,6 @@ export const loadShellSnapshotParts = Effect.fn("ShellStream.loadShellSnapshotPa
   };
 });
 
-/**
- * Threads whose shell row reads state owned by the given threads: forks count
- * their source's items, and threads bound to one provider session share its
- * last error. Neither has an event of its own when that state changes.
- */
-export const readShellDependentThreadIds = Effect.fn("ShellStream.readShellDependentThreadIds")(
-  function* (input: {
-    readonly sql: SqlClient.SqlClient;
-    readonly threadIds: ReadonlyArray<string>;
-  }) {
-    const { sql } = input;
-    if (input.threadIds.length === 0) return [];
-    const changed = new Set(input.threadIds);
-    const dependents = new Set<string>();
-    const read = Effect.gen(function* () {
-      const sharingSession = yield* sql<{ readonly thread_id: string }>`
-        SELECT DISTINCT other.thread_id
-        FROM orchestration_v2_projection_provider_session_bindings mine
-        INNER JOIN orchestration_v2_projection_provider_session_bindings other
-          ON other.provider_session_id = mine.provider_session_id
-        WHERE mine.thread_id IN ${sql.in(input.threadIds)}
-      `;
-      for (const row of sharingSession) dependents.add(row.thread_id);
-      let sources: ReadonlyArray<string> = input.threadIds;
-      while (sources.length > 0) {
-        const forks = yield* sql<{ readonly thread_id: string }>`
-          SELECT thread_id FROM orchestration_v2_projection_threads
-          WHERE json_extract(payload_json, '$.forkedFrom.type') = 'run'
-            AND json_extract(payload_json, '$.forkedFrom.threadId') IN ${sql.in(sources)}
-        `;
-        sources = forks
-          .map((row) => row.thread_id)
-          .filter((threadId) => !changed.has(threadId) && !dependents.has(threadId));
-        for (const threadId of sources) dependents.add(threadId);
-      }
-    });
-    yield* sql.withTransaction(read).pipe(NodeSqliteClient.readOnly);
-    return Array.from(dependents).filter((threadId) => !changed.has(threadId));
-  },
-);
-
 type ProjectStoredEvent = Extract<ApplicationStoredEvent, { readonly aggregateKind: "project" }>;
 
 export type ShellApplicationEvent =

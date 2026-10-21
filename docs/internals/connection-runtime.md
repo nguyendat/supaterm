@@ -34,12 +34,15 @@ in-memory cursor instead of reloading the HTTP snapshot. The server sends a
 when it matches the generation under which its in-memory shell last reached
 `synchronized` after an authoritative snapshot. A shell loaded from the disk cache
 never qualifies, and neither does one that skipped an unknown stream item, because
-the cursor already moved past rows this build could not apply. Some thread rows
-read state owned by another thread: a fork counts its source's items, and threads
-bound to one provider session share its last error. Resume resends those rows
-first, at the client's own cursor, so they apply without moving it. The live tail
-does not, so a connected client can hold such a row until the thread itself changes
-or the server restarts.
+the cursor already moved past rows this build could not apply. Resuming refetches
+only aggregates with events after the cursor, but some thread rows read state owned
+by another thread: a fork counts its source's items, threads bound to one provider
+session share its last error, and a provider-thread move changes the previous
+owner. Those rows have no event of their own, so neither resume nor the live tail
+resends them. A full reload on every reconnect used to repair them; instead, once a
+shell that resumed across connections reaches `synchronized` and its last
+authoritative snapshot is ten minutes old, the client reloads that snapshot quietly
+while keeping the rows live.
 
 The native mobile relay, not the supervisor, decides when a backgrounded tunnel
 suspends. iOS suspends when its background task expires, so the tunnel lasts as

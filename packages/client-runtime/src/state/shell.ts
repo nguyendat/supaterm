@@ -9,6 +9,7 @@ import {
   type ThreadPullRequestLink,
 } from "@supaterm/contracts";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
@@ -40,6 +41,12 @@ import { type EnvironmentCatalogState, enabledEnvironmentIds } from "./connectio
 import { followStreamInEnvironment } from "./runtime.ts";
 
 export type EnvironmentShellStatus = "empty" | "cached" | "synchronizing" | "live";
+
+// Resuming from a cursor misses rows that read another thread's state, such as a
+// fork's item count or a shared provider session's error. A shell that resumed
+// across connections reloads the authoritative snapshot quietly once its last one
+// is this old, so those rows heal on a schedule rather than on every reconnect.
+const SHELL_AUTHORITATIVE_RELOAD_AFTER_MS = 10 * 60 * 1000;
 
 function groupConsecutiveBySource<A>(
   entries: ReadonlyArray<readonly [RpcSession, A]>,
@@ -110,6 +117,10 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
   // An unknown item still advances the cursor past rows this build could not
   // apply, so a resume would never resend them.
   let skippedUnknownItem = false;
+  let lastAuthoritativeAt = 0;
+  let resumedAcrossSessions = false;
+  let reloadQuietly = false;
+  const quietReloads = yield* Queue.unbounded<void>();
   const activeSubscriptionSession = yield* Ref.make<RpcSession | null>(null);
   const activeSubscriptionGeneration = yield* Ref.make<string | null>(null);
   const latestLiveSnapshot = yield* Ref.make<Option.Option<OrchestrationV2ShellSnapshot>>(
@@ -216,6 +227,12 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         if (Option.isSome(next.snapshot)) {
           next = { snapshot: next.snapshot, status: "live", error: Option.none() };
           generation = skippedUnknownItem ? null : yield* Ref.get(activeSubscriptionGeneration);
+          const snapshotAge = (yield* Clock.currentTimeMillis) - lastAuthoritativeAt;
+          if (resumedAcrossSessions && snapshotAge >= SHELL_AUTHORITATIVE_RELOAD_AFTER_MS) {
+            resumedAcrossSessions = false;
+            reloadQuietly = true;
+            yield* Queue.offer(quietReloads, undefined);
+          }
         }
         continue;
       }
@@ -227,6 +244,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       if (item.kind === "snapshot" && item.resolvedRepositoryIdentityRoots === undefined) {
         skippedUnknownItem = false;
         generation = null;
+        lastAuthoritativeAt = yield* Clock.currentTimeMillis;
       }
       const nextSnapshot =
         item.kind === "snapshot"
@@ -242,7 +260,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
           : Option.match(next.snapshot, {
               onNone: () => null,
               onSome: (snapshot) =>
-                item.sequence >= snapshot.snapshotSequence
+                item.sequence > snapshot.snapshotSequence
                   ? applyShellStreamEvent(snapshot, item)
                   : snapshot,
             });
@@ -371,16 +389,20 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
           onSome: (config) => config.shellSyncGeneration ?? null,
         });
         yield* Ref.set(activeSubscriptionGeneration, generation);
-        yield* Ref.set(awaitingCompletion, supportsCompletionMarker);
-        yield* setSynchronizing;
+        // A quiet reload replaces rows that are already live, so it keeps showing them as live.
+        const quiet = reloadQuietly;
+        reloadQuietly = false;
+        yield* Ref.set(awaitingCompletion, supportsCompletionMarker && !quiet);
+        if (!quiet) yield* setSynchronizing;
 
         // A resubscription on the same live session, or a new session to the
         // same server run after this shell synchronized, resumes from the
         // in-memory cursor. Otherwise reload the authoritative HTTP snapshot so
         // a valid cursor cannot preserve incomplete cached data.
-        const hasAuthoritativeSnapshot =
-          (yield* Ref.get(lastAuthoritativeSession)) === session ||
-          (generation !== null && (yield* Ref.get(completedGeneration)) === generation);
+        const sameSession = (yield* Ref.get(lastAuthoritativeSession)) === session;
+        const sameRun = generation !== null && (yield* Ref.get(completedGeneration)) === generation;
+        const hasAuthoritativeSnapshot = !quiet && (sameSession || sameRun);
+        resumedAcrossSessions = hasAuthoritativeSnapshot && !sameSession;
         let canResume = hasAuthoritativeSnapshot;
         let current = yield* SubscriptionRef.get(state);
         if (!hasAuthoritativeSnapshot || Option.isNone(current.snapshot)) {
@@ -438,7 +460,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       {
         onExpectedFailure: (cause) => setStreamError(Cause.squash(cause)),
         retryExpectedFailureAfter: "250 millis",
-        resubscribe: foregroundResubscriptions,
+        resubscribe: Stream.merge(foregroundResubscriptions, Stream.fromQueue(quietReloads)),
       },
     ).pipe(
       Stream.runForEachArray((entries) =>
