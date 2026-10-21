@@ -21,6 +21,11 @@ export interface PushGatewayRequest {
 
 const encoder = new TextEncoder();
 
+/** The host push identity's public key, base64url, as sent in `supaterm-push-key`. */
+export function pushHostPublicKey(hostSecretKey: Uint8Array): string {
+  return encodeBase64(ed25519.getPublicKey(hostSecretKey));
+}
+
 export function pushRequestSigningString(request: PushGatewayRequest): string {
   const body = typeof request.body === "string" ? encoder.encode(request.body) : request.body;
   return [
@@ -38,7 +43,7 @@ export function signPushRequest(
   request: PushGatewayRequest,
 ): Record<string, string> {
   return {
-    [PUSH_KEY_HEADER]: encodeBase64(ed25519.getPublicKey(hostSecretKey)),
+    [PUSH_KEY_HEADER]: pushHostPublicKey(hostSecretKey),
     [PUSH_TIMESTAMP_HEADER]: String(request.timestamp),
     [PUSH_SIGNATURE_HEADER]: encodeBase64(
       ed25519.sign(encoder.encode(pushRequestSigningString(request)), hostSecretKey),
