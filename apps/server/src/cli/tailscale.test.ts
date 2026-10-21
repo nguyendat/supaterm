@@ -54,42 +54,59 @@ const runningStatus: TailnetStatus = {
   },
 };
 
-it.effect("signs in with an auth key file and waits until the node serves", () =>
+const LOGIN_URL = "https://login.tailscale.com/a/reauth";
+
+interface RecordedRequest {
+  readonly method: string;
+  readonly url: string;
+  readonly authorized: boolean;
+  readonly body: string;
+}
+
+/** A fake running server: answers discovery itself and every API call through `respond`. */
+const withRunningServer = <A, E, R>(
+  respond: (request: RecordedRequest) => unknown,
+  run: (input: {
+    readonly baseDir: string;
+    readonly requests: ReadonlyArray<RecordedRequest>;
+  }) => Effect.Effect<A, E, R>,
+) =>
   Effect.acquireUseRelease(
-    Effect.callback<{ readonly server: NodeHttp.Server; readonly bodies: Array<string> }>(
-      (resume) => {
-        const bodies: Array<string> = [];
-        let signedIn = false;
-        const server = NodeHttp.createServer((request, response) => {
-          const reply = (body: unknown) => {
+    Effect.callback<{
+      readonly server: NodeHttp.Server;
+      readonly requests: Array<RecordedRequest>;
+    }>((resume) => {
+      const requests: Array<RecordedRequest> = [];
+      const server = NodeHttp.createServer((request, response) => {
+        let body = "";
+        request.setEncoding("utf8");
+        request.on("data", (chunk: string) => {
+          body += chunk;
+        });
+        request.on("end", () => {
+          const reply = (value: unknown) => {
+            if (value === undefined) {
+              response.writeHead(404);
+              response.end();
+              return;
+            }
             response.writeHead(200, { "content-type": "application/json" });
-            response.end(JSON.stringify(body));
+            response.end(JSON.stringify(value));
           };
           if (request.url === "/.well-known/supaterm/environment") return reply(descriptor);
-          expect(request.headers.authorization).toMatch(/^Bearer /u);
-          if (request.url === "/api/tailnet/status") {
-            return reply(signedIn ? runningStatus : baseStatus);
-          }
-          if (request.url === "/api/tailnet/sign-in" && request.method === "POST") {
-            let body = "";
-            request.setEncoding("utf8");
-            request.on("data", (chunk: string) => {
-              body += chunk;
-            });
-            request.on("end", () => {
-              bodies.push(body);
-              signedIn = true;
-              reply({ loginUrl: null });
-            });
-            return;
-          }
-          response.writeHead(404);
-          response.end();
+          const recorded = {
+            method: request.method ?? "GET",
+            url: request.url ?? "",
+            authorized: (request.headers.authorization ?? "").startsWith("Bearer "),
+            body,
+          };
+          requests.push(recorded);
+          reply(respond(recorded));
         });
-        server.listen(0, "127.0.0.1", () => resume(Effect.succeed({ server, bodies })));
-      },
-    ),
-    ({ server, bodies }) =>
+      });
+      server.listen(0, "127.0.0.1", () => resume(Effect.succeed({ server, requests })));
+    }),
+    ({ server, requests }) =>
       Effect.gen(function* () {
         const address = server.address();
         if (address === null || typeof address === "string") {
@@ -103,10 +120,37 @@ it.effect("signs in with an auth key file and waits until the node serves", () =
             port: address.port,
           }),
         });
+        return yield* run({ baseDir, requests });
+      }),
+    ({ server }) => Effect.sync(() => server.close()),
+  ).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NetService.layer, TestConsole.layer)));
+
+const runCli = (args: ReadonlyArray<string>) => Command.runWith(cli, { version: "0.0.0" })(args);
+
+const mutations = (requests: ReadonlyArray<RecordedRequest>) =>
+  requests.flatMap((request) =>
+    request.method === "POST"
+      ? [{ url: request.url, body: request.body.length === 0 ? null : JSON.parse(request.body) }]
+      : [],
+  );
+
+it.effect("signs in with an auth key file and waits until the node serves", () => {
+  let signedIn = false;
+  return withRunningServer(
+    (request) => {
+      if (request.url === "/api/tailnet/status") return signedIn ? runningStatus : baseStatus;
+      if (request.url === "/api/tailnet/sign-in" && request.method === "POST") {
+        signedIn = true;
+        return { loginUrl: null };
+      }
+      return undefined;
+    },
+    ({ baseDir, requests }) =>
+      Effect.gen(function* () {
         const keyFile = NodePath.join(baseDir, "auth-key");
         NodeFS.writeFileSync(keyFile, "tskey-auth-from-file\n");
 
-        yield* Command.runWith(cli, { version: "0.0.0" })([
+        yield* runCli([
           "tailscale",
           "login",
           "--base-dir",
@@ -117,11 +161,15 @@ it.effect("signs in with an auth key file and waits until the node serves", () =
           keyFile,
         ]);
 
-        expect(bodies.map((body) => JSON.parse(body))).toEqual([
+        expect(requests.every((request) => request.authorized)).toBe(true);
+        expect(mutations(requests)).toEqual([
           {
-            hostname: "khoi-abcdefghij-supaterm",
-            tags: ["tag:supaterm"],
-            authKey: "tskey-auth-from-file",
+            url: "/api/tailnet/sign-in",
+            body: {
+              hostname: "khoi-abcdefghij-supaterm",
+              tags: ["tag:supaterm"],
+              authKey: "tskey-auth-from-file",
+            },
           },
         ]);
         const output = (yield* TestConsole.logLines).join("\n");
@@ -129,6 +177,48 @@ it.effect("signs in with an auth key file and waits until the node serves", () =
         assert.include(output, "HTTPS: https://khoi-abcdefghij-supaterm.tail1234.ts.net/");
         assert.notInclude(output, "tskey-");
       }),
-    ({ server }) => Effect.sync(() => server.close()),
-  ).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NetService.layer, TestConsole.layer))),
+  );
+});
+
+it.effect("reauthenticates an expired enrollment instead of signing in again", () => {
+  let reauthenticated = false;
+  return withRunningServer(
+    (request) => {
+      if (request.url === "/api/tailnet/status") {
+        return reauthenticated ? runningStatus : { ...runningStatus, phase: "needs-reauth" };
+      }
+      if (request.url === "/api/tailnet/reauthenticate" && request.method === "POST") {
+        reauthenticated = true;
+        return { loginUrl: LOGIN_URL };
+      }
+      return undefined;
+    },
+    ({ baseDir, requests }) =>
+      Effect.gen(function* () {
+        yield* runCli(["tailscale", "login", "--base-dir", baseDir, "--tag", "tag:supaterm"]);
+
+        expect(requests.every((request) => request.authorized)).toBe(true);
+        expect(mutations(requests)).toEqual([{ url: "/api/tailnet/reauthenticate", body: null }]);
+        const output = (yield* TestConsole.logLines).join("\n");
+        assert.include(output, "--tag, and --auth-key-file are ignored");
+        assert.include(output, "back in to Tailscale");
+        assert.include(output, LOGIN_URL);
+        assert.include(output, "Built-in Tailscale: Running");
+      }),
+  );
+});
+
+it.effect("leaves a signed-in node alone", () =>
+  withRunningServer(
+    (request) => (request.url === "/api/tailnet/status" ? runningStatus : undefined),
+    ({ baseDir, requests }) =>
+      Effect.gen(function* () {
+        yield* runCli(["tailscale", "login", "--base-dir", baseDir]);
+
+        expect(mutations(requests)).toEqual([]);
+        const output = (yield* TestConsole.logLines).join("\n");
+        assert.include(output, "is already signed in to Tailscale");
+        assert.include(output, "Built-in Tailscale: Running");
+      }),
+  ),
 );

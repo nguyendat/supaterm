@@ -16,6 +16,7 @@ import {
   EnvironmentHttpApi,
   ExecutionEnvironmentDescriptor,
   PortSchema,
+  TailnetPhase,
 } from "@supaterm/contracts";
 import { resolveWorktreeSupatermHome } from "@supaterm/shared/devHome";
 import { buildPairingUrl } from "@supaterm/shared/remote";
@@ -140,6 +141,17 @@ export class ServePortOccupiedError extends Schema.TaggedError<ServePortOccupied
 ) {
   override get message(): string {
     return `HTTPS port ${String(this.servePort)} on the tailnet already serves something that is not a Supaterm server. Pass --tailscale-serve-port to publish this one on another port.`;
+  }
+}
+
+class BuiltInTailnetNotServingError extends Schema.TaggedError<BuiltInTailnetNotServingError>()(
+  "BuiltInTailnetNotServingError",
+  { phase: TailnetPhase },
+) {
+  override get message(): string {
+    return this.phase === "running"
+      ? "Tailscale is signed in but not serving. Turn on Serve over Tailscale in Settings → Connections, or run `supaterm tailscale status`."
+      : `Built-in Tailscale is not running (${this.phase}). Run \`supaterm tailscale status\` to see why, or \`supaterm tailscale login\` to sign in again.`;
   }
 }
 
@@ -517,7 +529,10 @@ const prepareRelay = Effect.fn("pair.prepareRelay")(function* (
   );
 });
 
-/** Null when the built-in node is not serving HTTPS, or the server predates it. */
+/**
+ * Null when the built-in node is signed out or unavailable, or the server predates it. Once it
+ * is enrolled, System Serve would bypass its owner limit, so a node that isn't serving fails.
+ */
 const resolveBuiltInTailnetPairingBase = Effect.fn("pair.resolveBuiltInTailnetPairingBase")(
   function* (target: DiscoveredPairTarget, config: ServerConfig.ServerConfig["Service"]) {
     const client = yield* HttpApiClient.make(EnvironmentHttpApi, {
@@ -531,10 +546,22 @@ const resolveBuiltInTailnetPairingBase = Effect.fn("pair.resolveBuiltInTailnetPa
         label: "supaterm pair tailscale status",
       },
       (headers) => client.tailnet.status({ headers }),
-    );
-    return status.phase === "running" && status.serveEnabled ? (status.httpsUrl ?? null) : null;
+    ).pipe(Effect.orElseSucceed(() => null));
+    if (status === null || status.phase === "signed-out" || status.phase === "unavailable") {
+      return null;
+    }
+    const notes = ["Pairing through Supaterm's built-in Tailscale node."];
+    if (status.phase === "running" && status.serveEnabled) {
+      if (status.httpsUrl !== undefined) return { baseUrl: status.httpsUrl, notes };
+      if (status.httpUrl !== undefined) {
+        notes.push(
+          `HTTPS over Tailscale isn't ready (${status.httpsMessage ?? status.https}), so this link uses plain HTTP and browsers get limited features. Run \`supaterm tailscale status\` to check on it.`,
+        );
+        return { baseUrl: status.httpUrl, notes };
+      }
+    }
+    return yield* new BuiltInTailnetNotServingError({ phase: status.phase });
   },
-  Effect.orElseSucceed(() => null),
 );
 
 const ttlFlag = Flag.String("ttl").pipe(
@@ -552,7 +579,7 @@ const labelFlag = Flag.String("label").pipe(
 
 const tailscaleFlag = Flag.Boolean("tailscale").pipe(
   Flag.withDescription(
-    "Pair through the tailnet: the built-in Tailscale node's HTTPS URL when it is serving, otherwise publish the server over Tailscale Serve HTTPS.",
+    "Pair through the tailnet: the built-in Tailscale node's address once it is signed in, otherwise publish the server over the system Tailscale Serve HTTPS.",
   ),
   Flag.withDefault(false),
 );
@@ -610,18 +637,11 @@ export const pairCommand = Command.make("pair", {
         pairingBaseUrl = relayEndpoint;
         notes.push(`Paired clients show this host as Relay · ${relayName(relayEndpoint)}.`);
       } else if (flags.tailscale) {
-        const builtIn = yield* resolveBuiltInTailnetPairingBase(target, config);
-        if (builtIn !== null) {
-          pairingBaseUrl = builtIn;
-          notes.push("Pairing through Supaterm's built-in Tailscale node.");
-        } else {
-          const resolved = yield* resolveTailscalePairingBase({
-            target,
-            servePort: flags.tailscaleServePort,
-          });
-          pairingBaseUrl = resolved.baseUrl;
-          notes.push(...resolved.notes);
-        }
+        const resolved =
+          (yield* resolveBuiltInTailnetPairingBase(target, config)) ??
+          (yield* resolveTailscalePairingBase({ target, servePort: flags.tailscaleServePort }));
+        pairingBaseUrl = resolved.baseUrl;
+        notes.push(...resolved.notes);
       } else {
         pairingBaseUrl = resolveDirectPairingBaseUrl(target.state);
         if (isLoopbackHost(new URL(pairingBaseUrl).hostname)) {

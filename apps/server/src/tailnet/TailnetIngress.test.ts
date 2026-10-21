@@ -196,6 +196,72 @@ describe("TailnetIngress", () => {
   );
 });
 
+/** Reads until `count` bytes have arrived, however the transport splits them. */
+const readBytes = (socket: NodeNet.Socket, count: number) =>
+  Effect.promise(
+    () =>
+      new Promise<Buffer>((resolve) => {
+        let buffered = Buffer.alloc(0);
+        const onData = (chunk: Buffer) => {
+          buffered = Buffer.concat([buffered, chunk]);
+          if (buffered.length < count) return;
+          socket.off("data", onData);
+          socket.pause();
+          resolve(buffered);
+        };
+        socket.on("data", onData);
+        socket.resume();
+      }),
+  );
+
+const listenLoopback = (server: NodeNet.Server) =>
+  Effect.promise(
+    () =>
+      new Promise<number>((resolve) => {
+        server.listen(0, "127.0.0.1", () => {
+          const address = server.address();
+          resolve(typeof address === "object" && address !== null ? address.port : 0);
+        });
+      }),
+  );
+
+describe("forwardToDevServer", () => {
+  it.live("answers before the dev server's first byte, pipes both ways, and revokes both", () =>
+    Effect.gen(function* () {
+      const upstreams: Array<NodeNet.Socket> = [];
+      const devServer = NodeNet.createServer((upstream) => {
+        upstreams.push(upstream);
+        upstream.write("vite\n");
+        upstream.pipe(upstream);
+      });
+      yield* Effect.addFinalizer(() => Effect.sync(() => devServer.close()));
+      const port = yield* listenLoopback(devServer);
+
+      const ingress = yield* TailnetIngress.TailnetIngress.pipe(
+        Effect.provide(
+          TailnetIngress.layer(
+            TailnetIngress.forwardToDevServer(new URL(`http://127.0.0.1:${port}`)),
+          ),
+        ),
+      );
+      const address = yield* ingress.listen({ secret: SECRET, authorize: () => true });
+      const client = NodeNet.connect(address, () => client.write(preamble()));
+      client.on("error", () => undefined);
+      yield* Effect.addFinalizer(() => Effect.sync(() => client.destroy()));
+
+      const greeting = yield* readBytes(client, 6);
+      expect(greeting[0]).toBe(1);
+      expect(greeting.subarray(1).toString("utf8")).toBe("vite\n");
+      client.write("ping");
+      expect((yield* readBytes(client, 4)).toString("utf8")).toBe("ping");
+
+      expect(yield* ingress.revoke(() => false)).toBe(1);
+      yield* closed(client);
+      yield* Effect.forEach(upstreams, closed, { discard: true });
+    }).pipe(Effect.scoped),
+  );
+});
+
 describe("isTailnetOwnerAllowed", () => {
   const connection = (
     peer: TailnetIngress.TailnetConnection["peer"],

@@ -25,7 +25,7 @@ import * as NodeOS from "node:os";
 import { isPrivateNetworkHost, isTailnetHost } from "@supaterm/shared/hostClassification";
 
 import * as ServerConfig from "../config.ts";
-import { TailnetExposure } from "../tailnet/TailnetExposure.ts";
+import { TailnetExposure, type TailnetExposureState } from "../tailnet/TailnetExposure.ts";
 import { formatHostForUrl, isLoopbackHost, isWildcardHost } from "../startupAccess.ts";
 
 type NetworkInterfacesMap = ReturnType<typeof NodeOS.networkInterfaces>;
@@ -40,6 +40,9 @@ export class DirectEndpoints extends Context.Service<
   DirectEndpoints,
   {
     readonly resolve: () => Effect.Effect<ReadonlyArray<ServerDirectEndpoint>>;
+    readonly resolveFor: (
+      exposure: TailnetExposureState,
+    ) => Effect.Effect<ReadonlyArray<ServerDirectEndpoint>>;
   }
 >()("supaterm/environment/DirectEndpoints") {}
 
@@ -98,7 +101,9 @@ export const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
   const tailnet = yield* TailnetExposure;
 
-  const resolve = Effect.gen(function* () {
+  const resolveFor = Effect.fn("DirectEndpoints.resolveFor")(function* (
+    exposure: TailnetExposureState,
+  ) {
     const endpoints = [
       ...resolveBoundEndpoints({
         host: config.host,
@@ -134,11 +139,13 @@ export const make = Effect.gen(function* () {
         endpoints.push({ kind: "tailnet", httpBaseUrl: servedUrl.value });
       }
     }
-    endpoints.push(...(yield* tailnet.current).endpoints);
+    endpoints.push(...exposure.endpoints);
     return endpoints;
   });
 
-  return DirectEndpoints.of({ resolve: () => resolve });
+  const resolve = Effect.flatMap(tailnet.current, resolveFor);
+
+  return DirectEndpoints.of({ resolve: () => resolve, resolveFor });
 });
 
 export const layer = Layer.effect(DirectEndpoints, make);

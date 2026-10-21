@@ -119,6 +119,28 @@ export function installTailnetForwardedHeaders<T extends NodeHttp.Server>(server
   return server;
 }
 
+/**
+ * Dev is single-origin: tailnet browsers need Vite and HMR like any other remote browser, and
+ * Vite proxies the backend routes. That proxy reaches the backend over loopback, so tailnet
+ * identity and `x-forwarded-proto` are lost on this dev-only path.
+ */
+export const forwardToDevServer = (devUrl: URL) => (socket: NodeNet.Socket) => {
+  const upstream = NodeNet.connect({
+    host: devUrl.hostname.replace(/^\[(.*)\]$/u, "$1"),
+    port: devUrl.port.length > 0 ? Number(devUrl.port) : 80,
+  });
+  const destroyBoth = () => {
+    socket.destroy();
+    upstream.destroy();
+  };
+  for (const side of [socket, upstream]) {
+    side.once("close", destroyBoth);
+    side.on("error", destroyBoth);
+  }
+  socket.pipe(upstream);
+  upstream.pipe(socket);
+};
+
 const secretsMatch = (expected: Buffer, presented: string) => {
   const candidate = Buffer.from(presented, "utf8");
   return candidate.length === expected.length && NodeCrypto.timingSafeEqual(candidate, expected);

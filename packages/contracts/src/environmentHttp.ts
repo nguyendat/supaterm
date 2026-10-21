@@ -567,6 +567,13 @@ class EnvironmentTailnetHttpApi extends HttpApiGroup.make("tailnet")
     }).middleware(EnvironmentAuthenticatedAuth),
   )
   .add(
+    HttpApiEndpoint.post("reauthenticate", "/api/tailnet/reauthenticate", {
+      headers: OptionalBearerHeaders,
+      success: TailnetLoginResult,
+      error: [TailnetError, EnvironmentScopeRequiredError, EnvironmentInternalError],
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
     HttpApiEndpoint.post("signOut", "/api/tailnet/sign-out", {
       headers: OptionalBearerHeaders,
       success: TailnetSignOutResult,

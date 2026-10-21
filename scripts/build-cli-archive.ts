@@ -400,6 +400,7 @@ const stripStaleAuthenticodeEntry = Effect.fn("stripStaleAuthenticodeEntry")(fun
 const signWindowsExecutable = Effect.fn("signWindowsExecutable")(function* (
   executablePath: string,
 ) {
+  const path = yield* Path.Path;
   const signing = yield* WindowsSigningConfig;
   const endpoint = Option.getOrUndefined(signing.endpoint);
   const accountName = Option.getOrUndefined(signing.accountName);
@@ -411,7 +412,9 @@ const signWindowsExecutable = Effect.fn("signWindowsExecutable")(function* (
   yield* stripStaleAuthenticodeEntry(executablePath);
   if ((yield* HostProcess.Platform) !== "win32") {
     yield* signWithJsign(executablePath);
-    yield* Effect.log("[cli-archive] Signed supaterm.exe (Azure Trusted Signing via jsign).");
+    yield* Effect.log(
+      `[cli-archive] Signed ${path.basename(executablePath)} (Azure Trusted Signing via jsign).`,
+    );
     return;
   }
   const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
@@ -428,9 +431,11 @@ const signWindowsExecutable = Effect.fn("signWindowsExecutable")(function* (
   ].join(" ");
   yield* runCommand(
     ChildProcess.make("pwsh", ["-NoProfile", "-NonInteractive", "-Command", script]),
-    "Invoke-TrustedSigning supaterm.exe",
+    `Invoke-TrustedSigning ${path.basename(executablePath)}`,
   );
-  yield* Effect.log("[cli-archive] Signed supaterm.exe (Azure Trusted Signing).");
+  yield* Effect.log(
+    `[cli-archive] Signed ${path.basename(executablePath)} (Azure Trusted Signing).`,
+  );
 });
 
 const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
@@ -506,6 +511,13 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
     yield* signMacArchiveContents({ repoRoot, contentDir, executablePath });
   } else if (input.platform === "win") {
     yield* signWindowsExecutable(executablePath);
+    // Smart App Control blocks unsigned helpers the server spawns.
+    const tailnetFiles = yield* fs.readDirectory(path.join(contentDir, "tailnet"), {
+      recursive: true,
+    });
+    for (const file of tailnetFiles.filter((entry) => entry.endsWith(".exe"))) {
+      yield* signWindowsExecutable(path.join(contentDir, "tailnet", file));
+    }
   }
   if (input.platform !== "win") {
     yield* fs.chmod(executablePath, 0o755);

@@ -47,7 +47,7 @@ import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as CommandOutputHub from "./orchestration-v2/CommandOutputHub.ts";
 import * as CodexInstallation from "./provider/CodexInstallation.ts";
 import * as DeviceService from "./device/DeviceService.ts";
-import * as DirectEndpoints from "./environment/DirectEndpoints.ts";
+import * as EnvironmentReachability from "./environment/EnvironmentReachability.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
@@ -624,7 +624,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
     advertisement: Effect.succeed({}),
     advertisements: Stream.empty,
   }),
-  Layer.mock(TailnetNode.TailnetNode)({ exposureChanges: Stream.empty }),
+  Layer.mock(TailnetNode.TailnetNode)({}),
   Layer.mock(ServerLifecycleEvents.ServerLifecycleEvents)({}),
   Layer.mock(ServerRuntimeStartup.ServerRuntimeStartup)({}),
   Layer.mock(ServerSelfUpdate.ServerSelfUpdate)({}),
@@ -694,7 +694,18 @@ it.effect(
         Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({
           resolveTargets: () => Effect.succeed([]),
         }),
-        Layer.mock(DirectEndpoints.DirectEndpoints)({ resolve: () => Effect.succeed([]) }),
+        Layer.mock(EnvironmentReachability.EnvironmentReachability)({
+          current: Effect.succeed({
+            auth: {
+              policy: "loopback-browser",
+              bootstrapMethods: [],
+              sessionMethods: ["browser-session-cookie"],
+              sessionCookieName: "config-test-session",
+            },
+            directEndpoints: [],
+          }),
+          changes: Stream.empty,
+        }),
         Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
           scratchRoot: Effect.succeedNone,
           namedProjectsRoot: process.cwd(),
@@ -709,15 +720,7 @@ it.effect(
             capabilities: {},
           }),
         }),
-        Layer.mock(EnvironmentAuth.EnvironmentAuth)({
-          getDescriptor: () =>
-            Effect.succeed({
-              policy: "loopback-browser",
-              bootstrapMethods: [],
-              sessionMethods: ["browser-session-cookie"],
-              sessionCookieName: "config-test-session",
-            }),
-        }),
+        Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
         // Signal subscription on either accessor so the test also fails, rather
         // than hangs, against a handler that subscribes after the snapshot.
         Layer.succeed(Keybindings.Keybindings, {

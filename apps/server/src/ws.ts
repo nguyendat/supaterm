@@ -212,7 +212,7 @@ import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
-import * as DirectEndpoints from "./environment/DirectEndpoints.ts";
+import * as EnvironmentReachability from "./environment/EnvironmentReachability.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as DefectReporter from "./observability/DefectReporter.ts";
 import * as EventLoopMonitor from "./observability/EventLoopMonitor.ts";
@@ -1280,7 +1280,7 @@ export const layerWsRpc = (
       const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
-      const directEndpoints = yield* DirectEndpoints.DirectEndpoints;
+      const reachability = yield* EnvironmentReachability.EnvironmentReachability;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
@@ -1693,7 +1693,7 @@ export const layerWsRpc = (
           yield* serverSettings.getSettings,
         );
         const environment = yield* serverEnvironment.getDescriptor;
-        const auth = yield* serverAuth.getDescriptor();
+        const { auth, directEndpoints } = yield* reachability.current;
         const scratchWorkspaceRoot = yield* managedFolders.scratchRoot;
         const lastEventLoopStall = yield* eventLoopMonitor.latestNoticeableStall;
         const editorConfig = yield* resolveEditorConfig(
@@ -1713,7 +1713,7 @@ export const layerWsRpc = (
           remoteOpenTargets: yield* resolveAvailableEditorsForConfig(
             remoteOpenTargets.resolveTargets(),
           ),
-          directEndpoints: yield* resolveAvailableEditorsForConfig(directEndpoints.resolve()),
+          directEndpoints,
           observability: {
             logsDirectoryPath: config.logsDir,
             localTracingEnabled: true,
@@ -2989,17 +2989,7 @@ export const layerWsRpc = (
                 config,
                 relayAccess.advertisements,
               );
-              const reachability = reachabilityUpdates(
-                config,
-                tailnet.exposureChanges.pipe(
-                  Stream.mapEffect(() =>
-                    Effect.all({
-                      auth: serverAuth.getDescriptor(),
-                      directEndpoints: resolveAvailableEditorsForConfig(directEndpoints.resolve()),
-                    }),
-                  ),
-                ),
-              );
+              const reachabilityUpdated = reachabilityUpdates(config, reachability.changes);
 
               const liveUpdates = Stream.mergeAll<ServerConfigStreamEvent, never, never>(
                 [
@@ -3008,7 +2998,7 @@ export const layerWsRpc = (
                   settingsUpdates,
                   environmentThemeUpdates,
                   relayAdvertisements,
-                  reachability,
+                  reachabilityUpdated,
                 ],
                 { concurrency: "unbounded" },
               );

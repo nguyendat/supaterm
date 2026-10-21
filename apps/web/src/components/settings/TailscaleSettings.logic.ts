@@ -1,4 +1,5 @@
 import {
+  type TailnetConfigureInput,
   type TailnetSelf,
   type TailnetStatus,
   isTailnetHostname,
@@ -70,4 +71,120 @@ export function tailnetKeyExpiryDays(keyExpiry: string | undefined, nowMs: numbe
   if (Number.isNaN(expiresAt)) return null;
   const days = Math.ceil((expiresAt - nowMs) / DAY_MS);
   return days >= 0 && days <= KEY_EXPIRY_WARNING_DAYS ? days : null;
+}
+
+export function tailnetConfirmationMessage(
+  question: string,
+  ...details: ReadonlyArray<string | null>
+): string {
+  return [question, ...details.filter((detail) => detail !== null)].join("\n");
+}
+
+export type TailnetOperation =
+  | { readonly kind: "sign-in" | "cancel-sign-in" | "reauthenticate" | "sign-out" }
+  | { readonly kind: "configure"; readonly patch: TailnetConfigureInput };
+export type TailnetOperationKind = TailnetOperation["kind"];
+
+/** The server runs one Tailscale change at a time, and cancelling is how a waiting sign-in ends. */
+export function canStartTailnetOperation(
+  active: TailnetOperation | null,
+  kind: TailnetOperationKind,
+): boolean {
+  return active === null || (active.kind === "sign-in" && kind === "cancel-sign-in");
+}
+
+/** A cancel can overlap the sign-in it ends, so the newest operation still in flight is the active one. */
+export function activeTailnetOperation(
+  inFlight: ReadonlyArray<TailnetOperation>,
+): TailnetOperation | null {
+  return inFlight[inFlight.length - 1] ?? null;
+}
+
+export type TailnetAccountAction =
+  | "sign-in"
+  | "sign-out"
+  | "cancel-sign-in"
+  | "continue"
+  | "reauthenticate";
+
+export interface TailnetStatusHeader {
+  readonly title: string;
+  readonly description: string;
+  readonly warning?: string | undefined;
+  readonly actions: ReadonlyArray<TailnetAccountAction>;
+}
+
+function keyExpiryWarning(days: number) {
+  const unit = days === 1 ? "day" : "days";
+  return `This device's Tailscale key expires in ${days} ${unit}. You can turn off key expiry for it in the Tailscale admin console.`;
+}
+
+export function tailnetStatusHeader(
+  status: TailnetStatus,
+  machineLabel: string,
+  nowMs: number,
+): TailnetStatusHeader {
+  const accountSummary = tailnetAccountSummary(status.self);
+  switch (status.phase) {
+    case "unavailable":
+      return {
+        title: "Tailscale is unavailable",
+        description: status.message ?? "Built-in Tailscale isn't available on this machine.",
+        actions: [],
+      };
+    case "signed-out":
+      return {
+        title: "Sign in to Tailscale",
+        description: "Access Supaterm securely from your other devices.",
+        actions: ["sign-in"],
+      };
+    case "starting":
+      return {
+        title: "Starting Tailscale…",
+        description: `Connecting ${machineLabel} to your tailnet.`,
+        actions: ["sign-out"],
+      };
+    case "restarting":
+      return {
+        title: "Restarting Tailscale…",
+        description:
+          status.message ?? "Tailscale stopped unexpectedly. Supaterm is starting it again.",
+        actions: ["sign-out"],
+      };
+    case "needs-login":
+      return {
+        title: "Finish signing in to Tailscale",
+        description: status.message ?? `Open the sign-in page to connect ${machineLabel}.`,
+        actions: ["cancel-sign-in", "continue"],
+      };
+    case "needs-approval":
+      return {
+        title: "Waiting for approval",
+        description: "Waiting for an admin to approve this device",
+        actions: ["cancel-sign-in"],
+      };
+    case "needs-reauth":
+      return {
+        title: "Sign in to Tailscale again",
+        description: accountSummary ?? "This device's Tailscale sign-in expired.",
+        warning:
+          status.message ?? "Supaterm isn't reachable over Tailscale until you reauthenticate.",
+        actions: ["sign-out", "reauthenticate"],
+      };
+    case "running": {
+      const keyExpiryDays = tailnetKeyExpiryDays(status.self?.keyExpiry, nowMs);
+      return {
+        title: "Signed in to Tailscale",
+        description: accountSummary ?? "Connected to your tailnet.",
+        warning: keyExpiryDays === null ? undefined : keyExpiryWarning(keyExpiryDays),
+        actions: ["sign-out"],
+      };
+    }
+    case "error":
+      return {
+        title: "Tailscale stopped",
+        description: status.message ?? "Tailscale couldn't start.",
+        actions: ["sign-out"],
+      };
+  }
 }

@@ -1,15 +1,7 @@
-import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId, TailnetStatus } from "@supaterm/contracts";
-import {
-  isAtomCommandInterrupted,
-  settlePromise,
-  squashAtomCommandFailure,
-} from "@supaterm/client-runtime/state/runtime";
-import type { AsyncResult } from "effect/reactivity";
+import type { TailnetStatus } from "@supaterm/contracts";
+import { isAtomCommandInterrupted, settlePromise } from "@supaterm/client-runtime/state/runtime";
 import { useEffect, useId, useRef, useState } from "react";
 
-import { serverEnvironment } from "~/state/server";
-import { useAtomCommand } from "~/state/use-atom-command";
 import { Alert, AlertAction, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import {
@@ -25,6 +17,7 @@ import { Input } from "../ui/input";
 import { QRCodeSvg } from "../ui/qr-code";
 import { TailscaleLogo } from "./TailscaleLogo";
 import { parseTailnetTagsInput, tailnetHostnameError } from "./TailscaleSettings.logic";
+import { type TailnetOperations, commandFailureMessage } from "./useTailnetOperations";
 
 export type TailscaleSignInSession =
   | { readonly mode: "sign-in" }
@@ -50,35 +43,23 @@ export function openTailnetLoginUrl(url: string | null) {
   window.open(safeUrl, "_blank", "noopener");
 }
 
-export function commandFailureMessage(
-  failure: AsyncResult.Failure<unknown, unknown>,
-  fallback: string,
-): string {
-  const error = squashAtomCommandFailure(failure);
-  return error instanceof Error && error.message.trim().length > 0 ? error.message : fallback;
-}
-
 export function TailscaleSignInDialog({
-  environmentId,
   status,
   machineLabel,
   session,
+  operations,
   onClose,
 }: {
-  readonly environmentId: EnvironmentId;
   readonly status: TailnetStatus;
   readonly machineLabel: string;
   readonly session: TailscaleSignInSession;
+  readonly operations: TailnetOperations;
   readonly onClose: () => void;
 }) {
-  const signIn = useAtomCommand(serverEnvironment.tailnetSignIn, { reportFailure: false });
-  const cancelSignIn = useAtomCommand(serverEnvironment.tailnetCancelSignIn, {
-    reportFailure: false,
-  });
-  const canSignIn = useAtomValue(serverEnvironment.tailnetSignIn.permissionAtom(environmentId));
   const hostnameId = useId();
   const tagsId = useId();
   const hostnameRef = useRef<HTMLInputElement>(null);
+  const cancelRequested = useRef(false);
   const [hostname, setHostname] = useState(status.hostname ?? status.suggestedHostname);
   const [tagsInput, setTagsInput] = useState(status.tags.join(", "));
   const [stage, setStage] = useState<"form" | "waiting">(
@@ -88,38 +69,28 @@ export function TailscaleSignInDialog({
     session.mode === "sign-in" ? null : httpsUrlOrNull(session.loginUrl),
   );
   const [focusTags, setFocusTags] = useState(false);
-  const [pending, setPending] = useState<"sign-in" | "cancel" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [enrollmentStarted, setEnrollmentStarted] = useState(session.mode === "continue");
-  const reauthenticating = session.mode === "reauthenticate";
-  const trimmedHostname = hostname.trim();
-  const hostnameError = tailnetHostnameError(trimmedHostname);
-  const tags = parseTailnetTagsInput(tagsInput);
-  const canSubmit =
-    canSignIn && pending === null && hostnameError === null && tags.invalid.length === 0;
 
   useEffect(() => {
     if (stage === "waiting" && status.phase === "running") onClose();
   }, [stage, status.phase, onClose]);
 
-  const resetEnrollment = async () => {
-    const result = await cancelSignIn({ environmentId, input: {} });
-    if (result._tag === "Success" || isAtomCommandInterrupted(result)) return null;
-    return commandFailureMessage(result, "Could not cancel the sign-in.");
-  };
+  const reauthenticating = session.mode === "reauthenticate";
+  const signingIn = operations.active?.kind === "sign-in";
+  const cancelling = operations.active?.kind === "cancel-sign-in";
+  const trimmedHostname = hostname.trim();
+  const hostnameError = tailnetHostnameError(trimmedHostname);
+  const tags = parseTailnetTagsInput(tagsInput);
+  const canSubmit =
+    operations.available["sign-in"] && hostnameError === null && tags.invalid.length === 0;
 
   const submit = async () => {
     if (stage !== "form" || !canSubmit) return;
-    setPending("sign-in");
+    cancelRequested.current = false;
     setError(null);
-    // A rejected or abandoned attempt can leave the node enrolled with the old tags.
-    if (enrollmentStarted) await resetEnrollment();
-    setEnrollmentStarted(true);
-    const result = await signIn({
-      environmentId,
-      input: { hostname: trimmedHostname, tags: tags.tags },
-    });
-    setPending(null);
+    const result = await operations.signIn({ hostname: trimmedHostname, tags: tags.tags });
+    // After Cancel, this attempt's outcome is moot, including its "Sign-in was cancelled." failure.
+    if (result === null || cancelRequested.current) return;
     if (result._tag === "Success") {
       const url = httpsUrlOrNull(result.value.loginUrl);
       setLoginUrl(url);
@@ -131,12 +102,11 @@ export function TailscaleSignInDialog({
     setError(commandFailureMessage(result, "Could not start Tailscale sign-in."));
   };
 
-  const waitingError = stage === "waiting" ? (status.message ?? error) : null;
+  const nodeStopped = status.phase === "signed-out" || status.phase === "unavailable";
+  const statusError = stage === "waiting" ? (status.message ?? null) : null;
   const awaitingApproval = stage === "waiting" && status.phase === "needs-approval";
-  const stopped =
-    stage === "waiting" &&
-    waitingError === null &&
-    (status.phase === "signed-out" || status.phase === "unavailable");
+  const stopped = stage === "waiting" && statusError === null && nodeStopped;
+  const enrollmentPending = signingIn || stage === "waiting" || !nodeStopped;
   const closesWhen = reauthenticating
     ? `${machineLabel} reconnects`
     : `${machineLabel} joins your tailnet`;
@@ -147,13 +117,13 @@ export function TailscaleSignInDialog({
   const dismissLabel = stopped ? "Close" : "Cancel";
 
   const cancel = async () => {
-    if (pending === "cancel") return;
-    if (!reauthenticating && !stopped && (enrollmentStarted || stage === "waiting")) {
-      setPending("cancel");
-      const failure = await resetEnrollment();
-      setPending(null);
-      if (failure !== null) {
-        setError(failure);
+    if (cancelling) return;
+    if (!reauthenticating && !stopped && enrollmentPending) {
+      cancelRequested.current = true;
+      setError(null);
+      const result = await operations.cancelSignIn();
+      if (result?._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        setError(commandFailureMessage(result, "Could not cancel the sign-in."));
         return;
       }
     }
@@ -176,7 +146,7 @@ export function TailscaleSignInDialog({
       <DialogPopup
         className="max-w-lg"
         initialFocus={stage === "form" ? hostnameRef : undefined}
-        showCloseButton={pending !== "cancel"}
+        showCloseButton={!cancelling}
         render={
           <form
             onSubmit={(event) => {
@@ -198,13 +168,13 @@ export function TailscaleSignInDialog({
           </div>
         </DialogHeader>
         <DialogPanel>
+          {error ? (
+            <Alert variant="error" role="status">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
           {stage === "form" ? (
             <>
-              {error ? (
-                <Alert variant="error" role="status">
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              ) : null}
               <div className="space-y-2">
                 <label htmlFor={hostnameId} className="block text-sm font-medium">
                   Preferred Hostname
@@ -214,7 +184,7 @@ export function TailscaleSignInDialog({
                   id={hostnameId}
                   value={hostname}
                   onChange={(event) => setHostname(event.target.value)}
-                  disabled={pending !== null}
+                  disabled={operations.active !== null}
                   aria-invalid={hostnameError !== null}
                   autoCapitalize="none"
                   autoComplete="off"
@@ -234,7 +204,7 @@ export function TailscaleSignInDialog({
                   value={tagsInput}
                   onChange={(event) => setTagsInput(event.target.value)}
                   placeholder="tag:name"
-                  disabled={pending !== null}
+                  disabled={operations.active !== null}
                   aria-invalid={tags.invalid.length > 0}
                   autoFocus={focusTags}
                   autoCapitalize="none"
@@ -250,9 +220,9 @@ export function TailscaleSignInDialog({
             </>
           ) : (
             <>
-              {waitingError ? (
+              {statusError ? (
                 <Alert variant="error" role="status">
-                  <AlertDescription>{waitingError}</AlertDescription>
+                  <AlertDescription>{statusError}</AlertDescription>
                   {reauthenticating ? null : (
                     <AlertAction>
                       <Button size="xs" variant="outline" onClick={editTags}>
@@ -302,12 +272,12 @@ export function TailscaleSignInDialog({
           )}
         </DialogPanel>
         <DialogFooter variant="bare">
-          <Button variant="outline" disabled={pending === "cancel"} onClick={() => void cancel()}>
-            {pending === "cancel" ? "Cancelling…" : dismissLabel}
+          <Button variant="outline" disabled={cancelling} onClick={() => void cancel()}>
+            {cancelling ? "Cancelling…" : dismissLabel}
           </Button>
           {stage === "form" ? (
             <Button type="submit" disabled={!canSubmit}>
-              {pending === "sign-in" ? "Starting…" : "Sign In"}
+              {signingIn ? "Starting…" : "Sign In"}
             </Button>
           ) : null}
         </DialogFooter>

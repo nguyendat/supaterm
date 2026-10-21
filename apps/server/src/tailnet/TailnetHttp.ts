@@ -16,6 +16,9 @@ export const layer = HttpApiBuilder.group(
       .handle("signIn", ({ payload }) =>
         requireEnvironmentScope(AuthAccessWriteScope).pipe(Effect.andThen(tailnet.signIn(payload))),
       )
+      .handle("reauthenticate", () =>
+        requireEnvironmentScope(AuthAccessWriteScope).pipe(Effect.andThen(tailnet.reauthenticate)),
+      )
       .handle("signOut", () =>
         requireEnvironmentScope(AuthAccessWriteScope).pipe(Effect.andThen(tailnet.signOut)),
       );

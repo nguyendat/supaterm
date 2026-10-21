@@ -9,6 +9,7 @@ import {
   AuthStandardClientScopes,
   ORCHESTRATION_PROTOCOL_VERSION,
   RelayPreparationError,
+  type TailnetStatus,
 } from "@supaterm/contracts";
 import * as NetService from "@supaterm/shared/Net";
 import * as HostProcess from "@supaterm/shared/HostProcess";
@@ -134,10 +135,17 @@ const withDescriptorServer = <A, E, R>(
   run: (origin: string) => Effect.Effect<A, E, R>,
   relay?: { readonly relayEndpoint: string; readonly relayUrl: string } | RelayPreparationError,
   host = "127.0.0.1",
+  tailnet?: TailnetStatus,
 ) =>
   Effect.acquireUseRelease(
     Effect.callback<NodeHttp.Server>((resume) => {
       const server = NodeHttp.createServer((request, response) => {
+        if (request.url === "/api/tailnet/status" && tailnet) {
+          expect(request.headers.authorization).toMatch(/^Bearer /);
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify(tailnet));
+          return;
+        }
         if (request.url === "/api/relay/prepare" && relay) {
           expect(request.headers.authorization).toMatch(/^Bearer /);
           response.writeHead(isRelayPreparationError(relay) ? 503 : 200, {
@@ -562,6 +570,88 @@ describe("supaterm pair", () => {
         assert.deepEqual(tailscaleCalls, [["status", "--json"]]);
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
+  );
+});
+
+const builtInTailnet = (overrides: Partial<TailnetStatus>): TailnetStatus => ({
+  phase: "running",
+  suggestedHostname: "pair-test-supaterm",
+  tags: [],
+  serveEnabled: true,
+  requireOwner: true,
+  loggingAllowed: false,
+  loggingRequired: false,
+  https: "pending",
+  ...overrides,
+});
+
+const systemTailscaleMustNotRun = ChildProcessSpawner.make(() =>
+  Effect.die("System Tailscale must not run while the built-in node is enrolled"),
+);
+
+const persistPairState = (origin: string) =>
+  Effect.gen(function* () {
+    const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "supaterm-pair-tn-test-"));
+    yield* persistServerRuntimeState({
+      path: NodePath.join(baseDir, "userdata", "server-runtime.json"),
+      state: yield* makePersistedServerRuntimeState({
+        config: { host: "127.0.0.1", devUrl: undefined },
+        port: Number(new URL(origin).port),
+      }),
+    });
+    return baseDir;
+  });
+
+describe("supaterm pair --tailscale with the built-in node", () => {
+  it.effect("pairs over the tailnet HTTP address while HTTPS is not ready", () =>
+    withDescriptorServer(
+      (origin) =>
+        Effect.gen(function* () {
+          const baseDir = yield* persistPairState(origin);
+          const output = yield* captureStdout(
+            runCli(["pair", "--base-dir", baseDir, "--tailscale"]).pipe(
+              Effect.provideService(
+                ChildProcessSpawner.ChildProcessSpawner,
+                systemTailscaleMustNotRun,
+              ),
+            ),
+          );
+
+          assert.include(output, "Pairing URL: http://100.64.0.1/pair#token=");
+          assert.include(output, "HTTPS over Tailscale isn't ready (rate limited)");
+        }),
+      undefined,
+      "127.0.0.1",
+      builtInTailnet({ httpUrl: "http://100.64.0.1/", httpsMessage: "rate limited" }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect.each([
+    { phase: "running", serveEnabled: false, expected: "signed in but not serving" },
+    { phase: "needs-reauth", serveEnabled: true, expected: "not running (needs-reauth)" },
+  ] as const)(
+    "fails instead of falling back to System Serve when $phase and serve is $serveEnabled",
+    ({ phase, serveEnabled, expected }) =>
+      withDescriptorServer(
+        (origin) =>
+          Effect.gen(function* () {
+            const baseDir = yield* persistPairState(origin);
+            const error = yield* provideCliTestLayers(
+              runCli(["pair", "--base-dir", baseDir, "--tailscale"]).pipe(
+                Effect.provideService(
+                  ChildProcessSpawner.ChildProcessSpawner,
+                  systemTailscaleMustNotRun,
+                ),
+                Effect.flip,
+              ),
+            );
+
+            assert.include(String(error), expected);
+          }),
+        undefined,
+        "127.0.0.1",
+        builtInTailnet({ phase, serveEnabled, httpUrl: "http://100.64.0.1/" }),
+      ).pipe(Effect.provide(NodeServices.layer)),
   );
 });
 

@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as Struct from "effect/Struct";
 import * as Ndjson from "effect/encoding/Ndjson";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
@@ -44,54 +45,59 @@ const INHERITED_ENVIRONMENT = [
   "SSL_CERT_DIR",
 ] as const;
 
-// Go encodes nil slices and pointers as null.
-const lenient = <S extends Schema.Top>(schema: S) => Schema.optionalKey(Schema.NullOr(schema));
+const BackendState = Schema.Literals([
+  "NoState",
+  "NeedsLogin",
+  "NeedsMachineAuth",
+  "Stopped",
+  "Starting",
+  "Running",
+]);
+const isBackendState = Schema.is(BackendState);
 
-const TailnetSidecarSelf = Schema.Struct({
-  dnsName: lenient(Schema.String),
-  ipv4: lenient(Schema.String),
-  ipv6: lenient(Schema.String),
-  userId: lenient(Schema.String),
-  loginName: lenient(Schema.String),
-  displayName: lenient(Schema.String),
-  tagged: Schema.Boolean,
-  tags: lenient(Schema.Array(Schema.String)),
-  keyExpiry: lenient(Schema.String),
-});
-
-const TailnetSidecarStatus = Schema.Struct({
+/** Mirrors `statusMsg` in `native/tailnet/protocol.go`; `omitempty` fields are optional keys. */
+const TailnetSidecarWireStatus = Schema.Struct({
   v: Schema.Literal(PROTOCOL_VERSION),
   type: Schema.Literal("status"),
   backendState: Schema.String,
-  authUrl: lenient(Schema.String),
-  errMessage: lenient(Schema.String),
-  self: lenient(TailnetSidecarSelf),
-  https: lenient(TailnetHttpsState),
-  httpsMessage: lenient(Schema.String),
-  listening: lenient(
+  authUrl: Schema.optionalKey(Schema.String),
+  errMessage: Schema.optionalKey(Schema.String),
+  self: Schema.optionalKey(
     Schema.Struct({
-      https: lenient(Schema.String),
-      http: lenient(Schema.String),
+      dnsName: Schema.String,
+      ipv4: Schema.optionalKey(Schema.String),
+      ipv6: Schema.optionalKey(Schema.String),
+      userId: Schema.String,
+      loginName: Schema.String,
+      displayName: Schema.String,
+      tagged: Schema.Boolean,
+      tags: Schema.Array(Schema.String),
+      keyExpiry: Schema.optionalKey(Schema.String),
     }),
   ),
-  loggingRequired: lenient(Schema.Boolean),
-  health: lenient(Schema.Array(Schema.String)),
+  https: TailnetHttpsState,
+  httpsMessage: Schema.optionalKey(Schema.String),
+  listening: Schema.Struct({
+    https: Schema.optionalKey(Schema.String),
+    http: Schema.optionalKey(Schema.String),
+  }),
+  loggingRequired: Schema.Boolean,
+  health: Schema.Array(Schema.String),
 });
-export type TailnetSidecarStatus = typeof TailnetSidecarStatus.Type;
 
-const TailnetSidecarEvent = Schema.Union([
+const TailnetSidecarWireEvent = Schema.Union([
   Schema.Struct({
     v: Schema.Literal(PROTOCOL_VERSION),
     type: Schema.Literal("hello"),
     version: Schema.String,
     tailscaleVersion: Schema.String,
   }),
-  TailnetSidecarStatus,
+  TailnetSidecarWireStatus,
   Schema.Struct({
     v: Schema.Literal(PROTOCOL_VERSION),
     type: Schema.Literal("loggedOut"),
     confirmed: Schema.Boolean,
-    message: lenient(Schema.String),
+    message: Schema.optionalKey(Schema.String),
   }),
   Schema.Struct({
     v: Schema.Literal(PROTOCOL_VERSION),
@@ -101,12 +107,36 @@ const TailnetSidecarEvent = Schema.Union([
     fatal: Schema.Boolean,
   }),
 ]);
-export type TailnetSidecarEvent = typeof TailnetSidecarEvent.Type;
+
+// Go writes the profile fields even when empty, and a state from a newer helper reads as
+// starting instead of failing the whole event stream.
+const normalizeStatus = ({
+  self,
+  backendState,
+  ...status
+}: typeof TailnetSidecarWireStatus.Type) => ({
+  ...status,
+  backendState: isBackendState(backendState) ? backendState : ("Starting" as const),
+  ...(self === undefined
+    ? {}
+    : {
+        self: {
+          ...Struct.omit(self, ["dnsName", "loginName", "displayName"]),
+          ...(self.dnsName === "" ? {} : { dnsName: self.dnsName }),
+          ...(self.loginName === "" ? {} : { loginName: self.loginName }),
+          ...(self.displayName === "" ? {} : { displayName: self.displayName }),
+        },
+      }),
+});
+export type TailnetSidecarStatus = ReturnType<typeof normalizeStatus>;
+export type TailnetSidecarEvent =
+  | Exclude<typeof TailnetSidecarWireEvent.Type, { readonly type: "status" }>
+  | TailnetSidecarStatus;
 
 const KNOWN_EVENT_TYPES: ReadonlySet<string> = new Set(["hello", "status", "loggedOut", "error"]);
 const EventEnvelope = Schema.Struct({ v: Schema.Number, type: Schema.String });
 const decodeEnvelope = Schema.decodeUnknownEffect(EventEnvelope);
-const decodeEvent = Schema.decodeUnknownEffect(TailnetSidecarEvent);
+const decodeEvent = Schema.decodeUnknownEffect(TailnetSidecarWireEvent);
 const encodeCommand = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 export type TailnetSidecarCommand =
@@ -170,7 +200,7 @@ const redactLine = (line: string) =>
     .replace(/tskey-\S+/gu, "[auth key]");
 
 // Per-line work for a long-lived stream; the spawn span already covers the process.
-const decodeLine = Effect.fnUntraced(function* (value: unknown) {
+const decodeLine = Effect.fnUntraced(function* (value: unknown, unknownStates: Set<string>) {
   const envelope = yield* decodeEnvelope(value).pipe(
     Effect.mapError((cause) => new TailnetSidecarError({ stage: "read", cause })),
   );
@@ -178,9 +208,17 @@ const decodeLine = Effect.fnUntraced(function* (value: unknown) {
     return yield* new TailnetSidecarError({ stage: "protocol", cause: envelope.v });
   }
   if (!KNOWN_EVENT_TYPES.has(envelope.type)) return undefined;
-  return yield* decodeEvent(value).pipe(
+  const event = yield* decodeEvent(value).pipe(
     Effect.mapError((cause) => new TailnetSidecarError({ stage: "read", cause })),
   );
+  if (event.type !== "status") return event;
+  if (!isBackendState(event.backendState) && !unknownStates.has(event.backendState)) {
+    unknownStates.add(event.backendState);
+    yield* Effect.logWarning("Built-in Tailscale reported an unknown backend state", {
+      backendState: event.backendState.slice(0, 64),
+    });
+  }
+  return normalizeStatus(event);
 });
 
 const make = Effect.gen(function* () {
@@ -240,10 +278,11 @@ const make = Effect.gen(function* () {
       ),
     );
 
+    const unknownStates = new Set<string>();
     const events = handle.stdout.pipe(
       Stream.pipeThroughChannel(Ndjson.decode({ ignoreEmptyLines: true })),
       Stream.mapError((cause) => new TailnetSidecarError({ stage: "read", cause })),
-      Stream.mapEffect(decodeLine),
+      Stream.mapEffect((value) => decodeLine(value, unknownStates)),
       Stream.filter((event): event is TailnetSidecarEvent => event !== undefined),
     );
 

@@ -2,7 +2,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { TailnetPhase, TailnetStatus } from "@supaterm/contracts";
 import * as HostProcess from "@supaterm/shared/HostProcess";
 import { describe, expect, it } from "@effect/vitest";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -43,9 +45,11 @@ const owner: TailnetIngress.TailnetConnection = {
   self: { userId: "123456789012345678", tagged: false },
 };
 
-const makeHarness = (mode: "default" | "silent" | "crash") => {
+const makeHarness = (mode: "default" | "pending" | "crash-once" | "unknown-state") => {
   const revocations: Array<boolean> = [];
+  const ownerRequests: Array<Fiber.Fiber<unknown, unknown>> = [];
   const layer = TailnetNode.layer.pipe(
+    Layer.provide(Layer.succeed(TailnetNode.TailnetRestartDelay, Duration.zero)),
     Layer.provide(TailnetSidecar.layer),
     Layer.provide(
       Layer.succeed(TailnetBinary.TailnetBinary, {
@@ -56,10 +60,14 @@ const makeHarness = (mode: "default" | "silent" | "crash") => {
       Layer.succeed(TailnetIngress.TailnetIngress, {
         listen: () => Effect.succeed("fake-ingress"),
         revoke: (allow) =>
-          Effect.sync(() => {
-            revocations.push(allow(owner));
-            return 0;
-          }),
+          Effect.suspend(() => {
+            const allowed = allow(owner);
+            revocations.push(allowed);
+            // Revoking the owner's socket ends every request that arrived over it.
+            return allowed
+              ? Effect.void
+              : Effect.forEach(ownerRequests.splice(0), Fiber.interrupt, { discard: true });
+          }).pipe(Effect.as(0)),
       }),
     ),
     Layer.provide(
@@ -74,7 +82,7 @@ const makeHarness = (mode: "default" | "silent" | "crash") => {
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "supaterm-tailnet-" })),
     Layer.provideMerge(NodeServices.layer),
   );
-  return { layer, revocations };
+  return { layer, revocations, ownerRequests };
 };
 
 const awaitPhase = (node: TailnetNode.TailnetNode["Service"], phase: TailnetPhase) =>
@@ -131,6 +139,22 @@ describe("TailnetNode", () => {
       expect(launch.environment).not.toContain("SUPATERM_HOME");
       expect(launch.secretLength).toBe(64);
       expect(launch.authKey).toBeNull();
+    }).pipe(Effect.provide(harness.layer), Effect.scoped);
+  });
+
+  it.live("reads a backend state it does not know as starting", () => {
+    const harness = makeHarness("unknown-state");
+    return Effect.gen(function* () {
+      const node = yield* TailnetNode.TailnetNode;
+      const phases = yield* node.status.pipe(
+        Stream.map((status) => status.phase),
+        Stream.takeUntil((phase) => phase === "needs-login"),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      const result = yield* node.signIn({ hostname: "khoi-laptop", tags: [] });
+      expect(result.loginUrl).toBe("https://login.tailscale.com/a/fake1");
+      expect(yield* Fiber.join(phases)).toEqual(["signed-out", "starting", "needs-login"]);
     }).pipe(Effect.provide(harness.layer), Effect.scoped);
   });
 
@@ -220,29 +244,143 @@ describe("TailnetNode", () => {
     }).pipe(Effect.provide(harness.layer), Effect.scoped);
   });
 
+  it.live("finishes signing out after revoking the socket its request arrived on", () => {
+    const harness = makeHarness("default");
+    return Effect.gen(function* () {
+      const node = yield* TailnetNode.TailnetNode;
+      const fileSystem = yield* FileSystem.FileSystem;
+      yield* node.signIn({ hostname: "khoi-laptop", tags: [], authKey: "tskey-auth-fake" });
+      yield* awaitPhase(node, "running");
+
+      const request = yield* node.signOut.pipe(Effect.forkScoped);
+      harness.ownerRequests.push(request);
+      expect(Exit.hasInterrupts(yield* Fiber.await(request))).toBe(true);
+      // Queues behind the sign-out, which still holds the lock.
+      yield* node.start;
+      expect(yield* fileSystem.exists(yield* nodeDirectory)).toBe(false);
+      expect((yield* node.currentStatus).phase).toBe("signed-out");
+    }).pipe(Effect.provide(harness.layer), Effect.scoped);
+  });
+
+  it.live("cancels a sign-in that is still waiting for its login URL", () => {
+    const harness = makeHarness("pending");
+    return Effect.gen(function* () {
+      const node = yield* TailnetNode.TailnetNode;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const signIn = yield* node
+        .signIn({ hostname: "khoi-laptop", tags: [] })
+        .pipe(Effect.flip, Effect.forkScoped);
+      yield* awaitPhase(node, "needs-login");
+
+      yield* node.cancelSignIn;
+      expect(yield* Fiber.join(signIn)).toMatchObject({
+        reason: "rejected",
+        detail: "Sign-in was cancelled.",
+      });
+      expect((yield* node.currentStatus).phase).toBe("signed-out");
+      expect(yield* fileSystem.exists(yield* nodeDirectory)).toBe(false);
+    }).pipe(Effect.provide(harness.layer), Effect.scoped);
+  });
+
+  it.live("replaces an unfinished sign-in with a fresh node for the new hostname and tags", () => {
+    const harness = makeHarness("default");
+    return Effect.gen(function* () {
+      const node = yield* TailnetNode.TailnetNode;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      yield* node.signIn({ hostname: "khoi-first", tags: ["tag:old"] });
+      const leftover = path.join(yield* nodeDirectory, "leftover");
+      yield* fileSystem.writeFileString(leftover, "");
+
+      const result = yield* node.signIn({ hostname: "khoi-second", tags: [] });
+      expect(result.loginUrl).toBe("https://login.tailscale.com/a/fake1");
+      expect(yield* fileSystem.exists(leftover)).toBe(false);
+      expect(yield* readJson(Launch, path.join(yield* nodeDirectory, "launch.json"))).toMatchObject(
+        { hostname: "khoi-second", tags: [] },
+      );
+      expect(yield* node.currentStatus).toMatchObject({
+        phase: "needs-login",
+        hostname: "khoi-second",
+        tags: [],
+        requireOwner: true,
+      });
+    }).pipe(Effect.provide(harness.layer), Effect.scoped);
+  });
+
   it.live("reports busy while another change is in flight", () => {
-    const harness = makeHarness("silent");
+    const harness = makeHarness("pending");
     return Effect.gen(function* () {
       const node = yield* TailnetNode.TailnetNode;
       const signIn = yield* node
         .signIn({ hostname: "khoi-laptop", tags: [] })
-        .pipe(Effect.forkScoped);
-      yield* awaitPhase(node, "starting");
+        .pipe(Effect.flip, Effect.forkScoped);
+      yield* awaitPhase(node, "needs-login");
+
+      yield* node.signOut.pipe(Effect.forkScoped);
+      yield* awaitPhase(node, "signed-out");
       expect(yield* node.configure({ requireOwner: false }).pipe(Effect.flip)).toMatchObject({
         reason: "busy",
       });
-      yield* Fiber.interrupt(signIn);
+      expect(yield* Fiber.join(signIn)).toMatchObject({ detail: "Sign-in was cancelled." });
     }).pipe(Effect.provide(harness.layer), Effect.scoped);
   });
 
-  it.live("withdraws endpoints and restarts when the helper crashes", () => {
-    const harness = makeHarness("crash");
+  it.live("restarts a crashed helper from its saved sign-in and restores its endpoints", () => {
+    const harness = makeHarness("crash-once");
     return Effect.gen(function* () {
       const node = yield* TailnetNode.TailnetNode;
+      const path = yield* Path.Path;
+      const recovery = yield* node.status.pipe(
+        Stream.dropWhile((status) => status.phase !== "restarting"),
+        Stream.takeUntil((status) => status.phase === "running"),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
       yield* node.signIn({ hostname: "khoi-laptop", tags: [], authKey: "tskey-auth-fake" });
-      const restarting = yield* awaitPhase(node, "restarting");
-      expect(restarting.httpsUrl).toBeUndefined();
+
+      const [restarting, ...rest] = yield* Fiber.join(recovery);
+      expect(restarting).toMatchObject({ phase: "restarting" });
+      expect(restarting).not.toHaveProperty("httpsUrl");
       expect(harness.revocations).toContain(false);
+      expect(rest.at(-1)).toMatchObject({ phase: "running" });
+      expect(yield* node.exposure).toEqual({
+        serving: true,
+        endpoints: [
+          { kind: "tailnet", httpBaseUrl: "https://fake.tailnet.ts.net/" },
+          { kind: "tailnet", httpBaseUrl: "http://100.64.0.1/" },
+        ],
+      });
+      const launch = yield* readJson(Launch, path.join(yield* nodeDirectory, "launch.json"));
+      expect(launch.authKey).toBeNull();
+    }).pipe(Effect.provide(harness.layer), Effect.scoped);
+  });
+
+  it.live("resends an unchanged hostname and shows the rename error until the next rename", () => {
+    const harness = makeHarness("default");
+    return Effect.gen(function* () {
+      const node = yield* TailnetNode.TailnetNode;
+      const awaitMessage = (text: string) =>
+        node.status.pipe(
+          Stream.filter((status) => status.message?.includes(text) === true),
+          Stream.runHead,
+          Effect.map(Option.getOrThrow),
+        );
+      yield* node.signIn({ hostname: "khoi-laptop", tags: [], authKey: "tskey-auth-fake" });
+      yield* awaitPhase(node, "running");
+
+      yield* node.configure({ hostname: "taken-name" });
+      expect((yield* awaitMessage("rename 1")).message).toBe(
+        "Could not rename this machine on Tailscale: taken-name is in use (rename 1)",
+      );
+      yield* node.configure({ hostname: "taken-name" });
+      yield* awaitMessage("rename 2");
+
+      yield* node.configure({ hostname: "khoi-renamed" });
+      expect(yield* node.currentStatus).toMatchObject({
+        phase: "running",
+        hostname: "khoi-renamed",
+      });
+      expect((yield* node.currentStatus).message).toBeUndefined();
     }).pipe(Effect.provide(harness.layer), Effect.scoped);
   });
 });

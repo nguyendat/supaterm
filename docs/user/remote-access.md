@@ -223,8 +223,10 @@ supaterm tailscale logout
 ```
 
 `login` prints the sign-in link and a QR code. Use `--auth-key-file <path>` to
-sign in with a Tailscale auth key instead. Then run `supaterm pair --tailscale` to
-create a pairing link that uses the tailnet address.
+sign in with a Tailscale auth key instead. When the host's Tailscale login has
+expired, `login` signs it back in with its saved hostname and tags. Then run
+`supaterm pair --tailscale` to create a pairing link that uses the tailnet
+address, or the plain HTTP address until HTTPS is ready.
 
 Signing out removes Supaterm's Tailscale keys from the host. If Tailscale can't
 be reached at that moment, remove the device from your Tailscale admin console.
@@ -234,7 +236,7 @@ be reached at that moment, remove the device from your Tailscale admin console.
 Servers started with `supaterm serve --tailscale-serve`, or set up earlier through
 the Tailscale app, keep working. When this is on, **Settings → Connections**
 shows **System Tailscale Serve** with **Turn off**, which removes only Supaterm's
-mapping. When the built-in node is not signed in, `supaterm pair --tailscale`
+mapping. When the built-in node is signed out, `supaterm pair --tailscale`
 still sets up Tailscale Serve through the system Tailscale app.
 
 ### Hosted web app

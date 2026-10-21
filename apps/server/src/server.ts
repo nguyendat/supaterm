@@ -113,6 +113,7 @@ import * as HeapSnapshot from "./observability/HeapSnapshot.ts";
 import * as EventLoopMonitor from "./observability/EventLoopMonitor.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as DirectEndpoints from "./environment/DirectEndpoints.ts";
+import * as EnvironmentReachability from "./environment/EnvironmentReachability.ts";
 import * as RelayAccess from "./relay/RelayAccess.ts";
 import * as RelayHttp from "./relay/RelayHttp.ts";
 import * as RelayIdentity from "./relay/RelayIdentity.ts";
@@ -263,6 +264,7 @@ const layerHttpServer = Layer.unwrap(
     const server = guardHttpResponseWriteErrors(
       TailnetIngress.installTailnetForwardedHeaders(NodeHttp.createServer()),
     );
+    const devServer = config.devUrl?.protocol === "http:" ? config.devUrl : undefined;
     return NodeHttpServer.layer(() => rejectRequestsUntilServing(server), {
       host: config.host ?? "127.0.0.1",
       port: config.port,
@@ -280,9 +282,13 @@ const layerHttpServer = Layer.unwrap(
               server.emit("connection", new TunnelSocket(stream));
             },
           }),
-          TailnetIngress.layer((socket) => {
-            server.emit("connection", socket);
-          }),
+          TailnetIngress.layer(
+            devServer === undefined
+              ? (socket) => {
+                  server.emit("connection", socket);
+                }
+              : TailnetIngress.forwardToDevServer(devServer),
+          ),
         ),
       ),
     );
@@ -469,6 +475,14 @@ const layerAuth = EnvironmentAuth.layer.pipe(
   Layer.provide(layerTailnetExposure),
 );
 
+const layerDirectEndpoints = DirectEndpoints.layer.pipe(Layer.provide(layerTailnetExposure));
+
+const layerReachability = EnvironmentReachability.layer.pipe(
+  Layer.provide(layerDirectEndpoints),
+  Layer.provide(layerAuth),
+  Layer.provide(layerTailnetExposure),
+);
+
 const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
   Layer.provide(ProviderEventIngestor.layerAnalytics),
   Layer.provide(layerCheckpointStore),
@@ -645,7 +659,8 @@ const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
   Layer.provideMerge(AnalyticsService.layer),
   Layer.provideMerge(ExternalLauncher.layer),
   Layer.provideMerge(RemoteOpenTargets.layer),
-  Layer.provideMerge(DirectEndpoints.layer.pipe(Layer.provide(layerTailnetExposure))),
+  Layer.provideMerge(layerReachability),
+  Layer.provideMerge(layerDirectEndpoints),
   Layer.provideMerge(layerTailnetNode),
   Layer.provideMerge(ServerLifecycleEvents.layer),
   Layer.provide(NetService.layer),

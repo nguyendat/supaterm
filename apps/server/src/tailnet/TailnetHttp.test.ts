@@ -29,19 +29,24 @@ const status: TailnetStatus = {
   https: "pending",
 };
 
+const LOGIN_URL = "https://login.tailscale.com/a/reauth";
+
 const makeClient = HttpApiTest.groups(EnvironmentHttpApi, ["tailnet"]);
 
 const run = <A, E>(
   scopes: ReadonlyArray<AuthEnvironmentScope>,
   call: (client: Effect.Success<typeof makeClient>) => Effect.Effect<A, E>,
 ) => {
-  const signIns: Array<string> = [];
+  const calls: Array<string> = [];
   const node = Layer.mock(TailnetNode.TailnetNode)({
     currentStatus: Effect.succeed(status),
     signIn: (input) =>
-      Effect.sync(() => signIns.push(input.hostname)).pipe(
+      Effect.sync(() => calls.push(`signIn ${input.hostname}`)).pipe(
         Effect.andThen(Effect.fail(new TailnetError({ reason: "busy" }))),
       ),
+    reauthenticate: Effect.sync(() => calls.push("reauthenticate")).pipe(
+      Effect.as({ loginUrl: LOGIN_URL }),
+    ),
   });
   const auth = Layer.succeed(EnvironmentAuthenticatedAuth, (next) =>
     Effect.provideService(next, EnvironmentAuthenticatedPrincipal, {
@@ -54,7 +59,7 @@ const run = <A, E>(
   return makeClient.pipe(
     Effect.flatMap(call),
     Effect.result,
-    Effect.map((result) => ({ result, signIns })),
+    Effect.map((result) => ({ result, calls })),
     Effect.provide(
       Layer.mergeAll(
         TailnetHttp.layer.pipe(Layer.provide(node), Layer.provideMerge(auth)),
@@ -91,7 +96,7 @@ it.effect("signs in only with access:write and passes Tailscale failures through
       _tag: "Failure",
       failure: { _tag: "EnvironmentScopeRequiredError", requiredScope: AuthAccessWriteScope },
     });
-    expect(denied.signIns).toEqual([]);
+    expect(denied.calls).toEqual([]);
 
     const allowed = yield* run([AuthAccessWriteScope], (client) =>
       client.tailnet.signIn({ headers: {}, payload }),
@@ -100,6 +105,25 @@ it.effect("signs in only with access:write and passes Tailscale failures through
       _tag: "Failure",
       failure: { _tag: "TailnetError", reason: "busy" },
     });
-    expect(allowed.signIns).toEqual(["khoi-laptop"]);
+    expect(allowed.calls).toEqual(["signIn khoi-laptop"]);
+  }),
+);
+
+it.effect("reauthenticates only with access:write and returns the login link", () =>
+  Effect.gen(function* () {
+    const denied = yield* run([AuthAccessReadScope], (client) =>
+      client.tailnet.reauthenticate({ headers: {} }),
+    );
+    expect(denied.result).toMatchObject({
+      _tag: "Failure",
+      failure: { _tag: "EnvironmentScopeRequiredError", requiredScope: AuthAccessWriteScope },
+    });
+    expect(denied.calls).toEqual([]);
+
+    const allowed = yield* run([AuthAccessWriteScope], (client) =>
+      client.tailnet.reauthenticate({ headers: {} }),
+    );
+    expect(allowed.result).toMatchObject({ _tag: "Success", success: { loginUrl: LOGIN_URL } });
+    expect(allowed.calls).toEqual(["reauthenticate"]);
   }),
 );

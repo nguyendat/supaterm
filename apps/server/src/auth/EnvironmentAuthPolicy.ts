@@ -5,13 +5,14 @@ import * as Layer from "effect/Layer";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
-import { TailnetExposure } from "../tailnet/TailnetExposure.ts";
+import { TailnetExposure, type TailnetExposureState } from "../tailnet/TailnetExposure.ts";
 import { isRemoteReachableHost, resolveSessionCookieName } from "./utils.ts";
 
 export class EnvironmentAuthPolicy extends Context.Service<
   EnvironmentAuthPolicy,
   {
     readonly getDescriptor: () => Effect.Effect<ServerAuthDescriptor>;
+    readonly descriptorFor: (exposure: TailnetExposureState) => ServerAuthDescriptor;
   }
 >()("supaterm/auth/EnvironmentAuthPolicy") {}
 
@@ -47,12 +48,14 @@ export const make = Effect.gen(function* () {
     sessionCookieName,
   };
 
+  const descriptorFor = (exposure: TailnetExposureState) =>
+    reachableByConfig || exposure.serving ? remote : local;
+
   return EnvironmentAuthPolicy.of({
     getDescriptor: Effect.fn("EnvironmentAuthPolicy.getDescriptor")(() =>
-      reachableByConfig
-        ? Effect.succeed(remote)
-        : tailnet.current.pipe(Effect.map((exposure) => (exposure.serving ? remote : local))),
+      tailnet.current.pipe(Effect.map(descriptorFor)),
     ),
+    descriptorFor,
   });
 });
 

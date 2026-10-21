@@ -189,6 +189,31 @@ const awaitSignedIn = (connection: Connection) =>
       ),
   );
 
+const withLoginSession = <A, E, R>(
+  connection: Connection,
+  use: (headers: { readonly authorization: string }) => Effect.Effect<A, E, R>,
+) =>
+  withLiveServerSession(
+    connection.config,
+    { scopes: [AuthAccessWriteScope], ttl: COMMAND_SESSION_TTL, label: "supaterm tailscale login" },
+    use,
+  );
+
+const announceLogin = (heading: string, loginUrl: string | null) =>
+  loginUrl === null
+    ? Effect.void
+    : Console.log(
+        [
+          heading,
+          "Open this link on any device to sign in:",
+          "",
+          renderTerminalQrCode(loginUrl),
+          "",
+          loginUrl,
+          "",
+        ].join("\n"),
+      );
+
 const describeTarget = (target: DiscoveredPairTarget) =>
   `${target.descriptor.label} (${target.state.origin})`;
 
@@ -213,7 +238,9 @@ const loginCommand = Command.make("login", {
     Flag.optional,
   ),
 }).pipe(
-  Command.withDescription("Sign the running server's built-in Tailscale node in to a tailnet."),
+  Command.withDescription(
+    "Sign the running server's built-in Tailscale node in to a tailnet, or back in when its login expired.",
+  ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
       const tags = [...new Set(flags.tags.map((tag) => tag.trim()))];
@@ -226,20 +253,24 @@ const loginCommand = Command.make("login", {
 
       const connection = yield* connect(flags.baseDir);
       const current = yield* readStatus(connection);
-      const hostname = Option.getOrElse(
-        Option.map(flags.hostname, (value) => value.trim().toLowerCase()),
-        () => current.hostname ?? current.suggestedHostname,
-      );
-      if (!isTailnetHostname(hostname)) return yield* new TailnetHostnameInvalidError({ hostname });
+      const target = describeTarget(connection.target);
+      if (current.phase === "running") {
+        return yield* Console.log(
+          [`${target} is already signed in to Tailscale.`, formatTailnetStatus(current)].join("\n"),
+        );
+      }
 
-      const { loginUrl } = yield* withLiveServerSession(
-        connection.config,
-        {
-          scopes: [AuthAccessWriteScope],
-          ttl: COMMAND_SESSION_TTL,
-          label: "supaterm tailscale login",
-        },
-        (headers) =>
+      if (current.phase === "starting") {
+        yield* Console.log(`Tailscale is starting on ${target}…`);
+      } else if (current.phase === "signed-out" || current.phase === "unavailable") {
+        const hostname = Option.getOrElse(
+          Option.map(flags.hostname, (value) => value.trim().toLowerCase()),
+          () => current.hostname ?? current.suggestedHostname,
+        );
+        if (!isTailnetHostname(hostname)) {
+          return yield* new TailnetHostnameInvalidError({ hostname });
+        }
+        const { loginUrl } = yield* withLoginSession(connection, (headers) =>
           connection.client.tailnet.signIn({
             headers,
             payload: {
@@ -248,19 +279,18 @@ const loginCommand = Command.make("login", {
               ...(Option.isSome(authKey) ? { authKey: authKey.value } : {}),
             },
           }),
-      );
-      if (loginUrl !== null) {
-        yield* Console.log(
-          [
-            `Signing ${describeTarget(connection.target)} in to Tailscale as ${hostname}.`,
-            "Open this link on any device to sign in:",
-            "",
-            renderTerminalQrCode(loginUrl),
-            "",
-            loginUrl,
-            "",
-          ].join("\n"),
         );
+        yield* announceLogin(`Signing ${target} in to Tailscale as ${hostname}.`, loginUrl);
+      } else {
+        if (Option.isSome(flags.hostname) || tags.length > 0 || Option.isSome(authKey)) {
+          yield* Console.log(
+            "Note: this server is already enrolled, so --hostname, --tag, and --auth-key-file are ignored. To change them, run `supaterm tailscale logout` first.",
+          );
+        }
+        const { loginUrl } = yield* withLoginSession(connection, (headers) =>
+          connection.client.tailnet.reauthenticate({ headers }),
+        );
+        yield* announceLogin(`Signing ${target} back in to Tailscale.`, loginUrl);
       }
       const status = yield* awaitSignedIn(connection);
       yield* Console.log(formatTailnetStatus(status));
