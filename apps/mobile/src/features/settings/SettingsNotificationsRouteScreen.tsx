@@ -95,7 +95,7 @@ export function SettingsNotificationsRouteScreen() {
 
   const retry = () =>
     run(async () =>
-      registrar?.sync({
+      registrar?.retry({
         saved: new Set(environments.map((environment) => environment.environmentId)),
         connected: new Set(
           environments

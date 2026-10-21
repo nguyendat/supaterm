@@ -174,6 +174,12 @@ class InstallationLostError extends Error {}
 
 const CHALLENGE_MIN_WAIT_MS = 60_000;
 const CHALLENGE_MAX_WAIT_MS = 10 * 60_000;
+/**
+ * Every challenge is a visible alert and the gateway allows a handful per token an hour,
+ * so the reconnects, token callbacks, and app-state changes that each sync must not
+ * each enroll again after a failure. Only the user's retry skips the wait.
+ */
+const ENROLL_RETRY_MS = 60_000;
 
 export interface PushRegistrarDeps {
   readonly native: PushNative;
@@ -203,6 +209,8 @@ export interface PushEnvironments {
 export interface PushRegistrar {
   /** Converges gateway, host, and Keychain state with the settings. Safe to call on every reconnect. */
   readonly sync: (environments: PushEnvironments) => Promise<void>;
+  /** Like sync, but enrolls again at once instead of waiting out a recent enrollment failure. */
+  readonly retry: (environments: PushEnvironments) => Promise<void>;
   readonly enable: (preview: PushPreviewLevel) => Promise<void>;
   readonly disable: () => Promise<void>;
   readonly updatePreferences: (patch: {
@@ -225,6 +233,7 @@ const sameKinds = (left: PushKinds, right: PushKinds) =>
 
 export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
   const now = deps.now ?? Date.now;
+  let enrollFailure: { readonly until: number; readonly error: unknown } | null = null;
   let queue: Promise<unknown> = Promise.resolve();
   let environments: PushEnvironments = { saved: new Set(), connected: new Set() };
   // Reconnects can fire in bursts; syncs that have not started yet collapse into one.
@@ -356,6 +365,7 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
       current.environment === config.apnsEnvironment;
     if (sameDestination && current.token === token) return current;
 
+    if (enrollFailure !== null && now() < enrollFailure.until) throw enrollFailure.error;
     device = { state: "verifying" };
     for (const environmentId of environments.saved) {
       if (environments.connected.has(environmentId))
@@ -365,22 +375,33 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
 
     const request = { token, topic: config.topic, environment: config.apnsEnvironment };
     let owner = sameDestination ? ownerOf(current) : null;
-    let enrollment;
+    let confirmed;
     try {
-      enrollment = await deps.gateway.enroll(request, owner ?? undefined);
-    } catch (error) {
-      if (!(owner !== null && error instanceof PushGatewayError && error.installationLost)) {
-        throw error;
+      let enrollment;
+      try {
+        enrollment = await deps.gateway.enroll(request, owner ?? undefined);
+      } catch (error) {
+        if (!(owner !== null && error instanceof PushGatewayError && error.installationLost)) {
+          throw error;
+        }
+        owner = null;
+        enrollment = await deps.gateway.enroll(request);
       }
-      owner = null;
-      enrollment = await deps.gateway.enroll(request);
+      const waitMs = Math.min(
+        CHALLENGE_MAX_WAIT_MS,
+        Math.max(CHALLENGE_MIN_WAIT_MS, enrollment.expiresAt - now()),
+      );
+      const code = await deps.challenges.wait(enrollment.enrollmentId, waitMs);
+      confirmed = await deps.gateway.confirm(enrollment.enrollmentId, code);
+    } catch (error) {
+      const waitMs =
+        error instanceof PushGatewayError && error.retryAfterMs !== null
+          ? Math.max(error.retryAfterMs, ENROLL_RETRY_MS)
+          : ENROLL_RETRY_MS;
+      enrollFailure = { until: now() + waitMs, error };
+      throw error;
     }
-    const waitMs = Math.min(
-      CHALLENGE_MAX_WAIT_MS,
-      Math.max(CHALLENGE_MIN_WAIT_MS, enrollment.expiresAt - now()),
-    );
-    const code = await deps.challenges.wait(enrollment.enrollmentId, waitMs);
-    const confirmed = await deps.gateway.confirm(enrollment.enrollmentId, code);
+    enrollFailure = null;
     const ownerToken = confirmed.ownerToken ?? owner?.ownerToken;
     if (ownerToken === undefined) {
       throw new PushGatewayError({ status: 502, code: "invalid_response" });
@@ -664,8 +685,17 @@ export function createPushRegistrar(deps: PushRegistrarDeps): PushRegistrar {
       });
       return queuedSync;
     },
+    retry: (next) => {
+      enrollFailure = null;
+      latestEnvironments = next;
+      return serial(async () => {
+        environments = latestEnvironments;
+        await runSync();
+      });
+    },
     enable: (preview) =>
       serial(async () => {
+        enrollFailure = null;
         const current = await load();
         await commit({ ...current, enabled: true, preview });
         if ((await deps.permissions.request()) !== "granted") {

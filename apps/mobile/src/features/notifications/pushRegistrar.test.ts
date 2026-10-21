@@ -48,6 +48,7 @@ function harness(options: { permission?: PushPermission; token?: string } = {}) 
   const gateway = {
     installations: new Map<string, { ownerToken: string; handles: Set<string> }>(),
     down: false,
+    enrollFailure: null as PushGatewayError | null,
     pending: new Map<string, { installationId?: string }>(),
   };
   const host = {
@@ -58,6 +59,7 @@ function harness(options: { permission?: PushPermission; token?: string } = {}) 
     registrations: new Map<string, PushRegisterInput & { status: PushRegistrationStatus }>(),
   };
   let stored: MobilePushSettings = DEFAULT_MOBILE_PUSH_SETTINGS;
+  const clock = { now: Date.now() };
   const snapshots: PushStatusSnapshot[] = [];
 
   const ownerCheck = (owner: { installationId: string; ownerToken: string }) => {
@@ -73,6 +75,7 @@ function harness(options: { permission?: PushPermission; token?: string } = {}) 
     origin: ORIGIN,
     enroll: async (_request, owner) => {
       calls.push(owner ? "gateway.enroll(owner)" : "gateway.enroll");
+      if (gateway.enrollFailure) throw gateway.enrollFailure;
       if (owner) ownerCheck(owner);
       const enrollmentId = `enrollment-${next()}`;
       gateway.pending.set(enrollmentId, owner ? { installationId: owner.installationId } : {});
@@ -186,6 +189,7 @@ function harness(options: { permission?: PushPermission; token?: string } = {}) 
     },
     challenges,
     randomId: () => uuid(next()),
+    now: () => clock.now,
     deviceName: "iPhone",
     onStatus: (snapshot) => snapshots.push(snapshot),
   });
@@ -207,6 +211,9 @@ function harness(options: { permission?: PushPermission; token?: string } = {}) 
       snapshots.at(-1)?.environments.get(id),
     deviceState: () => snapshots.at(-1)?.device,
     clearCalls: () => calls.splice(0),
+    advance: (ms: number) => {
+      clock.now += ms;
+    },
   };
 }
 
@@ -457,6 +464,25 @@ describe("push registrar", () => {
     expect(test.device.bindings.size).toBe(0);
     expect(test.stored().registrations).toEqual([]);
     expect(test.device.keys.has(registration!.keyId)).toBe(false);
+  });
+
+  it("waits before enrolling again after a failure unless the user retries", async () => {
+    const test = harness();
+    test.gateway.enrollFailure = new PushGatewayError({ status: 503, code: "gateway_unavailable" });
+    await test.registrar.enable("titles");
+    await test.registrar.sync(test.environments([environmentId]));
+    await test.registrar.sync(test.environments([environmentId]));
+
+    expect(test.calls.filter((call) => call === "gateway.enroll")).toHaveLength(1);
+    expect(test.deviceState()).toMatchObject({ state: "gateway-unreachable" });
+
+    await test.registrar.retry(test.environments([environmentId]));
+    expect(test.calls.filter((call) => call === "gateway.enroll")).toHaveLength(2);
+
+    test.gateway.enrollFailure = null;
+    test.advance(60_000);
+    await test.registrar.sync(test.environments([environmentId]));
+    expect(test.state(environmentId)).toEqual({ state: "active", lastDeliveryAt: null });
   });
 
   it("turns everything off and keeps retrying the gateway until it is reachable", async () => {
