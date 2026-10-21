@@ -119,7 +119,6 @@ vi.mock("../../state/use-remote-environment-registry", () => ({
 }));
 vi.mock("../../state/use-model-option-memory", () => ({
   rememberModelOptions: () => {},
-  withRememberedModelOptions: (selection: unknown) => selection,
 }));
 vi.mock("../../state/pending-task-editor-writes", () => ({
   capturePendingTaskEditorWriteBaseline: () => Promise.resolve(0),
@@ -433,6 +432,19 @@ describe("pending task editor dismissal", () => {
       expect(flow.beginEditingPendingTask(pendingTask.messageId)).toBe(true);
     });
     expect(flow.prompt).toBe("");
+  });
+});
+
+describe("new-task model selection", () => {
+  it("keeps resolved options in the draft and submitted task", async () => {
+    const selection = {
+      instanceId: provider.instanceId,
+      model: "gpt-5.4",
+      options: [{ id: "reasoningEffort", value: "high" }],
+    };
+    await act(() => flow.setSelectedModel(selection));
+    expect(readDraft(flow.draftKey!).modelSelection).toEqual(selection);
+    expect(flow.buildPendingTaskMessage(metadata)?.modelSelection).toEqual(selection);
   });
 });
 

@@ -53,14 +53,14 @@ export function ScheduledTaskModelPickerRouteScreen() {
       projectId={projectId}
       providerGroups={providerGroups}
       selectedModel={selectedModel}
-      onSelectModel={(option) =>
+      onSelectModel={(modelSelection) =>
         setEditor((current) =>
           current
             ? {
                 ...current,
                 draft: {
                   ...current.draft,
-                  modelSelection: option.selection,
+                  modelSelection,
                   modelSelectionIsExplicit: true,
                 },
               }

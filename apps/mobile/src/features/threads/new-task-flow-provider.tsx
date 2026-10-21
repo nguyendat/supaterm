@@ -77,10 +77,7 @@ import {
   capturePendingTaskEditorWriteBaseline,
   flushPendingTaskEditorWrite,
 } from "../../state/pending-task-editor-writes";
-import {
-  rememberModelOptions,
-  withRememberedModelOptions,
-} from "../../state/use-model-option-memory";
+import { rememberModelOptions } from "../../state/use-model-option-memory";
 import { useDebouncedValue, usePaginatedBranches } from "../../state/queries";
 import { vcsEnvironment } from "../../state/vcs";
 import {
@@ -235,10 +232,7 @@ type NewTaskFlowContextValue = {
   readonly switchingToEnvironmentId: EnvironmentId | null;
   /** An edited pending task with follow-ups queued behind it stays on its machine. */
   readonly environmentPinned: boolean;
-  readonly setSelectedModelKey: (
-    key: string | null,
-    options?: ReadonlyArray<ProviderOptionSelection>,
-  ) => void;
+  readonly setSelectedModel: (selection: ModelSelection) => void;
   readonly setWorkspaceMode: (mode: WorkspaceMode) => void;
   readonly selectBranch: (branch: VcsRef) => void;
   readonly setStartFromOrigin: (value: boolean) => void;
@@ -626,20 +620,10 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     selectedEnvironmentServerConfig?.providers.find(
       (provider) => provider.instanceId === selectedModel?.instanceId,
     ) ?? null;
-  const setSelectedModelKey = (
-    key: string | null,
-    options?: ReadonlyArray<ProviderOptionSelection>,
-  ) => {
-    if (!key || !selectedProjectDraftKey) {
+  const setSelectedModel = (selection: ModelSelection) => {
+    if (!selectedProjectDraftKey) {
       return;
     }
-    const option = modelOptions.find((candidate) => candidate.key === key);
-    if (!option) {
-      return;
-    }
-    const selection = withRememberedModelOptions(
-      options ? { ...option.selection, options } : option.selection,
-    );
     updateComposerDraftSettings(selectedProjectDraftKey, {
       modelSelection: selection,
     });
@@ -1230,7 +1214,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     switchEnvironment,
     switchingToEnvironmentId,
     environmentPinned,
-    setSelectedModelKey,
+    setSelectedModel,
     setWorkspaceMode,
     selectBranch,
     setStartFromOrigin,
