@@ -112,21 +112,19 @@ const make = Effect.gen(function* () {
     ) {
       return yield* new PushNotificationError({ reason: "origin_not_allowed" });
     }
-    const existing = Option.getOrUndefined(yield* registrations.get(input.registrationId));
-    if (existing !== undefined && existing.sessionId !== sessionId) {
-      return yield* new PushNotificationError({ reason: "conflict" });
-    }
-    yield* registrations.upsert({
-      registrationId: input.registrationId,
-      sessionId,
-      gatewayOrigin: origin,
-      handle: input.handle,
-      keyId: input.recipientKey.keyId,
-      recipientPublicKey: input.recipientKey.publicKey,
-      preview: input.preview,
-      kinds: input.kinds,
-      deviceName: input.deviceName ?? null,
-    });
+    const existing = Option.getOrUndefined(
+      yield* registrations.register({
+        registrationId: input.registrationId,
+        sessionId,
+        gatewayOrigin: origin,
+        handle: input.handle,
+        keyId: input.recipientKey.keyId,
+        recipientPublicKey: input.recipientKey.publicKey,
+        preview: input.preview,
+        kinds: input.kinds,
+        deviceName: input.deviceName ?? null,
+      }),
+    );
     if (
       existing !== undefined &&
       (existing.handle !== input.handle || existing.gatewayOrigin !== origin)

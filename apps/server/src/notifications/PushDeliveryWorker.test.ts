@@ -4,6 +4,7 @@ import {
   type ClientActivityLease,
   ClientActivityClientId,
   MessageId,
+  type OrchestrationV2ConversationMessage,
   RpcClientId,
   RunId,
   RuntimeRequestId,
@@ -95,7 +96,11 @@ const takeCalls = (world: PushWorld) =>
   Queue.clear(world.gatewayCalls).pipe(Effect.map((calls): ReadonlyArray<GatewayCall> => calls));
 
 /** A run that just finished, after the reactor saw it running. */
-const finishRun = (world: PushWorld, overrides: Parameters<typeof threadShell>[1] = {}) =>
+const finishRun = (
+  world: PushWorld,
+  overrides: Parameters<typeof threadShell>[1] = {},
+  status: "completed" | "failed" = "completed",
+) =>
   Effect.gen(function* () {
     yield* world.putShell(threadShell(THREAD));
     yield* world.appendEvent({
@@ -105,14 +110,12 @@ const finishRun = (world: PushWorld, overrides: Parameters<typeof threadShell>[1
       payload: { id: RUN, status: "running" },
     });
     yield* drainReactor;
-    yield* world.putShell(
-      threadShell(THREAD, { status: "completed", activityRunStatus: null, ...overrides }),
-    );
+    yield* world.putShell(threadShell(THREAD, { status, activityRunStatus: null, ...overrides }));
     yield* world.appendEvent({
       type: "run.updated",
       threadId: THREAD,
       occurredAt: yield* DateTime.now,
-      payload: { id: RUN, status: "completed" },
+      payload: { id: RUN, status },
     });
     yield* drainReactor;
   });
@@ -140,9 +143,30 @@ const requestApproval = (world: PushWorld) =>
       type: "runtime-request.updated",
       threadId: THREAD,
       occurredAt: yield* DateTime.now,
-      payload: { id: requestId, status: "pending" },
+      payload: { id: requestId, kind: "command", status: "pending" },
     });
     yield* drainReactor;
+  });
+
+const assistantMessage = (text: string, updatedAt: DateTime.Utc) =>
+  ({
+    id: MessageId.make(`message-${text.length}`),
+    threadId: THREAD,
+    runId: RUN,
+    role: "assistant",
+    text,
+    updatedAt,
+    createdAt: updatedAt,
+  }) as unknown as OrchestrationV2ConversationMessage;
+
+const openSent = (call: GatewayCall | undefined, privateKey: Uint8Array) =>
+  Effect.promise(() => {
+    const body = decodeSendBody(call?.body ?? "");
+    return openPushEnvelope({
+      envelope: body.payload,
+      recipientPrivateKey: privateKey,
+      hostPublicKey: decodeBase64(call?.headers["supaterm-push-key"] ?? ""),
+    });
   });
 
 const watchingLease = (input: {
@@ -182,14 +206,21 @@ describe("PushDeliveryWorker", () => {
           full: yield* register("full"),
         };
         const occurredAt = DateTime.toEpochMillis(yield* DateTime.now);
-        yield* finishRun(world, {
-          latestVisibleMessage: {
-            id: MessageId.make("message-1"),
-            role: "assistant",
-            text: "All\ntests pass",
-            updatedAt: yield* DateTime.now,
-          },
-        });
+        const now = yield* DateTime.now;
+        yield* Ref.set(
+          world.messages,
+          new Map([
+            [
+              THREAD,
+              [
+                assistantMessage("Running the tests", DateTime.subtract(now, { seconds: 5 })),
+                assistantMessage("All\ntests pass", now),
+                assistantMessage("  ", DateTime.add(now, { seconds: 1 })),
+              ],
+            ],
+          ]),
+        );
+        yield* finishRun(world);
 
         yield* drainWorker;
         assert.deepStrictEqual(yield* takeCalls(world), [], "completions wait out the grace");
@@ -293,7 +324,24 @@ describe("PushDeliveryWorker", () => {
     ),
   );
 
-  it.effect("drops a delivery whose request was answered before it went out", () =>
+  it.effect("previews a failed run with its error", () =>
+    withWorker((world) =>
+      Effect.gen(function* () {
+        const recipient = yield* register("full");
+        yield* finishRun(world, { lastError: "Rate limited by provider" }, "failed");
+        yield* TestClock.adjust("2 seconds");
+        yield* drainWorker;
+
+        const [call] = yield* takeCalls(world);
+        assert.deepInclude(yield* openSent(call, recipient.privateKey), {
+          kind: "failure",
+          body: "Failed: Rate limited by provider",
+        });
+      }),
+    ),
+  );
+
+  it.effect("sets aside a delivery whose request was answered before it went out", () =>
     withWorker((world) =>
       Effect.gen(function* () {
         yield* register("titles");
@@ -304,8 +352,74 @@ describe("PushDeliveryWorker", () => {
         assert.deepStrictEqual(yield* takeCalls(world), []);
         assert.deepStrictEqual(
           (yield* deliveryRows).map((row) => row.status),
-          ["cancelled"],
+          ["superseded"],
         );
+      }),
+    ),
+  );
+
+  it.effect("keeps an unanswered approval eligible past a day and reseals its envelope", () =>
+    withWorker((world) =>
+      Effect.gen(function* () {
+        yield* register("titles");
+        yield* Ref.set(world.gatewayReply, () => ({
+          status: 429,
+          headers: { "retry-after": String(25 * 60 * 60) },
+        }));
+        yield* requestApproval(world);
+        yield* drainWorker;
+        const firstSentAt = DateTime.toEpochMillis(yield* DateTime.now);
+
+        yield* Ref.set(world.gatewayReply, () => ({ status: 200 }));
+        yield* TestClock.adjust("25 hours");
+        yield* drainWorker;
+
+        const [first, second] = (yield* takeCalls(world)).map(
+          (call) => decodeSendBody(call.body).payload,
+        );
+        assert.strictEqual(first?.expiresAt, firstSentAt + 24 * 60 * 60_000);
+        const resealedAt = DateTime.toEpochMillis(yield* DateTime.now);
+        assert.deepStrictEqual(
+          { createdAt: second?.createdAt, expiresAt: second?.expiresAt },
+          { createdAt: resealedAt, expiresAt: resealedAt + 24 * 60 * 60_000 },
+        );
+        assert.strictEqual(second?.notificationId, first?.notificationId);
+        assert.deepStrictEqual(
+          (yield* deliveryRows).map((row) => row.status),
+          ["sent"],
+        );
+      }),
+    ),
+  );
+
+  it.effect("never resends an envelope sealed before the registration changed", () =>
+    withWorker((world) =>
+      Effect.gen(function* () {
+        yield* register("titles");
+        yield* Ref.set(world.gatewayReply, () => ({ status: 503 }));
+        yield* requestApproval(world);
+        yield* drainWorker;
+        const sql = yield* SqlClient.SqlClient;
+        const [stale] = yield* sql<{
+          readonly envelope_json: string;
+          readonly envelope_expires_at: number;
+          readonly envelope_revision: number;
+        }>`SELECT envelope_json, envelope_expires_at, envelope_revision FROM push_deliveries`;
+
+        const rekeyed = yield* register("titles");
+        // An attempt that sealed under the old key can still write its envelope after the change.
+        yield* sql`
+          UPDATE push_deliveries SET envelope_json = ${stale?.envelope_json ?? null},
+            envelope_expires_at = ${stale?.envelope_expires_at ?? null},
+            envelope_revision = ${stale?.envelope_revision ?? null}
+        `;
+        yield* Ref.set(world.gatewayReply, () => ({ status: 200 }));
+        yield* TestClock.adjust("3 seconds");
+        yield* drainWorker;
+
+        const calls = yield* takeCalls(world);
+        assert.lengthOf(calls, 2);
+        assert.deepInclude(yield* openSent(calls[1], rekeyed.privateKey), { kind: "approval" });
       }),
     ),
   );

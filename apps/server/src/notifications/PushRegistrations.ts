@@ -27,6 +27,8 @@ export const PushRegistrationRecord = Schema.Struct({
   status: PushRegistrationStatus,
   createdAt: Schema.DateTimeUtcFromString,
   lastDeliveryAt: Schema.NullOr(Schema.DateTimeUtcFromString),
+  /** Bumped by every registration write, so an envelope sealed before it is never reused. */
+  revision: Schema.Number,
 });
 export type PushRegistrationRecord = typeof PushRegistrationRecord.Type;
 
@@ -37,7 +39,7 @@ const ListedRegistration = Schema.Struct({
 
 export type PushRegistrationWrite = Omit<
   PushRegistrationRecord,
-  "status" | "createdAt" | "lastDeliveryAt"
+  "status" | "createdAt" | "lastDeliveryAt" | "revision"
 >;
 
 const encodeKinds = Schema.encodeEffect(Schema.fromJsonString(PushKinds));
@@ -50,8 +52,13 @@ export class PushRegistrations extends Context.Service<
     readonly get: (
       registrationId: string,
     ) => Effect.Effect<Option.Option<PushRegistrationRecord>, PushNotificationError>;
-    /** Inserts or replaces the registration and reactivates it. */
-    readonly upsert: (input: PushRegistrationWrite) => Effect.Effect<void, PushNotificationError>;
+    /**
+     * Inserts or replaces the registration and reactivates it, failing with `conflict` when
+     * another session owns the id. Returns what it replaced.
+     */
+    readonly register: (
+      input: PushRegistrationWrite,
+    ) => Effect.Effect<Option.Option<PushRegistrationRecord>, PushNotificationError>;
     readonly remove: (
       registrationId: string,
     ) => Effect.Effect<Option.Option<PushRegistrationRecord>, PushNotificationError>;
@@ -95,7 +102,8 @@ const make = Effect.gen(function* () {
     device_name AS "deviceName",
     status,
     created_at AS "createdAt",
-    last_delivery_at AS "lastDeliveryAt"
+    last_delivery_at AS "lastDeliveryAt",
+    revision
   `;
 
   const findById = SqlSchema.findOneOption({
@@ -108,39 +116,56 @@ const make = Effect.gen(function* () {
   const get: PushRegistrations["Service"]["get"] = (registrationId) =>
     findById(registrationId).pipe(Effect.mapError(storageError));
 
-  const upsert: PushRegistrations["Service"]["upsert"] = Effect.fn("PushRegistrations.upsert")(
-    function* (input) {
-      const now = yield* nowIso;
-      const kinds = yield* encodeKinds(input.kinds);
-      yield* sql`
-        INSERT INTO push_registrations (
-          registration_id, session_id, gateway_origin, handle, key_id, recipient_public_key,
-          preview, kinds_json, device_name, status, created_at, updated_at, last_delivery_at
-        )
-        VALUES (
-          ${input.registrationId}, ${input.sessionId}, ${input.gatewayOrigin}, ${input.handle},
-          ${input.keyId}, ${input.recipientPublicKey}, ${input.preview}, ${kinds},
-          ${input.deviceName}, 'active', ${now}, ${now}, NULL
-        )
-        ON CONFLICT(registration_id) DO UPDATE SET
-          gateway_origin = excluded.gateway_origin,
-          handle = excluded.handle,
-          key_id = excluded.key_id,
-          recipient_public_key = excluded.recipient_public_key,
-          preview = excluded.preview,
-          kinds_json = excluded.kinds_json,
-          device_name = excluded.device_name,
-          status = 'active',
-          updated_at = excluded.updated_at
-      `;
-      // Sealed envelopes and preview text follow the old key and preview level.
-      yield* sql`
-        UPDATE push_deliveries SET envelope_json = NULL, envelope_expires_at = NULL
-        WHERE registration_id = ${input.registrationId} AND status IN ('pending', 'leased')
-      `;
-    },
-    Effect.mapError(storageError),
-  );
+  const register: PushRegistrations["Service"]["register"] = Effect.fn(
+    "PushRegistrations.register",
+  )(function* (input) {
+    const now = yield* nowIso;
+    const kinds = yield* encodeKinds(input.kinds).pipe(Effect.mapError(storageError));
+    return yield* sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const existing = yield* findById(input.registrationId);
+          if (Option.isSome(existing) && existing.value.sessionId !== input.sessionId) {
+            return yield* new PushNotificationError({ reason: "conflict" });
+          }
+          yield* sql`
+            INSERT INTO push_registrations (
+              registration_id, session_id, gateway_origin, handle, key_id, recipient_public_key,
+              preview, kinds_json, device_name, status, created_at, updated_at, last_delivery_at,
+              revision
+            )
+            VALUES (
+              ${input.registrationId}, ${input.sessionId}, ${input.gatewayOrigin}, ${input.handle},
+              ${input.keyId}, ${input.recipientPublicKey}, ${input.preview}, ${kinds},
+              ${input.deviceName}, 'active', ${now}, ${now}, NULL, 0
+            )
+            ON CONFLICT(registration_id) DO UPDATE SET
+              gateway_origin = excluded.gateway_origin,
+              handle = excluded.handle,
+              key_id = excluded.key_id,
+              recipient_public_key = excluded.recipient_public_key,
+              preview = excluded.preview,
+              kinds_json = excluded.kinds_json,
+              device_name = excluded.device_name,
+              status = 'active',
+              updated_at = excluded.updated_at,
+              revision = push_registrations.revision + 1
+          `;
+          yield* sql`
+            UPDATE push_deliveries
+            SET envelope_json = NULL, envelope_expires_at = NULL, envelope_revision = NULL
+            WHERE registration_id = ${input.registrationId} AND status IN ('pending', 'leased')
+          `;
+          return existing;
+        }),
+      )
+      .pipe(
+        Effect.catchTags({
+          SqlError: (cause) => Effect.fail(storageError(cause)),
+          SchemaError: (cause) => Effect.fail(storageError(cause)),
+        }),
+      );
+  });
 
   const remove: PushRegistrations["Service"]["remove"] = Effect.fn("PushRegistrations.remove")(
     function* (registrationId) {
@@ -200,7 +225,8 @@ const make = Effect.gen(function* () {
       ? Effect.void
       : sql`
           UPDATE push_deliveries SET status = 'cancelled', lease_until = NULL
-          WHERE status IN ('pending', 'leased') AND ${sql.in("registration_id", registrationIds)}
+          WHERE status IN ('pending', 'leased', 'superseded')
+            AND ${sql.in("registration_id", registrationIds)}
         `.pipe(Effect.asVoid);
 
   const markGone: PushRegistrations["Service"]["markGone"] = Effect.fn(
@@ -259,7 +285,7 @@ const make = Effect.gen(function* () {
 
   return PushRegistrations.of({
     get,
-    upsert,
+    register,
     remove,
     list,
     listDeliverable,

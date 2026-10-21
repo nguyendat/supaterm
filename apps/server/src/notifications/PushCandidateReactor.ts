@@ -1,10 +1,20 @@
 import type {
   OrchestrationV2DomainEvent,
   OrchestrationV2StoredEvent,
+  RunId,
+  RuntimeRequestId,
   ThreadId,
 } from "@supaterm/contracts";
 import { PushNotificationError } from "@supaterm/contracts/push";
 import { makeDrainableWorker } from "@supaterm/shared/DrainableWorker";
+import { turnItemUpdateCanEndBackgroundWork } from "@supaterm/shared/orchestrationV2PendingBackgroundWork";
+import {
+  requestAttention,
+  runAttention,
+  runtimeRequestAttentionKind,
+  type ThreadNotificationAttention,
+  type ThreadNotificationRequestAttention,
+} from "@supaterm/shared/threadNotificationAttention";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -28,15 +38,15 @@ import * as PushRegistrations from "./PushRegistrations.ts";
 const CURSOR_NAME = "push-candidates";
 const PAGE_SIZE = 256;
 const COMPLETION_FRESHNESS_MS = 10 * 60_000;
-const REQUEST_ELIGIBILITY_MS = 24 * 60 * 60_000;
+/** Approvals and questions stay eligible until answered; each envelope still expires in 24 h. */
+const UNTIL_RESOLVED = Number.MAX_SAFE_INTEGER;
+const RECONCILE_COMMAND_PREFIX = "command:runtime-reconcile:";
 
-// Turn items and messages are the bulk of the event volume and never change attention.
-const ATTENTION_EVENT_TYPES: ReadonlySet<OrchestrationV2DomainEvent["type"]> = new Set([
-  "thread.created",
-  "thread.archived",
-  "thread.unarchived",
-  "thread.deleted",
+const CHANGE_EVENT_TYPES: ReadonlySet<OrchestrationV2DomainEvent["type"]> = new Set([
   "thread.provider-switched",
+  "thread.pull-request-link-updated",
+  "thread.pull-request-synced",
+  "thread.workflow-run-watch-synced",
   "run.created",
   "run.updated",
   "run.background-work-cancelled",
@@ -48,14 +58,123 @@ const ATTENTION_EVENT_TYPES: ReadonlySet<OrchestrationV2DomainEvent["type"]> = n
   "runtime-request.updated",
 ]);
 
-interface ThreadActivity {
-  occurredAt: number;
-  sequence: number;
-  /** False when only server restart reconciliation touched the thread. */
-  organic: boolean;
-  /** Run and request ids the events carried, to recognize a thread's first occurrence. */
-  readonly occurrenceIds: Set<string>;
+/** Whether an event can change what a thread needs from the user; streamed text never does. */
+const affectsAttention = (event: OrchestrationV2DomainEvent) =>
+  CHANGE_EVENT_TYPES.has(event.type) ||
+  event.type === "thread.archived" ||
+  event.type === "thread.deleted" ||
+  // Commands never hold a completion back, and they finish far more often than work that does.
+  (event.type === "turn-item.updated" &&
+    event.payload.type !== "command_execution" &&
+    turnItemUpdateCanEndBackgroundWork(event.payload));
+
+/** Something that needs the user, as the event that raised it describes it. */
+type Occurrence =
+  | { readonly type: "run"; readonly runId: RunId; readonly failed: boolean }
+  | {
+      readonly type: "request";
+      readonly kind: ThreadNotificationRequestAttention["kind"];
+      readonly requestId: RuntimeRequestId;
+    };
+
+const occurrenceOf = (event: OrchestrationV2DomainEvent): Occurrence | null => {
+  switch (event.type) {
+    case "run.created":
+    case "run.updated":
+      return event.payload.status === "completed" || event.payload.status === "failed"
+        ? { type: "run", runId: event.payload.id, failed: event.payload.status === "failed" }
+        : null;
+    case "runtime-request.updated": {
+      if (event.payload.status !== "pending" || event.payload.autoDismissPaused === true) {
+        return null;
+      }
+      const kind = runtimeRequestAttentionKind(event.payload.kind);
+      return kind === null ? null : { type: "request", kind, requestId: event.payload.id };
+    }
+    default:
+      return null;
+  }
+};
+
+interface ThreadEvents {
+  /** When the latest user-driven event that could change this thread's attention happened. */
+  changedAt: number | null;
+  /** Server restart reconciliation touched the thread; it settles work nobody is waiting on. */
+  reconciled: boolean;
+  occurrences: Array<{ readonly occurrence: Occurrence; readonly occurredAt: number }>;
 }
+
+interface RootEvents {
+  readonly state: PushAttention.PushThreadAttentionState;
+  changedAt: number | null;
+  reconciled: boolean;
+  readonly occurrences: Map<
+    string,
+    { readonly attention: ThreadNotificationAttention; readonly occurredAt: number }
+  >;
+}
+
+interface DeliverySchedule {
+  readonly occurredAt: number;
+  readonly expiresAt: number;
+  readonly nextAttemptAt: number;
+}
+
+const collectEvents = (page: ReadonlyArray<OrchestrationV2StoredEvent>) => {
+  const threads = new Map<ThreadId, ThreadEvents>();
+  const dismissedThreadIds = new Set<ThreadId>();
+  // Pausing a question's auto-dismiss shows the user saw it.
+  const seenRequests: Array<{ readonly threadId: ThreadId; readonly requestId: RuntimeRequestId }> =
+    [];
+  for (const stored of page) {
+    const event = stored.event;
+    if (!affectsAttention(event)) continue;
+    const entry = threads.get(event.threadId) ?? {
+      changedAt: null,
+      reconciled: false,
+      occurrences: [],
+    };
+    threads.set(event.threadId, entry);
+    if (event.type === "thread.archived" || event.type === "thread.deleted") {
+      dismissedThreadIds.add(event.threadId);
+      entry.occurrences = [];
+      continue;
+    }
+    if (String(stored.commandId).startsWith(RECONCILE_COMMAND_PREFIX)) {
+      entry.reconciled = true;
+      continue;
+    }
+    const occurredAt = DateTime.toEpochMillis(event.occurredAt);
+    entry.changedAt = Math.max(entry.changedAt ?? occurredAt, occurredAt);
+    if (
+      event.type === "runtime-request.updated" &&
+      event.payload.status === "pending" &&
+      event.payload.autoDismissPaused === true
+    ) {
+      seenRequests.push({ threadId: event.threadId, requestId: event.payload.id });
+    }
+    const occurrence = occurrenceOf(event);
+    if (occurrence !== null) entry.occurrences.push({ occurrence, occurredAt });
+  }
+  return { threads, dismissedThreadIds, seenRequests };
+};
+
+const occurrenceAttention = (
+  rootId: ThreadId,
+  threadId: ThreadId,
+  occurrence: Occurrence,
+  current: ThreadNotificationAttention | null,
+): ThreadNotificationAttention | null => {
+  if (occurrence.type === "request") {
+    return requestAttention(occurrence.kind, rootId, threadId, occurrence.requestId);
+  }
+  if (threadId !== rootId) return null;
+  if (!occurrence.failed) return runAttention("completion", rootId, occurrence.runId);
+  // Only the projection tells a usage limit from another failure.
+  return current?.kind === "usage-limit" && current.runId === occurrence.runId
+    ? current
+    : runAttention("failure", rootId, occurrence.runId);
+};
 
 const storageError = (cause: unknown) => new PushNotificationError({ reason: "storage", cause });
 
@@ -97,171 +216,187 @@ const make = Effect.gen(function* () {
     WHERE projection_name = ${CURSOR_NAME}
   `.pipe(Effect.map((rows) => rows[0]?.last_sequence ?? 0));
 
-  const collectActivity = (page: ReadonlyArray<OrchestrationV2StoredEvent>) => {
-    const activity = new Map<ThreadId, ThreadActivity>();
-    const pausedRequestIds = new Set<string>();
-    for (const stored of page) {
-      const event = stored.event;
-      if (!ATTENTION_EVENT_TYPES.has(event.type)) continue;
-      const entry = activity.get(event.threadId) ?? {
-        occurredAt: 0,
-        sequence: stored.sequence,
-        organic: false,
-        occurrenceIds: new Set<string>(),
-      };
-      entry.occurredAt = Math.max(entry.occurredAt, DateTime.toEpochMillis(event.occurredAt));
-      entry.sequence = stored.sequence;
-      entry.organic ||= !String(stored.commandId).startsWith("command:runtime-reconcile:");
-      if (event.type === "run.created" || event.type === "run.updated") {
-        entry.occurrenceIds.add(event.payload.id);
-      }
-      if (event.type === "runtime-request.updated") {
-        entry.occurrenceIds.add(event.payload.id);
-        if (event.payload.status === "pending" && event.payload.autoDismissPaused === true) {
-          pausedRequestIds.add(event.payload.id);
-        }
-      }
-      activity.set(event.threadId, entry);
+  const scheduleFrom = Effect.fnUntraced(function* (
+    value: ThreadNotificationAttention,
+    occurredAt: number,
+  ) {
+    if (!PushAttention.isRequestAttention(value)) {
+      return {
+        occurredAt,
+        expiresAt: occurredAt + COMPLETION_FRESHNESS_MS,
+        nextAttemptAt: occurredAt + PushDeliveryWorker.COMPLETION_GRACE_MS,
+      } satisfies DeliverySchedule;
     }
-    return { activity, pausedRequestIds };
+    const deadline = yield* attention.requestDeadline(value);
+    return {
+      occurredAt,
+      expiresAt: deadline ?? UNTIL_RESOLVED,
+      nextAttemptAt: occurredAt,
+    } satisfies DeliverySchedule;
+  });
+
+  /** Records an occurrence; a dormant one waits as superseded until its attention is current. */
+  const insertDelivery = (input: {
+    readonly registrationId: string;
+    readonly rootId: ThreadId;
+    readonly attention: ThreadNotificationAttention;
+    readonly schedule: DeliverySchedule;
+    readonly current: boolean;
+    readonly notificationId: string;
+  }) => {
+    const request = PushAttention.isRequestAttention(input.attention) ? input.attention : null;
+    return sql`
+      INSERT INTO push_deliveries (
+        registration_id, thread_id, attention_key, kind, request_thread_id, request_id,
+        occurred_at, expires_at, status, attempts, next_attempt_at, notification_id
+      )
+      VALUES (
+        ${input.registrationId}, ${input.rootId}, ${input.attention.key}, ${input.attention.kind},
+        ${request?.sourceThreadId ?? null}, ${request?.requestId ?? null},
+        ${input.schedule.occurredAt}, ${input.schedule.expiresAt},
+        ${input.current ? "pending" : "superseded"}, 0, ${input.schedule.nextAttemptAt},
+        ${input.notificationId}
+      )
+      ON CONFLICT(registration_id, thread_id, attention_key) DO UPDATE SET
+        status = 'pending',
+        lease_until = NULL,
+        occurred_at = excluded.occurred_at,
+        expires_at = excluded.expires_at,
+        next_attempt_at = excluded.next_attempt_at,
+        envelope_json = NULL,
+        envelope_expires_at = NULL,
+        envelope_revision = NULL
+      WHERE push_deliveries.status = 'superseded' AND excluded.status = 'pending'
+    `;
   };
 
-  const mergeActivity = (into: ThreadActivity, from: ThreadActivity) => {
-    into.occurredAt = Math.max(into.occurredAt, from.occurredAt);
-    into.sequence = Math.max(into.sequence, from.sequence);
-    into.organic ||= from.organic;
-    for (const id of from.occurrenceIds) into.occurrenceIds.add(id);
-  };
+  const rearmDeliveries = (rootId: ThreadId, key: string, schedule: DeliverySchedule) => sql`
+    UPDATE push_deliveries
+    SET status = 'pending', lease_until = NULL, occurred_at = ${schedule.occurredAt},
+      expires_at = ${schedule.expiresAt}, next_attempt_at = ${schedule.nextAttemptAt},
+      envelope_json = NULL, envelope_expires_at = NULL, envelope_revision = NULL
+    WHERE thread_id = ${rootId} AND attention_key = ${key} AND status = 'superseded'
+    RETURNING delivery_id
+  `;
+
+  const retireDormant = (rootId: ThreadId, key: string) => sql`
+    UPDATE push_deliveries SET status = 'expired'
+    WHERE thread_id = ${rootId} AND attention_key = ${key} AND status = 'superseded'
+  `;
 
   const processPage = Effect.fn("PushCandidateReactor.processPage")(function* (
     page: ReadonlyArray<OrchestrationV2StoredEvent>,
   ) {
     const throughSequence = page.at(-1)?.sequence ?? 0;
-    const { activity, pausedRequestIds } = collectActivity(page);
+    const { threads, dismissedThreadIds, seenRequests } = collectEvents(page);
 
-    const roots = new Map<
-      ThreadId,
-      { state: PushAttention.PushThreadAttentionState | null; activity: ThreadActivity }
-    >();
-    for (const [threadId, entry] of activity) {
+    // The projection may already be past this page, so it only decides which occurrence is current.
+    const roots = new Map<ThreadId, RootEvents>();
+    for (const [threadId, entry] of threads) {
       const state = yield* attention.forThread(threadId);
-      const rootId = state?.thread.id ?? threadId;
-      const existing = roots.get(rootId);
-      if (existing === undefined) {
-        roots.set(rootId, {
-          state,
-          activity: { ...entry, occurrenceIds: new Set(entry.occurrenceIds) },
-        });
-      } else {
-        mergeActivity(existing.activity, entry);
+      if (state === null || state.thread.archivedAt !== null || state.thread.deletedAt !== null) {
+        continue;
+      }
+      const rootId = state.thread.id;
+      const root: RootEvents = roots.get(rootId) ?? {
+        state,
+        changedAt: null,
+        reconciled: false,
+        occurrences: new Map(),
+      };
+      roots.set(rootId, root);
+      if (entry.changedAt !== null) {
+        root.changedAt = Math.max(root.changedAt ?? entry.changedAt, entry.changedAt);
+      }
+      root.reconciled ||= entry.reconciled;
+      for (const { occurrence, occurredAt } of entry.occurrences) {
+        const value = occurrenceAttention(rootId, threadId, occurrence, state.attention);
+        if (value === null) continue;
+        const known = root.occurrences.get(value.key);
+        if (known === undefined || known.occurredAt < occurredAt) {
+          root.occurrences.set(value.key, { attention: value, occurredAt });
+        }
       }
     }
-
-    const priorRows =
-      roots.size === 0
-        ? []
-        : yield* sql<{ readonly thread_id: string; readonly attention_key: string | null }>`
-            SELECT thread_id, attention_key FROM push_thread_attention
-            WHERE ${sql.in("thread_id", [...roots.keys()])}
-          `;
-    const prior = new Map(priorRows.map((row) => [row.thread_id, row.attention_key] as const));
 
     const enabled = yield* settings.getSettings.pipe(
       Effect.map((current) => current.pushNotificationsEnabled),
     );
     const recipients = enabled ? yield* registrations.listDeliverable : [];
+    const now = DateTime.toEpochMillis(yield* DateTime.now);
 
-    const writes: Array<Effect.Effect<unknown, SqlError.SqlError>> = [];
-    let inserted = false;
-    for (const [rootId, { state, activity: entry }] of roots) {
-      const current = state?.attention ?? null;
-      const known = prior.has(rootId);
-      const previousKey = prior.get(rootId) ?? null;
-      if (known && previousKey === (current?.key ?? null)) continue;
-      if (!known && current === null && state !== null) {
-        writes.push(sql`
-          INSERT INTO push_thread_attention (thread_id, attention_key, kind, updated_sequence)
-          VALUES (${rootId}, NULL, NULL, ${entry.sequence})
-        `);
-        continue;
-      }
+    // Each write reports whether it left a delivery for the worker to send.
+    const writes: Array<Effect.Effect<boolean, SqlError.SqlError>> = [];
+    for (const threadId of dismissedThreadIds) {
       writes.push(
-        current === null
-          ? sql`
-              UPDATE push_deliveries SET status = 'cancelled', lease_until = NULL
-              WHERE thread_id = ${rootId} AND status IN ('pending', 'leased')
-            `
-          : sql`
-              UPDATE push_deliveries SET status = 'cancelled', lease_until = NULL
-              WHERE thread_id = ${rootId} AND status IN ('pending', 'leased')
-                AND attention_key <> ${current.key}
-            `,
+        Effect.as(
+          sql`
+            UPDATE push_deliveries SET status = 'cancelled', lease_until = NULL
+            WHERE thread_id = ${threadId} AND status IN ('pending', 'leased', 'superseded')
+          `,
+          false,
+        ),
       );
-      if (state === null || state.thread.deletedAt !== null) {
-        writes.push(sql`DELETE FROM push_thread_attention WHERE thread_id = ${rootId}`);
+    }
+    for (const [rootId, root] of roots) {
+      const current = root.state.attention;
+      for (const { attention: value, occurredAt } of root.occurrences.values()) {
+        const isCurrent = value.key === current?.key;
+        const schedule = yield* scheduleFrom(value, Math.min(occurredAt, now));
+        if (isCurrent && schedule.expiresAt <= now) continue;
+        for (const registration of recipients) {
+          if (!registration.kinds[value.kind]) continue;
+          const insert = insertDelivery({
+            registrationId: registration.registrationId,
+            rootId,
+            attention: value,
+            schedule,
+            current: isCurrent,
+            notificationId: yield* crypto.randomUUIDv4(),
+          });
+          writes.push(Effect.as(insert, isCurrent));
+        }
+      }
+      // Attention returned to an earlier occurrence, such as a completion that background work
+      // held back or an approval hidden behind another; the events that brought it back date it.
+      if (current === null || root.occurrences.has(current.key)) continue;
+      if (root.changedAt === null) {
+        if (root.reconciled) writes.push(Effect.as(retireDormant(rootId, current.key), false));
         continue;
       }
-      writes.push(sql`
-        INSERT INTO push_thread_attention (thread_id, attention_key, kind, updated_sequence)
-        VALUES (${rootId}, ${current?.key ?? null}, ${current?.kind ?? null}, ${entry.sequence})
-        ON CONFLICT(thread_id) DO UPDATE SET
-          attention_key = excluded.attention_key,
-          kind = excluded.kind,
-          updated_sequence = excluded.updated_sequence
-      `);
-      if (current === null || !entry.organic) continue;
-      const occurrenceId = current.request?.requestId ?? state.thread.latestRunId;
-      if (!known && (occurrenceId === null || !entry.occurrenceIds.has(occurrenceId))) continue;
-
-      const now = DateTime.toEpochMillis(yield* DateTime.now);
-      const occurredAt = Math.min(entry.occurredAt, now);
-      const isRequest = PushAttention.isRequestKind(current.kind);
-      const deadline = isRequest ? yield* attention.requestDeadline(current) : null;
-      const expiresAt = isRequest
-        ? Math.min(deadline ?? Number.POSITIVE_INFINITY, occurredAt + REQUEST_ELIGIBILITY_MS)
-        : occurredAt + COMPLETION_FRESHNESS_MS;
-      if (expiresAt <= now) continue;
-      const nextAttemptAt = isRequest
-        ? occurredAt
-        : occurredAt + PushDeliveryWorker.COMPLETION_GRACE_MS;
-      for (const registration of recipients) {
-        if (!registration.kinds[current.kind]) continue;
-        const notificationId = yield* crypto.randomUUIDv4();
-        inserted = true;
-        writes.push(sql`
-          INSERT INTO push_deliveries (
-            registration_id, thread_id, attention_key, kind, occurred_at, expires_at,
-            status, attempts, next_attempt_at, notification_id
-          )
-          VALUES (
-            ${registration.registrationId}, ${rootId}, ${current.key}, ${current.kind},
-            ${occurredAt}, ${expiresAt}, 'pending', 0, ${nextAttemptAt}, ${notificationId}
-          )
-          ON CONFLICT(registration_id, thread_id, attention_key) DO NOTHING
-        `);
-      }
+      const schedule = yield* scheduleFrom(current, Math.min(root.changedAt, now));
+      if (schedule.expiresAt <= now) continue;
+      writes.push(
+        rearmDeliveries(rootId, current.key, schedule).pipe(Effect.map((rows) => rows.length > 0)),
+      );
     }
-    // Pausing a question's auto-dismiss shows the user saw it.
-    for (const requestId of pausedRequestIds) {
-      writes.push(sql`
-        UPDATE push_deliveries SET status = 'cancelled', lease_until = NULL
-        WHERE status IN ('pending', 'leased')
-          AND substr(attention_key, -${requestId.length + 1}) = ${`:${requestId}`}
-      `);
+    for (const request of seenRequests) {
+      writes.push(
+        Effect.as(
+          sql`
+            UPDATE push_deliveries SET status = 'cancelled', lease_until = NULL
+            WHERE request_thread_id = ${request.threadId} AND request_id = ${request.requestId}
+              AND status IN ('pending', 'leased', 'superseded')
+          `,
+          false,
+        ),
+      );
     }
 
-    const now = DateTime.formatIso(yield* DateTime.now);
-    yield* sql.withTransaction(
+    const updatedAt = DateTime.formatIso(yield* DateTime.now);
+    const armed = yield* sql.withTransaction(
       Effect.gen(function* () {
-        for (const write of writes) yield* write;
+        let armed = false;
+        for (const write of writes) armed = (yield* write) || armed;
         yield* sql`
           UPDATE orchestration_v2_projection_metadata
-          SET last_sequence = ${throughSequence}, updated_at = ${now}
+          SET last_sequence = ${throughSequence}, updated_at = ${updatedAt}
           WHERE projection_name = ${CURSOR_NAME}
         `;
+        return armed;
       }),
     );
-    if (inserted) yield* deliveries.wake;
+    if (armed) yield* deliveries.wake;
   }, Effect.mapError(storageError));
 
   const drain: PushCandidateReactor["Service"]["drain"] = lane.withPermit(
@@ -290,7 +425,7 @@ const make = Effect.gen(function* () {
       yield* schedule;
       yield* forkParked(
         Stream.runForEach(engine.streamDomainEvents, (event) =>
-          ATTENTION_EVENT_TYPES.has(event.type) ? schedule : Effect.void,
+          affectsAttention(event) ? schedule : Effect.void,
         ).pipe(
           Effect.catchCause((cause) =>
             Effect.logWarning("push candidate event stream failed", { cause }),

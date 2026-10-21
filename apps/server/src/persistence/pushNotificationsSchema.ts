@@ -5,6 +5,18 @@ export const ensurePushNotificationsSchema = Effect.fn("ensurePushNotificationsS
   function* () {
     const sql = yield* SqlClient.SqlClient;
 
+    const addMissingColumn = Effect.fnUntraced(function* (
+      table: string,
+      column: string,
+      definition: string,
+    ) {
+      const columns = yield* sql<{ readonly name: string }>`
+        SELECT name FROM pragma_table_info(${table})
+      `;
+      if (columns.some((row) => row.name === column)) return;
+      yield* sql.unsafe(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    });
+
     yield* sql`
     CREATE TABLE IF NOT EXISTS push_registrations (
       registration_id TEXT PRIMARY KEY,
@@ -19,20 +31,15 @@ export const ensurePushNotificationsSchema = Effect.fn("ensurePushNotificationsS
       status TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      last_delivery_at TEXT
+      last_delivery_at TEXT,
+      revision INTEGER NOT NULL DEFAULT 0
     )
   `;
+    yield* addMissingColumn("push_registrations", "revision", "INTEGER NOT NULL DEFAULT 0");
     yield* sql`
     CREATE INDEX IF NOT EXISTS push_registrations_session_idx ON push_registrations(session_id)
   `;
-    yield* sql`
-    CREATE TABLE IF NOT EXISTS push_thread_attention (
-      thread_id TEXT PRIMARY KEY,
-      attention_key TEXT,
-      kind TEXT,
-      updated_sequence INTEGER NOT NULL
-    )
-  `;
+    yield* sql`DROP TABLE IF EXISTS push_thread_attention`;
     yield* sql`
     CREATE TABLE IF NOT EXISTS push_deliveries (
       delivery_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,14 +56,25 @@ export const ensurePushNotificationsSchema = Effect.fn("ensurePushNotificationsS
       envelope_json TEXT,
       envelope_expires_at INTEGER,
       notification_id TEXT NOT NULL,
+      request_thread_id TEXT,
+      request_id TEXT,
+      envelope_revision INTEGER,
       UNIQUE (registration_id, thread_id, attention_key)
     )
   `;
+    yield* addMissingColumn("push_deliveries", "request_thread_id", "TEXT");
+    yield* addMissingColumn("push_deliveries", "request_id", "TEXT");
+    yield* addMissingColumn("push_deliveries", "envelope_revision", "INTEGER");
     yield* sql`
     CREATE INDEX IF NOT EXISTS push_deliveries_due_idx ON push_deliveries(status, next_attempt_at)
   `;
     yield* sql`
     CREATE INDEX IF NOT EXISTS push_deliveries_thread_idx ON push_deliveries(thread_id, status)
+  `;
+    yield* sql`
+    CREATE INDEX IF NOT EXISTS push_deliveries_request_idx
+    ON push_deliveries(request_thread_id, request_id)
+    WHERE request_id IS NOT NULL
   `;
   },
 );

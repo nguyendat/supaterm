@@ -110,17 +110,22 @@ registration and drops its gateway handle.
 The [candidate reactor](../../apps/server/src/notifications/PushCandidateReactor.ts)
 reads committed events from its own cursor instead of hooking the event sink, so a
 slow gateway can never delay a commit. Its cursor starts at the head on first boot,
-so history never notifies. It classifies attention with the same shared function as
-desktop notifications, so the two surfaces agree, and records the last attention key
-per thread. A thread it has never seen only
-notifies when the batch carries that occurrence's run or request; otherwise an old
-completion would alert the first time anything touches the thread. Runs reconciled
-during a server restart update the key without notifying.
+so history never notifies. Only a consumed event raises an occurrence (a finished or
+failed run, a pending request) and that event dates it. The projection may already
+be pages ahead of the cursor, so it only decides whether an occurrence is the
+thread's current attention, using the same shared classifier as desktop
+notifications. An occurrence that is not current, such as a completion held by
+background work or an approval hidden behind another, waits as a superseded delivery
+until a later event brings that attention back and dates it. Archiving a thread or
+pausing a question dismisses its alerts for good. Restart reconciliation never
+notifies, and attention it brings back is retired rather than rearmed.
 
 The [delivery worker](../../apps/server/src/notifications/PushDeliveryWorker.ts)
 persists the sealed envelope before the first send and reuses its notification ID
 on retries, so a send that reached the phone but timed out here is dropped by the
-phone's replay ledger.
+phone's replay ledger. Every registration write bumps a revision, and an envelope is
+reused only under the revision it was sealed for, so a retry never sends ciphertext
+for a key or preview level the phone has replaced.
 
 Suppression uses thread activity leases and the client's last real input, never
 `thread.visit`, which reports pane ownership rather than visibility. A client that

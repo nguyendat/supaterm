@@ -3,6 +3,7 @@ import {
   type AuthSessionId,
   type ClientActivityLease,
   EnvironmentId,
+  type OrchestrationV2ConversationMessage,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2RuntimeRequest,
   type OrchestrationV2StoredEvent,
@@ -168,6 +169,9 @@ const makePushWorld = Effect.gen(function* () {
   const subagents = yield* Ref.make(new Map<ThreadId, ReadonlyArray<OrchestrationV2Subagent>>());
   const runtimeRequests = yield* Ref.make(new Map<string, OrchestrationV2RuntimeRequest>());
   const turnItems = yield* Ref.make(new Map<ThreadId, ReadonlyArray<OrchestrationV2TurnItem>>());
+  const messages = yield* Ref.make(
+    new Map<ThreadId, ReadonlyArray<OrchestrationV2ConversationMessage>>(),
+  );
   const events = yield* Ref.make<ReadonlyArray<OrchestrationV2StoredEvent>>([]);
   const leases = yield* Ref.make<ReadonlyArray<ClientActivityLease>>([]);
   const gatewayCalls = yield* Queue.unbounded<GatewayCall>();
@@ -207,7 +211,13 @@ const makePushWorld = Effect.gen(function* () {
             (item) =>
               filter?.turnItemTypes === undefined || filter.turnItemTypes.includes(item.type),
           );
-          return { subagents: children, turnItems: items } as never;
+          const threadMessages = ((yield* Ref.get(messages)).get(threadId) ?? []).filter(
+            (message) =>
+              (filter?.messageRoles === undefined || filter.messageRoles.includes(message.role)) &&
+              (filter?.messageRunIds === undefined ||
+                (message.runId !== null && filter.messageRunIds.includes(message.runId))),
+          );
+          return { subagents: children, turnItems: items, messages: threadMessages } as never;
         }),
       getRuntimeRequest: (_threadId, requestId) =>
         Ref.get(runtimeRequests).pipe(Effect.map((map) => map.get(requestId))),
@@ -293,6 +303,7 @@ const makePushWorld = Effect.gen(function* () {
     subagents,
     runtimeRequests,
     turnItems,
+    messages,
     events,
     leases,
     gatewayCalls,

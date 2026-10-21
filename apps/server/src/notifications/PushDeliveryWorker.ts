@@ -51,6 +51,7 @@ const DeliveryRow = Schema.Struct({
   attempts: Schema.Number,
   envelope: Schema.NullOr(Schema.fromJsonString(PushEnvelope)),
   envelopeExpiresAt: Schema.NullOr(Schema.Number),
+  envelopeRevision: Schema.NullOr(Schema.Number),
   notificationId: Schema.String,
 });
 type DeliveryRow = typeof DeliveryRow.Type;
@@ -100,6 +101,7 @@ const make = Effect.gen(function* () {
     attempts,
     envelope_json AS "envelope",
     envelope_expires_at AS "envelopeExpiresAt",
+    envelope_revision AS "envelopeRevision",
     notification_id AS "notificationId"
   `;
 
@@ -120,7 +122,7 @@ const make = Effect.gen(function* () {
 
   const finish = (
     row: DeliveryRow,
-    status: "sent" | "cancelled" | "expired" | "failed",
+    status: "sent" | "superseded" | "cancelled" | "expired" | "failed",
     attempted = status === "sent" || status === "failed",
   ) =>
     sql`
@@ -143,7 +145,7 @@ const make = Effect.gen(function* () {
     retryAfterMs: number | null,
   ) {
     const base = BACKOFF_MS[Math.min(row.attempts, BACKOFF_MS.length - 1)]!;
-    const jittered = base * (0.8 + 0.4 * (yield* Random.next));
+    const jittered = Math.round(base * (0.8 + 0.4 * (yield* Random.next)));
     const next = now + Math.max(jittered, retryAfterMs ?? 0);
     yield* next >= row.expiresAt ? finish(row, "expired", true) : reschedule(row, next, true);
   });
@@ -178,7 +180,13 @@ const make = Effect.gen(function* () {
     state: PushAttention.PushThreadAttentionState,
     now: number,
   ) {
-    if (row.envelope !== null && (row.envelopeExpiresAt ?? 0) > now) return row.envelope;
+    if (
+      row.envelope !== null &&
+      row.envelopeRevision === registration.revision &&
+      (row.envelopeExpiresAt ?? 0) > now
+    ) {
+      return row.envelope;
+    }
     const project = yield* projects.getShell(state.thread.projectId);
     const detail = registration.preview === "full" ? yield* attention.detail(state) : null;
     const content = buildPushContent(
@@ -206,7 +214,9 @@ const make = Effect.gen(function* () {
     });
     const encoded = yield* encodeEnvelope(envelope);
     yield* sql`
-      UPDATE push_deliveries SET envelope_json = ${encoded}, envelope_expires_at = ${expiresAt}
+      UPDATE push_deliveries
+      SET envelope_json = ${encoded}, envelope_expires_at = ${expiresAt},
+        envelope_revision = ${registration.revision}
       WHERE delivery_id = ${row.deliveryId} AND status = 'leased'
     `;
     return envelope;
@@ -236,9 +246,9 @@ const make = Effect.gen(function* () {
       return yield* Effect.forEach(retired, retireHandle, { discard: true });
     }
     const state = yield* attention.forThread(row.threadId);
-    if (state === null || state.attention?.key !== row.attentionKey) {
-      return yield* finish(row, "cancelled");
-    }
+    if (state === null) return yield* finish(row, "cancelled");
+    // The candidate reactor rearms it if this attention becomes current again.
+    if (state.attention?.key !== row.attentionKey) return yield* finish(row, "superseded");
     if (!PushAttention.isRequestKind(row.kind) && now < row.occurredAt + COMPLETION_GRACE_MS) {
       return yield* reschedule(row, row.occurredAt + COMPLETION_GRACE_MS, false);
     }
@@ -339,7 +349,7 @@ const make = Effect.gen(function* () {
           const now = yield* nowMillis;
           yield* sql`
             DELETE FROM push_deliveries
-            WHERE status IN ('sent', 'cancelled', 'expired', 'failed')
+            WHERE status IN ('sent', 'superseded', 'cancelled', 'expired', 'failed')
               AND occurred_at < ${now - SETTLED_RETENTION_MS}
           `;
           yield* wake;
