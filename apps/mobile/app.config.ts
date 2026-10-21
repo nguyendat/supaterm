@@ -425,7 +425,7 @@ const config: ExpoConfig = {
   extra: {
     appVariant: APP_VARIANT,
     iosPersonalTeamBuild: isIosPersonalTeamBuild,
-    pushGatewayUrl: repoEnv.SUPATERM_PUSH_GATEWAY_URL?.trim() || "https://push.supaterm.com",
+    pushGatewayUrl: repoEnv.SUPATERM_PUSH_GATEWAY_URL?.trim(),
     eas: {
       projectId: "c96e633c-2940-4aab-a40a-44777a9600c6",
     },

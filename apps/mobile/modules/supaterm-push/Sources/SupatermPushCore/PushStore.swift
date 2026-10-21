@@ -159,10 +159,8 @@ public final class PushRecipientStore {
 
   /// Keys with no binding, left behind when registration failed between key generation and binding.
   public func orphanKeyIds() throws -> [String] {
-    let accounts = try storage.accounts()
-    let bound = Set(accounts.filter { $0.hasPrefix("binding:") }
-      .compactMap { try? binding(String($0.dropFirst("binding:".count))).keyId })
-    return accounts.filter { $0.hasPrefix("key:") }.map { String($0.dropFirst("key:".count)) }
+    let bound = Set(try bindings().map(\.keyId))
+    return try storage.accounts().filter { $0.hasPrefix("key:") }.map { String($0.dropFirst("key:".count)) }
       .filter { !bound.contains($0) }
   }
 

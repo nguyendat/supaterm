@@ -16,8 +16,8 @@ interface RetainedScope {
 const retainedScopes = new Map<string, RetainedScope>();
 const listeners = new Set<() => void>();
 
-function notify(): void {
-  for (const listener of listeners) {
+function notify(targets: ReadonlySet<() => void>): void {
+  for (const listener of targets) {
     try {
       listener();
     } catch {}
@@ -60,7 +60,7 @@ function retainScope(environmentId: EnvironmentId, scope: BackgroundScope): () =
     current.refCount += 1;
   } else {
     retainedScopes.set(key, { environmentId, scope, refCount: 1 });
-    notify();
+    notify(listeners);
   }
   let released = false;
   return () => {
@@ -71,7 +71,7 @@ function retainScope(environmentId: EnvironmentId, scope: BackgroundScope): () =
     retained.refCount -= 1;
     if (retained.refCount <= 0) {
       retainedScopes.delete(key);
-      notify();
+      notify(listeners);
     }
   };
 }
@@ -127,11 +127,7 @@ export function recordMobileInteraction(now = Date.now()): void {
   lastInteractionAtMs = now;
   if (now - lastReportedInteractionAtMs < INTERACTION_REPORT_INTERVAL_MS) return;
   lastReportedInteractionAtMs = now;
-  for (const listener of interactionListeners) {
-    try {
-      listener();
-    } catch {}
-  }
+  notify(interactionListeners);
 }
 
 export function onMobileInteraction(listener: () => void): () => void {

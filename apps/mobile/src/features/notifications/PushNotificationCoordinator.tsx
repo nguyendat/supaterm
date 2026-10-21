@@ -3,7 +3,7 @@ import { useLinkTo } from "@react-navigation/native";
 import type { EnvironmentId } from "@supaterm/contracts";
 import * as Notifications from "expo-notifications";
 import { useEffect, useEffectEvent, useRef } from "react";
-import { AppState, Platform } from "react-native";
+import { AppState } from "react-native";
 
 import { environmentCatalog } from "../../connection/catalog";
 import { workspaceConnections } from "../../state/workspace";
@@ -30,11 +30,11 @@ const SHOWN: Notifications.NotificationBehavior = {
   shouldSetBadge: false,
 };
 
-function triggerPayload(notification: Notifications.Notification): unknown {
+function notificationChallenge(notification: Notifications.Notification) {
   const trigger = notification.request.trigger;
   return trigger !== null && typeof trigger === "object" && "payload" in trigger
-    ? trigger.payload
-    : undefined;
+    ? pushChallengeFromPayload(trigger.payload)
+    : null;
 }
 
 /** `[environmentId, connected]` pairs as one string, so unrelated presentation changes do not resync. */
@@ -66,7 +66,7 @@ function parseConnectionKey(key: string) {
 
 async function consumePresentedChallenges(): Promise<void> {
   for (const notification of await Notifications.getPresentedNotificationsAsync()) {
-    const challenge = pushChallengeFromPayload(triggerPayload(notification));
+    const challenge = notificationChallenge(notification);
     if (challenge === null) continue;
     pushChallenges.deliver(challenge);
     await Notifications.dismissNotificationAsync(notification.request.identifier);
@@ -74,9 +74,7 @@ async function consumePresentedChallenges(): Promise<void> {
 }
 
 export function PushNotificationCoordinator() {
-  return Platform.OS === "ios" && pushRegistrar() !== null ? (
-    <IosPushNotificationCoordinator />
-  ) : null;
+  return pushRegistrar() === null ? null : <IosPushNotificationCoordinator />;
 }
 
 function IosPushNotificationCoordinator() {
@@ -114,7 +112,7 @@ function IosPushNotificationCoordinator() {
     if (handledResponses.current.has(identifier)) return;
     handledResponses.current.add(identifier);
     Notifications.clearLastNotificationResponse();
-    const challenge = pushChallengeFromPayload(triggerPayload(response.notification));
+    const challenge = notificationChallenge(response.notification);
     if (challenge !== null) {
       pushChallenges.deliver(challenge);
       return;
@@ -128,7 +126,7 @@ function IosPushNotificationCoordinator() {
   useEffect(() => {
     Notifications.setNotificationHandler({
       handleNotification: async (notification) => {
-        const challenge = pushChallengeFromPayload(triggerPayload(notification));
+        const challenge = notificationChallenge(notification);
         if (challenge !== null) {
           pushChallenges.deliver(challenge);
           return HIDDEN;

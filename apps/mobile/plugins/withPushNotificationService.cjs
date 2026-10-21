@@ -40,10 +40,10 @@ function findGroup(project) {
   const entry = Object.entries(groups).find(
     ([id, group]) => !id.endsWith("_comment") && unquote(group.path) === TARGET_NAME,
   );
-  if (entry) return entry;
+  if (entry) return entry[1];
   const added = project.addPbxGroup([], TARGET_NAME, TARGET_NAME);
   project.addToPbxGroup(added.uuid, project.getFirstProject().firstProject.mainGroup);
-  return [added.uuid, added.pbxGroup];
+  return added.pbxGroup;
 }
 
 function addGroupFile(project, group, name) {
@@ -63,7 +63,7 @@ function addGroupFile(project, group, name) {
 /** Keeps the target's Sources phase equal to the module's Swift files across repeated prebuilds. */
 function reconcileSources(project, targetId, sources) {
   const objects = project.hash.project.objects;
-  const [, group] = findGroup(project);
+  const group = findGroup(project);
   const names = sources.map((source) => source.name);
   // Info.plist and the entitlements are build-setting paths and need no reference. A reference
   // would also be picked up by other extension plugins, whose `addFile` reuses any same-path file.
