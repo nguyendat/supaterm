@@ -8,11 +8,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText as Text } from "../../components/ui/AppText";
 import * as Dialog from "../../components/ui/Dialog";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
+import { appAtomRegistry } from "../../state/atom-registry";
 import { useWorkspaceEnvironments } from "../../state/workspace";
 import type { PushDeviceState, PushEnvironmentState } from "../notifications/pushRegistrar";
 import { describePushEnvironmentState } from "../notifications/pushStatusText";
 import {
   loadPushHideContent,
+  loadPushSettings,
   pushCommands,
   pushHideContentAtom,
   pushRegistrar,
@@ -75,6 +77,9 @@ export function SettingsNotificationsRouteScreen() {
 
   useEffect(() => {
     void loadPushHideContent().catch(() => undefined);
+    if (appAtomRegistry.get(pushSettingsAtom) === null) {
+      void loadPushSettings().catch(() => undefined);
+    }
   }, []);
 
   const enabled = settings?.enabled ?? false;

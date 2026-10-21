@@ -179,6 +179,10 @@ export function pushRegistrar(): PushRegistrar | null {
   return registrar;
 }
 
+export async function loadPushSettings(): Promise<void> {
+  appAtomRegistry.set(pushSettingsAtom, await runStore((store) => store.load));
+}
+
 export async function loadPushHideContent(): Promise<void> {
   if (SupatermPush === null) return;
   appAtomRegistry.set(pushHideContentAtom, await SupatermPush.getHideContent());
