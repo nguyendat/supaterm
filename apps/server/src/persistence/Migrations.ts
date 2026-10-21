@@ -82,6 +82,17 @@ const ensureUnrecordedSchema = Effect.fn("ensureUnrecordedSchema")(function* () 
     )
     WHERE type = 'error' AND status = 'failed'
   `;
+  yield* sql`
+    CREATE INDEX IF NOT EXISTS orchestration_v2_projection_turn_items_run_interrupt_idx
+    ON orchestration_v2_projection_turn_items(thread_id, run_id)
+    WHERE type = 'run_interrupt_request'
+  `;
+  // Shell resume groups this range by aggregate; covering it keeps payload pages unread.
+  yield* sql`
+    CREATE INDEX IF NOT EXISTS idx_orchestration_events_application_changes
+    ON orchestration_events(sequence, aggregate_kind, stream_id, application_event_version)
+    WHERE aggregate_kind = 'project' OR (application_event_version = 2 AND aggregate_kind = 'thread')
+  `;
 });
 
 const run = Migrator.make({});

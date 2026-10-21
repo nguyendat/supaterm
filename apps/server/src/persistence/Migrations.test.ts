@@ -73,6 +73,41 @@ describe("runMigrations", () => {
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
+  it.effect(
+    "indexes shell resume and stop-request lookups without changing recorded migrations",
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* runMigrations();
+        const changes = yield* sql<{ readonly detail: string }>`
+        EXPLAIN QUERY PLAN SELECT aggregate_kind, stream_id, MAX(sequence)
+        FROM orchestration_events INDEXED BY idx_orchestration_events_application_changes
+        WHERE sequence > 1 AND sequence <= 9
+          AND (aggregate_kind = 'project' OR (application_event_version = 2 AND aggregate_kind = 'thread'))
+        GROUP BY aggregate_kind, stream_id
+      `;
+        assert.isTrue(
+          changes.some((row) =>
+            row.detail.includes(
+              "USING COVERING INDEX idx_orchestration_events_application_changes",
+            ),
+          ),
+        );
+        const interrupt = yield* sql<{ readonly detail: string }>`
+        EXPLAIN QUERY PLAN SELECT 1 FROM orchestration_v2_projection_turn_items request
+        WHERE request.thread_id = 'thread' AND request.run_id = 'run'
+          AND request.type = 'run_interrupt_request'
+      `;
+        assert.isTrue(
+          interrupt.some((row) =>
+            row.detail.includes("orchestration_v2_projection_turn_items_run_interrupt_idx"),
+          ),
+        );
+        assert.deepStrictEqual(yield* runMigrations(), []);
+        assert.deepStrictEqual(yield* history, migrationManifest);
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
   it.effect("refuses a database whose migration history came from another build", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;

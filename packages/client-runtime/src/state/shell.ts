@@ -26,7 +26,7 @@ import * as ConnectionWakeups from "../connection/wakeups.ts";
 import { safeErrorLogAttributes } from "../errors/safeLog.ts";
 import * as Persistence from "../platform/persistence.ts";
 import { runCachePersistence } from "./cachePersistence.ts";
-import { subscribeDynamic } from "../rpc/client.ts";
+import { subscribeDynamicWithSession } from "../rpc/client.ts";
 import type { RpcSession } from "../rpc/session.ts";
 import * as ShellSnapshotLoader from "./shellSnapshotHttp.ts";
 import type { DeferredShellSnapshot } from "./shellPullRequests.ts";
@@ -40,6 +40,18 @@ import { type EnvironmentCatalogState, enabledEnvironmentIds } from "./connectio
 import { followStreamInEnvironment } from "./runtime.ts";
 
 export type EnvironmentShellStatus = "empty" | "cached" | "synchronizing" | "live";
+
+function groupBySource<A>(
+  entries: ReadonlyArray<readonly [RpcSession, A]>,
+): ReadonlyArray<readonly [RpcSession, ReadonlyArray<A>]> {
+  const groups: Array<readonly [RpcSession, Array<A>]> = [];
+  for (const [source, item] of entries) {
+    const last = groups.at(-1);
+    if (last !== undefined && last[0] === source) last[1].push(item);
+    else groups.push([source, [item]]);
+  }
+  return groups;
+}
 
 export interface EnvironmentShellState {
   readonly snapshot: Option.Option<OrchestrationV2ShellSnapshot>;
@@ -92,6 +104,13 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
   });
   const awaitingCompletion = yield* Ref.make(false);
   const lastAuthoritativeSession = yield* Ref.make<RpcSession | null>(null);
+  // The server run whose stream last brought this in-memory shell to `synchronized`.
+  // Only a shell completed in this process qualifies, never one loaded from disk.
+  const completedGeneration = yield* Ref.make<string | null>(null);
+  const sessionGenerations = new WeakMap<RpcSession, string | null>();
+  // An unknown item still advances the cursor past rows this build could not
+  // apply, so a resume would never resend them.
+  let skippedUnknownItem = false;
   const activeSubscriptionSession = yield* Ref.make<RpcSession | null>(null);
   const latestLiveSnapshot = yield* Ref.make<Option.Option<OrchestrationV2ShellSnapshot>>(
     Option.none(),
@@ -177,11 +196,14 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
 
   const applyItems = Effect.fn("EnvironmentShellState.applyItems")(function* (
     items: ReadonlyArray<OrchestrationV2ShellStreamItem>,
-
-    pendingLinkIds?: ReadonlySet<ThreadId>,
+    options?: {
+      readonly pendingLinkIds?: ReadonlySet<ThreadId>;
+      readonly source?: RpcSession;
+    },
   ) {
     const initial = yield* SubscriptionRef.get(state);
     let waiting = yield* Ref.get(awaitingCompletion);
+    let generation = yield* Ref.get(completedGeneration);
     let next = initial;
     let receivedSnapshot = false;
     for (const item of items) {
@@ -189,10 +211,21 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         waiting = false;
         if (Option.isSome(next.snapshot)) {
           next = { snapshot: next.snapshot, status: "live", error: Option.none() };
+          generation =
+            skippedUnknownItem || options?.source === undefined
+              ? null
+              : (sessionGenerations.get(options.source) ?? null);
         }
         continue;
       }
-      if (item.kind === "unknown-item") continue;
+      if (item.kind === "unknown-item") {
+        skippedUnknownItem = true;
+        generation = null;
+        continue;
+      }
+      if (item.kind === "snapshot" && item.resolvedRepositoryIdentityRoots === undefined) {
+        skippedUnknownItem = false;
+      }
       const nextSnapshot =
         item.kind === "snapshot"
           ? mergeShellSnapshotProjects(
@@ -220,7 +253,9 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       };
     }
     yield* Ref.set(awaitingCompletion, waiting);
+    yield* Ref.set(completedGeneration, generation);
     if (next === initial) return;
+    const pendingLinkIds = options?.pendingLinkIds;
     if (pendingLinkIds !== undefined && Option.isSome(next.snapshot)) {
       pendingLinkRows = new Set(
         next.snapshot.value.threads.filter((thread) => pendingLinkIds.has(thread.id)),
@@ -311,26 +346,43 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
   const foregroundResubscriptions = Option.match(wakeups, {
     onNone: () => Stream.never,
     onSome: (service) =>
-      service.changes.pipe(Stream.filter(ConnectionWakeups.shouldResubscribeAfterWakeup)),
+      service.changes.pipe(
+        // The OS may end a backgrounded app before the throttled write runs.
+        Stream.tap((reason) =>
+          reason === "application-background"
+            ? Effect.forkIn(flushLiveShellSnapshot, stateScope)
+            : Effect.void,
+        ),
+        Stream.filter(ConnectionWakeups.shouldResubscribeAfterWakeup),
+      ),
   });
 
   yield* setSynchronizing;
   yield* Effect.forkScoped(
-    subscribeDynamic(
+    subscribeDynamicWithSession(
       ORCHESTRATION_V2_WS_METHODS.subscribeShell,
       Effect.fn("EnvironmentShellState.makeSubscribeInput")(function* (session) {
         yield* Ref.set(activeSubscriptionSession, session);
-        const supportsCompletionMarker = yield* session.initialConfig.pipe(
-          Effect.map((config) => config.shellResumeCompletionMarker === true),
-          Effect.orElseSucceed(() => false),
+        const initialConfig = yield* session.initialConfig.pipe(Effect.option);
+        const supportsCompletionMarker = Option.exists(
+          initialConfig,
+          (config) => config.shellResumeCompletionMarker === true,
         );
+        const generation = Option.match(initialConfig, {
+          onNone: () => null,
+          onSome: (config) => config.shellSyncGeneration ?? null,
+        });
+        sessionGenerations.set(session, generation);
         yield* Ref.set(awaitingCompletion, supportsCompletionMarker);
         yield* setSynchronizing;
 
-        // Foreground resubscriptions on the same live session can resume from
-        // the in-memory cursor. A new session reloads the authoritative HTTP
-        // snapshot so a valid cursor cannot preserve incomplete cached data.
-        const hasAuthoritativeSnapshot = (yield* Ref.get(lastAuthoritativeSession)) === session;
+        // A resubscription on the same live session, or a new session to the
+        // same server run after this shell synchronized, resumes from the
+        // in-memory cursor. Otherwise reload the authoritative HTTP snapshot so
+        // a valid cursor cannot preserve incomplete cached data.
+        const hasAuthoritativeSnapshot =
+          (yield* Ref.get(lastAuthoritativeSession)) === session ||
+          (generation !== null && (yield* Ref.get(completedGeneration)) === generation);
         let canResume = hasAuthoritativeSnapshot;
         let current = yield* SubscriptionRef.get(state);
         if (!hasAuthoritativeSnapshot || Option.isNone(current.snapshot)) {
@@ -361,7 +413,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
                 ? []
                 : httpSnapshot.value.threads.map((thread) => thread.id),
             );
-            yield* applyItems([{ kind: "snapshot", snapshot }], pendingLinkIds);
+            yield* applyItems([{ kind: "snapshot", snapshot }], { pendingLinkIds });
             canResume = true;
             current = yield* SubscriptionRef.get(state);
             if (Option.isSome(current.snapshot)) {
@@ -390,7 +442,13 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         retryExpectedFailureAfter: "250 millis",
         resubscribe: foregroundResubscriptions,
       },
-    ).pipe(Stream.runForEachArray((items) => applyItems(items))),
+    ).pipe(
+      Stream.runForEachArray((entries) =>
+        Effect.forEach(groupBySource(entries), ([source, items]) => applyItems(items, { source }), {
+          discard: true,
+        }),
+      ),
+    ),
   );
   yield* SubscriptionRef.changes(supervisor.state).pipe(
     Stream.runForEach((connectionState) => {

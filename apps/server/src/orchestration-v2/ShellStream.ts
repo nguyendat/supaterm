@@ -11,6 +11,8 @@ import type {
 import {
   OrchestrationProjectShell as ProjectShellSchema,
   OrchestrationV2ThreadShell as ThreadShellSchema,
+  ProjectId,
+  ThreadId,
 } from "@supaterm/contracts";
 import * as NodeSqliteClient from "@supaterm/shared/nodeSqliteClient";
 import type * as Arr from "effect/Array";
@@ -24,6 +26,7 @@ import * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
+import type { ChangedApplicationAggregate } from "../persistence/OrchestrationEventStore.ts";
 import { bufferLatestLiveStream } from "./LiveStreamBudget.ts";
 
 type ShellDelta = Extract<OrchestrationV2ShellStreamItem, { readonly sequence: number }>;
@@ -91,15 +94,32 @@ export const loadShellSnapshotParts = Effect.fn("ShellStream.loadShellSnapshotPa
   };
 });
 
+type ProjectStoredEvent = Extract<ApplicationStoredEvent, { readonly aggregateKind: "project" }>;
+
 export type ShellApplicationEvent =
-  | Pick<
-      Extract<ApplicationStoredEvent, { readonly aggregateKind: "project" }>,
-      "aggregateKind" | "aggregateId" | "type" | "sequence"
-    >
+  | (Pick<ProjectStoredEvent, "aggregateKind" | "aggregateId" | "sequence"> & {
+      /** Absent for resume rows, which carry no payload; the current row decides removal. */
+      readonly type?: ProjectStoredEvent["type"];
+    })
   | {
       readonly sequence: number;
       readonly event: Pick<OrchestrationV2StoredEvent["event"], "threadId">;
     };
+
+export function shellApplicationEventFromChangedAggregate(
+  changed: ChangedApplicationAggregate,
+): ShellApplicationEvent {
+  return changed.aggregateKind === "project"
+    ? {
+        aggregateKind: "project",
+        aggregateId: ProjectId.make(changed.aggregateId),
+        sequence: changed.sequence,
+      }
+    : {
+        sequence: changed.sequence,
+        event: { threadId: ThreadId.make(changed.aggregateId) },
+      };
+}
 
 /** Shell updates refetch an aggregate; drop transcript bodies before retaining an event. */
 export function toShellApplicationEvent(stored: ApplicationStoredEvent): ShellApplicationEvent {
