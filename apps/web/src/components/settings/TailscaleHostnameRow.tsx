@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { requestConfirmDialog } from "~/confirmDialog";
 import { Input } from "../ui/input";
@@ -21,16 +21,20 @@ export function TailscaleHostnameRow({
   readonly onRename: (hostname: string) => Promise<boolean>;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
+  const committing = useRef(false);
   const error = draft === null ? null : tailnetHostnameError(draft.trim());
 
-  const commit = async () => {
-    if (draft === null) return;
-    const next = draft.trim();
-    if (next === hostname) {
+  // Enter re-applies even an unchanged name, so a rename Tailscale rejected can be retried;
+  // blur only applies real edits.
+  const commit = async (reapply: boolean) => {
+    if (committing.current) return;
+    const next = (draft ?? hostname).trim();
+    if (next === hostname && !reapply) {
       setDraft(null);
       return;
     }
     if (tailnetHostnameError(next) !== null) return;
+    committing.current = true;
     const confirmed = await requestConfirmDialog(
       tailnetConfirmationMessage(
         `Rename this device to ${next}?`,
@@ -38,11 +42,9 @@ export function TailscaleHostnameRow({
         lockoutWarning,
       ),
     );
-    if (confirmed !== true) {
-      setDraft(null);
-      return;
-    }
-    if (await onRename(next)) setDraft(null);
+    const renamed = confirmed === true && (await onRename(next));
+    committing.current = false;
+    if (confirmed !== true || renamed) setDraft(null);
   };
 
   return (
@@ -72,12 +74,12 @@ export function TailscaleHostnameRow({
             autoComplete="off"
             spellCheck={false}
             onChange={(event) => setDraft(event.target.value)}
-            onBlur={() => void commit()}
+            onBlur={() => void commit(false)}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing) return;
               if (event.key === "Enter") {
                 event.preventDefault();
-                event.currentTarget.blur();
+                void commit(true);
               } else if (event.key === "Escape" && draft !== null) {
                 event.preventDefault();
                 event.stopPropagation();

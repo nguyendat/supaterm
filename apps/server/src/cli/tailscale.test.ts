@@ -8,12 +8,14 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ORCHESTRATION_PROTOCOL_VERSION, type TailnetStatus } from "@supaterm/contracts";
 import * as NetService from "@supaterm/shared/Net";
 import { assert, expect, it } from "@effect/vitest";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { Command } from "effect/cli";
 import * as TestConsole from "effect/testing/TestConsole";
 
 import { cli } from "../binCli.ts";
+import { TailnetLoginPollInterval } from "./tailscale.ts";
 import {
   makePersistedServerRuntimeState,
   persistServerRuntimeState,
@@ -202,6 +204,39 @@ it.effect("reauthenticates an expired enrollment instead of signing in again", (
         const output = (yield* TestConsole.logLines).join("\n");
         assert.include(output, "--tag, and --auth-key-file are ignored");
         assert.include(output, "back in to Tailscale");
+        assert.include(output, LOGIN_URL);
+        assert.include(output, "Built-in Tailscale: Running");
+      }),
+  );
+});
+
+it.live("waits for a booting node to settle before asking for a login link", () => {
+  const phases = ["starting", "needs-login"] as const;
+  let reads = 0;
+  let reauthenticated = false;
+  return withRunningServer(
+    (request) => {
+      if (request.url === "/api/tailnet/status") {
+        if (reauthenticated) return runningStatus;
+        const phase = phases[Math.min(reads, phases.length - 1)];
+        reads += 1;
+        return { ...baseStatus, phase };
+      }
+      if (request.url === "/api/tailnet/reauthenticate" && request.method === "POST") {
+        reauthenticated = true;
+        return { loginUrl: LOGIN_URL };
+      }
+      return undefined;
+    },
+    ({ baseDir, requests }) =>
+      Effect.gen(function* () {
+        yield* runCli(["tailscale", "login", "--base-dir", baseDir]).pipe(
+          Effect.provideService(TailnetLoginPollInterval, Duration.zero),
+        );
+
+        expect(mutations(requests)).toEqual([{ url: "/api/tailnet/reauthenticate", body: null }]);
+        const output = (yield* TestConsole.logLines).join("\n");
+        assert.include(output, "is starting");
         assert.include(output, LOGIN_URL);
         assert.include(output, "Built-in Tailscale: Running");
       }),

@@ -174,4 +174,17 @@ describe("tailnetStatusHeader", () => {
     expect(running("2026-10-22T12:00:00Z").warning).toMatch(/expires in 1 day\./u);
     expect(running("2027-04-01T00:00:00Z").warning).toBeUndefined();
   });
+
+  it("shows a failed change while running so the user can retry it", () => {
+    const header = tailnetStatusHeader(
+      status({
+        phase: "running",
+        message: "Could not rename this machine on Tailscale: name taken",
+        self: { tagged: false, tags: [], keyExpiry: "2026-10-22T12:00:00Z" },
+      }),
+      "this Mac",
+      now,
+    );
+    expect(header.warning).toBe("Could not rename this machine on Tailscale: name taken");
+  });
 });

@@ -11,6 +11,7 @@ import {
   type TailnetStatus,
 } from "@supaterm/contracts";
 import * as Console from "effect/Console";
+import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -29,8 +30,13 @@ import {
 } from "./pair.ts";
 
 const COMMAND_SESSION_TTL = Duration.seconds(30);
-const LOGIN_POLL_INTERVAL = Duration.seconds(2);
+export class TailnetLoginPollInterval extends Context.Reference<Duration.Duration>(
+  "supaterm/cli/TailnetLoginPollInterval",
+  { defaultValue: () => Duration.seconds(2) },
+) {}
+
 const LOGIN_WAIT = Duration.minutes(10);
+const STARTUP_WAIT = Duration.minutes(1);
 // Outlives the wait so the last poll is still authorized.
 const LOGIN_POLL_SESSION_TTL = Duration.minutes(11);
 
@@ -179,7 +185,7 @@ const awaitSignedIn = (connection: Connection) =>
             default:
               break;
           }
-          yield* Effect.sleep(LOGIN_POLL_INTERVAL);
+          yield* Effect.sleep(yield* TailnetLoginPollInterval);
         }
       }).pipe(
         Effect.timeoutOrElse({
@@ -188,6 +194,22 @@ const awaitSignedIn = (connection: Connection) =>
         }),
       ),
   );
+
+// Status never carries the login URL, so a node still booting must settle before login can ask for one.
+const awaitStartup = Effect.fn("tailscale.awaitStartup")(
+  function* (connection: Connection, initial: TailnetStatus) {
+    let status = initial;
+    while (status.phase === "starting") {
+      yield* Effect.sleep(yield* TailnetLoginPollInterval);
+      status = yield* readStatus(connection);
+    }
+    return status;
+  },
+  Effect.timeoutOrElse({
+    duration: STARTUP_WAIT,
+    orElse: () => Effect.fail(new TailnetLoginTimedOutError()),
+  }),
+);
 
 const withLoginSession = <A, E, R>(
   connection: Connection,
@@ -252,17 +274,19 @@ const loginCommand = Command.make("login", {
       }
 
       const connection = yield* connect(flags.baseDir);
-      const current = yield* readStatus(connection);
       const target = describeTarget(connection.target);
+      let current = yield* readStatus(connection);
+      if (current.phase === "starting") {
+        yield* Console.log(`Tailscale is starting on ${target}…`);
+        current = yield* awaitStartup(connection, current);
+      }
       if (current.phase === "running") {
         return yield* Console.log(
           [`${target} is already signed in to Tailscale.`, formatTailnetStatus(current)].join("\n"),
         );
       }
 
-      if (current.phase === "starting") {
-        yield* Console.log(`Tailscale is starting on ${target}…`);
-      } else if (current.phase === "signed-out" || current.phase === "unavailable") {
+      if (current.phase === "signed-out" || current.phase === "unavailable") {
         const hostname = Option.getOrElse(
           Option.map(flags.hostname, (value) => value.trim().toLowerCase()),
           () => current.hostname ?? current.suggestedHostname,

@@ -176,7 +176,8 @@ export function tailnetStatusHeader(
       return {
         title: "Signed in to Tailscale",
         description: accountSummary ?? "Connected to your tailnet.",
-        warning: keyExpiryDays === null ? undefined : keyExpiryWarning(keyExpiryDays),
+        warning:
+          status.message ?? (keyExpiryDays === null ? undefined : keyExpiryWarning(keyExpiryDays)),
         actions: ["sign-out"],
       };
     }
