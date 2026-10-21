@@ -36,6 +36,8 @@ export const COMPLETION_GRACE_MS = 2_000;
 const BACKOFF_MS = [2_000, 5_000, 15_000, 60_000, 300_000] as const;
 /** How long after a client's last input it still counts as watching the thread. */
 const RECENT_INTERACTION_MS = 45_000;
+/** Input this close before a completion, reported after it, means the user saw it land. */
+const SEEN_INPUT_WINDOW_MS = 10_000;
 const SETTLED_RETENTION_MS = 7 * 24 * 60 * 60_000;
 
 const DeliveryRow = Schema.Struct({
@@ -156,7 +158,8 @@ const make = Effect.gen(function* () {
       const seenAfterEvent = watching.some(
         (lease) =>
           lease.lastInteractionAt !== undefined &&
-          DateTime.toEpochMillis(lease.lastInteractionAt) > row.occurredAt,
+          DateTime.toEpochMillis(lease.updatedAt) >= row.occurredAt &&
+          DateTime.toEpochMillis(lease.lastInteractionAt) >= row.occurredAt - SEEN_INPUT_WINDOW_MS,
       );
       return seenAfterEvent ? ("drop" as const) : null;
     }

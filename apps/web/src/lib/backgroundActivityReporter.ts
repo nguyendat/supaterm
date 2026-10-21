@@ -8,6 +8,7 @@ import {
   type BackgroundScope,
   type ClientActivityReportInput,
   type EnvironmentId,
+  type ThreadId,
   WS_METHODS,
 } from "@supaterm/contracts";
 import * as Clock from "effect/Clock";
@@ -25,9 +26,6 @@ const CLIENT_ID_STORAGE_KEY = "supaterm.backgroundActivity.clientId";
 const REPORT_INTERVAL_MS = 25_000;
 const LEASE_TTL_MS = 45_000;
 const RECENT_INTERACTION_WINDOW_MS = LEASE_TTL_MS;
-// The host drops a completion push when a lease shows interaction after it, checked
-// two seconds after the event, so input on a shown thread must reach the host sooner.
-const THREAD_INTERACTION_REPORT_INTERVAL_MS = 1_000;
 const BASELINE_SCOPES: ReadonlyArray<BackgroundScope> = [{ type: "provider-status" }];
 
 interface RetainedScope {
@@ -38,6 +36,7 @@ interface RetainedScope {
 
 const retainedScopes = new Map<string, RetainedScope>();
 const retainedScopeListeners = new Set<() => void>();
+const shownAttentionListeners = new Set<(environmentId: EnvironmentId) => void>();
 
 function notifyRetainedScopesChanged(): void {
   for (const listener of retainedScopeListeners) {
@@ -83,17 +82,6 @@ export function wasRecentlyInteracted(lastInteractionAtMs: number, observedAtMs:
     lastInteractionAtMs <= observedAtMs &&
     observedAtMs - lastInteractionAtMs <= RECENT_INTERACTION_WINDOW_MS
   );
-}
-
-function holdsThreadScope(environmentId?: EnvironmentId): boolean {
-  for (const entry of retainedScopes.values()) {
-    if (
-      entry.scope.type === "thread" &&
-      (environmentId === undefined || entry.environmentId === environmentId)
-    )
-      return true;
-  }
-  return false;
 }
 
 export function createActivityReport(
@@ -182,6 +170,16 @@ export function retainedBackgroundScopes(
   ).filter((scope): scope is BackgroundScope => scope !== null);
 }
 
+/**
+ * The host holds a completion push for two seconds and drops it when a client reports,
+ * after the event, that it shows the thread and had input just before. This sends that
+ * report at once instead of on the next 25 second tick.
+ */
+export function reportShownThreadAttention(environmentId: EnvironmentId, threadId: ThreadId): void {
+  if (!retainedScopes.has(stableScopeKey(environmentId, { type: "thread", threadId }))) return;
+  for (const listener of shownAttentionListeners) listener(environmentId);
+}
+
 export const layerObserver = Layer.succeed(
   EnvironmentRpcSubscriptionObserver,
   EnvironmentRpcSubscriptionObserver.of({
@@ -199,14 +197,18 @@ export const layer = Layer.effectDiscard(
     const clock = yield* Clock.Clock;
     const reportRequests = yield* Queue.sliding<void>(1);
     let reportAll = true;
+    const pendingEnvironments = new Set<EnvironmentId>();
     const requestReport = () => {
       reportAll = true;
+      Queue.offerUnsafe(reportRequests, undefined);
+    };
+    const requestEnvironmentReport = (environmentId: EnvironmentId) => {
+      pendingEnvironments.add(environmentId);
       Queue.offerUnsafe(reportRequests, undefined);
     };
     let lastInteractionAtMs = clock.currentTimeMillisUnsafe();
     // Real input only; the value above starts at load so a fresh window counts as recent.
     let lastInputAtMs: number | null = null;
-    let reportedInputAtMs = Number.NEGATIVE_INFINITY;
     const recordInteraction = () => {
       const observedAtMs = clock.currentTimeMillisUnsafe();
       const wasRecent = wasRecentlyInteracted(lastInteractionAtMs, observedAtMs);
@@ -214,12 +216,6 @@ export const layer = Layer.effectDiscard(
       lastInputAtMs = observedAtMs;
       if (!wasRecent) {
         requestReport();
-      } else if (
-        observedAtMs - reportedInputAtMs >= THREAD_INTERACTION_REPORT_INTERVAL_MS &&
-        holdsThreadScope()
-      ) {
-        reportedInputAtMs = observedAtMs;
-        Queue.offerUnsafe(reportRequests, undefined);
       }
     };
     const passiveListenerOptions = { passive: true } as const;
@@ -228,12 +224,11 @@ export const layer = Layer.effectDiscard(
       const observedAtMs = yield* Clock.currentTimeMillis;
       const entries = yield* SubscriptionRef.get(registry.entries);
       const all = reportAll;
+      const pending = new Set(pendingEnvironments);
       reportAll = false;
-      if (lastInputAtMs !== null) reportedInputAtMs = Math.max(reportedInputAtMs, lastInputAtMs);
+      pendingEnvironments.clear();
       yield* Effect.forEach(
-        Array.from(entries.keys()).filter(
-          (environmentId) => all || holdsThreadScope(environmentId),
-        ),
+        Array.from(entries.keys()).filter((environmentId) => all || pending.has(environmentId)),
         (environmentId) =>
           registry
             .run(
@@ -257,6 +252,7 @@ export const layer = Layer.effectDiscard(
     yield* Effect.acquireRelease(
       Effect.sync(() => {
         retainedScopeListeners.add(requestReport);
+        shownAttentionListeners.add(requestEnvironmentReport);
         document.addEventListener("visibilitychange", requestReport);
         window.addEventListener("focus", requestReport);
         window.addEventListener("blur", requestReport);
@@ -269,6 +265,7 @@ export const layer = Layer.effectDiscard(
       () =>
         Effect.sync(() => {
           retainedScopeListeners.delete(requestReport);
+          shownAttentionListeners.delete(requestEnvironmentReport);
           document.removeEventListener("visibilitychange", requestReport);
           window.removeEventListener("focus", requestReport);
           window.removeEventListener("blur", requestReport);

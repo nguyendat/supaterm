@@ -148,6 +148,7 @@ const requestApproval = (world: PushWorld) =>
 const watchingLease = (input: {
   readonly lastInteractionAt: DateTime.Utc;
   readonly expiresAt: DateTime.Utc;
+  readonly updatedAt?: DateTime.Utc;
 }): ClientActivityLease => ({
   sessionId: AuthSessionId.make("desktop"),
   rpcClientId: RpcClientId.make(1),
@@ -158,7 +159,7 @@ const watchingLease = (input: {
   recentlyInteracted: true,
   scopes: [{ type: "thread", threadId: THREAD }],
   lastInteractionAt: input.lastInteractionAt,
-  updatedAt: input.lastInteractionAt,
+  updatedAt: input.updatedAt ?? input.lastInteractionAt,
   expiresAt: input.expiresAt,
 });
 
@@ -329,6 +330,48 @@ describe("PushDeliveryWorker", () => {
           (yield* deliveryRows).map((row) => row.status),
           ["cancelled"],
         );
+      }),
+    ),
+  );
+
+  it.effect("drops a completion when a client reports it landed just after input", () =>
+    withWorker((world) =>
+      Effect.gen(function* () {
+        yield* register("titles");
+        yield* finishRun(world);
+        const now = yield* DateTime.now;
+        yield* Ref.set(world.leases, [
+          watchingLease({
+            lastInteractionAt: DateTime.subtract(now, { seconds: 5 }),
+            updatedAt: DateTime.add(now, { seconds: 1 }),
+            expiresAt: DateTime.add(now, { seconds: 45 }),
+          }),
+        ]);
+        yield* TestClock.adjust("2 seconds");
+        yield* drainWorker;
+
+        assert.deepStrictEqual(yield* takeCalls(world), []);
+      }),
+    ),
+  );
+
+  it.effect("sends a completion when the watching client went quiet before it", () =>
+    withWorker((world) =>
+      Effect.gen(function* () {
+        yield* register("titles");
+        yield* finishRun(world);
+        const now = yield* DateTime.now;
+        yield* Ref.set(world.leases, [
+          watchingLease({
+            lastInteractionAt: DateTime.subtract(now, { seconds: 20 }),
+            updatedAt: DateTime.add(now, { seconds: 1 }),
+            expiresAt: DateTime.add(now, { seconds: 45 }),
+          }),
+        ]);
+        yield* TestClock.adjust("2 seconds");
+        yield* drainWorker;
+
+        assert.strictEqual((yield* takeCalls(world)).length, 1);
       }),
     ),
   );

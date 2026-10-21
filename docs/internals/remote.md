@@ -126,8 +126,12 @@ event; approvals and questions last until they resolve or auto-dismiss, with eac
 envelope capped at 24 hours.
 
 Suppression uses thread activity leases and the client's last real input, never
-`thread.visit`, which reports pane ownership rather than visibility. When the
-signals disagree the result is a duplicate alert, never a lost one.
+`thread.visit`, which reports pane ownership rather than visibility. A client that
+shows a thread sends one activity report when new attention lands there, instead
+of streaming input; the host drops a completion only when a report made after the
+event shows input from at most 10 seconds before it, and holds approvals while the
+thread is watched. When the signals disagree the result is a duplicate alert, never
+a lost one.
 
 The host contacts only origins in `pushGatewayOrigins`: HTTPS, or HTTP on
 localhost for development. It rejects origins that resolve to private or

@@ -13,6 +13,7 @@ import {
   createActivityReport,
   layer,
   observeBackgroundActivitySubscription,
+  reportShownThreadAttention,
   retainBackgroundScope,
   retainedBackgroundScopes,
   wasRecentlyInteracted,
@@ -125,10 +126,11 @@ describe("reporting", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("reports input on a shown thread promptly, to that thread's environment only", () =>
+  it.effect("reports at once to the environment whose shown thread got new attention", () =>
     Effect.gen(function* () {
       const shown = EnvironmentId.make("environment-showing-thread");
       const other = EnvironmentId.make("environment-without-thread");
+      const threadId = ThreadId.make("thread-shown");
       const entries = yield* SubscriptionRef.make(
         new Map([
           [shown, {}],
@@ -146,31 +148,19 @@ describe("reporting", () => {
       yield* Layer.build(
         layer.pipe(Layer.provide(Layer.succeed(EnvironmentRegistry.EnvironmentRegistry, registry))),
       );
+      const release = retainBackgroundScope(shown, { type: "thread", threadId });
       yield* TestClock.adjust("1 second");
-      calls.length = 0;
-
-      window.dispatchEvent(new Event("keydown"));
-      yield* TestClock.adjust("1 second");
-      expect(calls).toEqual([]);
-
-      const release = retainBackgroundScope(shown, {
-        type: "thread",
-        threadId: ThreadId.make("thread-shown"),
-      });
-      yield* TestClock.adjust("1 second");
-      expect(calls.toSorted()).toEqual([other, shown].toSorted());
       calls.length = 0;
 
       window.dispatchEvent(new Event("keydown"));
       window.dispatchEvent(new Event("pointermove"));
+      reportShownThreadAttention(other, threadId);
+      yield* TestClock.adjust("1 second");
+      expect(calls).toEqual([]);
+
+      reportShownThreadAttention(shown, threadId);
       yield* TestClock.adjust("1 second");
       expect(calls).toEqual([shown]);
-
-      window.dispatchEvent(new Event("keydown"));
-      yield* TestClock.adjust("500 millis");
-      window.dispatchEvent(new Event("keydown"));
-      yield* TestClock.adjust("1 second");
-      expect(calls).toEqual([shown, shown]);
       release();
     }).pipe(Effect.scoped),
   );
