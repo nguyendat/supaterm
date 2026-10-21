@@ -177,8 +177,7 @@ const makeHandler = Effect.fnUntraced(function* (browser: ServerBrowser.ServerBr
         }
         const frame = pending;
         pending = null;
-        // Only a ping with nothing in flight measures the path alone. Viewers
-        // that never answer keep one frame in flight.
+        // Only a ping with nothing in flight measures the path alone.
         if (pacer.idle() && pingSentAt === null && now - lastPingAt >= PING_INTERVAL_MS) {
           pingSentAt = now;
           lastPingAt = now;

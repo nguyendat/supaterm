@@ -306,7 +306,6 @@ export function createPreviewStreamClient(
         sequence,
         tabId,
       } = message as Record<string, unknown>;
-      // Answering lets the server keep more than one frame in flight.
       if (type === "ping") {
         ws.send(PONG_MESSAGE);
       } else if (type === "repeat") {

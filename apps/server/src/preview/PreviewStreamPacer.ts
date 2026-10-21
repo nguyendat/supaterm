@@ -1,6 +1,4 @@
-// Keeps a viewer's link full without queueing behind it, so remote frame rate
-// is bounded by bandwidth rather than by one frame per round trip. Until the
-// viewer answers a ping, only one frame is in flight; older clients never do.
+// Until the viewer answers a ping, only one frame is in flight; older clients never do.
 
 const MAX_FRAMES_IN_FLIGHT = 8;
 const RTT_WINDOW_MS = 10_000;
@@ -36,8 +34,6 @@ export const make = () => {
     rtts.push([now, rtt]);
     while (rtts.length > 1 && rtts[0]![0] < now - RTT_WINDOW_MS) rtts.shift();
   };
-  // Pipelining waits on the delivery rate and the bandwidth-delay product;
-  // pacing then only decides when.
   const windowOpen = (bytes: number) => {
     const bytesPerMs = rate();
     return (

@@ -65,7 +65,7 @@ const make = Effect.gen(function* () {
   const tuned = new Map<string, TunedDevice>();
 
   const apply = Effect.fn("DeviceStreamTuning.apply")(
-    function* (_key: string, device: TunedDevice) {
+    function* (device: TunedDevice) {
       const ready = yield* devices.currentReadiness(device.hostId);
       if (!ready || ready.upstream) return;
       const url = `${ready.hub.origin}/vendor/serve-sim/helper/${encodeURIComponent(device.deviceId)}/stream-settings`;
@@ -87,16 +87,13 @@ const make = Effect.gen(function* () {
         .pipe(Effect.flatMap(HttpClientResponse.filterStatusOk));
       device.applied = next;
     },
-    (effect, key, device) =>
-      effect.pipe(
-        Effect.catch((cause) => Effect.logWarning("device stream tuning failed", { cause })),
-        Effect.ensuring(
-          Effect.sync(() => {
-            if (device.viewers.size === 0 && tuned.get(key) === device) tuned.delete(key);
-          }),
-        ),
-      ),
+    Effect.catch((cause) => Effect.logWarning("device stream tuning failed", { cause })),
   );
+
+  const forgetIfUnwatched = (key: string, device: TunedDevice) =>
+    Effect.sync(() => {
+      if (device.viewers.size === 0 && tuned.get(key) === device) tuned.delete(key);
+    });
 
   const schedule = (key: string, device: TunedDevice) => {
     const generation = ++device.generation;
@@ -104,7 +101,9 @@ const make = Effect.gen(function* () {
       Effect.andThen(
         Effect.suspend(() =>
           generation === device.generation
-            ? Effect.uninterruptible(applying.withPermits(1)(apply(key, device)))
+            ? applying
+                .withPermits(1)(apply(device))
+                .pipe(Effect.ensuring(forgetIfUnwatched(key, device)), Effect.uninterruptible)
             : Effect.void,
         ),
       ),

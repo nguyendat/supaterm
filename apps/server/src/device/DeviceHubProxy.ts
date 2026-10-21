@@ -230,7 +230,7 @@ const handler = Effect.gen(function* () {
   const upstreamSearch = new URLSearchParams(url.value.search);
   upstreamSearch.delete("wsTicket");
   upstreamSearch.delete("hostId");
-  const displayEdge = Number(upstreamSearch.get("displayEdge"));
+  const displayEdge = upstreamSearch.get("displayEdge");
   upstreamSearch.delete("displayEdge");
   const search = upstreamSearch.size > 0 ? `?${upstreamSearch.toString()}` : "";
   // Hosts with several upstreams (one per cloud session) route and authenticate requests themselves.
@@ -250,16 +250,18 @@ const handler = Effect.gen(function* () {
       : (yield* DeviceStreamTuning.DeviceStreamTuning).watch({
           hostId: ready.hostId,
           deviceId,
-          displayEdge:
-            Number.isInteger(displayEdge) && displayEdge > 0 && displayEdge <= 8192
-              ? displayEdge
-              : null,
+          displayEdge: parseDisplayEdge(displayEdge),
         });
   return yield* proxyHttp(request, upstreamUrl, routed?.headers, viewer);
 });
 
 const IOS_STREAM_PATH =
   /^\/vendor\/serve-sim\/helper\/([^/]+)(?:\/panel\/[13])?\/stream\.(?:avcc|mjpeg)$/;
+
+const parseDisplayEdge = (value: string | null) => {
+  const edge = Number(value);
+  return Number.isInteger(edge) && edge > 0 && edge <= 8192 ? edge : null;
+};
 
 const decodePathSegment = (segment: string) => {
   try {
