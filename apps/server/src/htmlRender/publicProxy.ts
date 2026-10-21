@@ -82,8 +82,8 @@ const isLocal = (address: string, family: number): boolean => {
 };
 
 /**
- * The caller connects only to addresses checked here, so a name that later resolves elsewhere
- * (DNS rebinding) changes nothing.
+ * The proxy connects only to addresses checked here, so a name that later resolves elsewhere
+ * (DNS rebinding) changes nothing for it. Callers that reconnect by name do not get that guarantee.
  */
 export const publicAddresses = async (host: string) => {
   const addresses = NodeNet.isIP(host)
