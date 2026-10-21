@@ -138,9 +138,8 @@ export function NativeStackScreenOptions(props: {
   readonly options?: AppNativeStackNavigationOptions;
   /**
    * Causes dynamic native header factories to be reapplied when their closed-over
-   * menu content changes. Factory functions are intentionally stabilized, so
-   * their source alone cannot capture a menu that was initially empty while
-   * asynchronous data was loading.
+   * menu content changes. Factory source alone cannot capture a menu that was
+   * initially empty while asynchronous data was loading.
    */
   readonly optionsVersion?: unknown;
   readonly listeners?: Record<string, (event: never) => void>;
@@ -161,18 +160,22 @@ export function NativeStackScreenOptions(props: {
     if (!navigation || !normalizedOptions) {
       return;
     }
-    const stableOptions = stabilizeOptionFunctions(
-      normalizedOptions,
-      "options",
-      latestOptionFunctionsRef.current,
-      optionFunctionWrappersRef.current,
-    ) as NativeStackNavigationOptions;
-    const signature = optionsSignature([stableOptions, props.optionsVersion]);
+    const stabilize = () =>
+      stabilizeOptionFunctions(
+        normalizedOptions,
+        "options",
+        latestOptionFunctionsRef.current,
+        optionFunctionWrappersRef.current,
+      ) as NativeStackNavigationOptions;
+    const signature = optionsSignature([stabilize(), props.optionsVersion]);
     if (lastAppliedOptionsSignatureRef.current === signature) {
       return;
     }
     lastAppliedOptionsSignatureRef.current = signature;
-    navigation.setOptions(stableOptions);
+    // React Navigation keeps a screen's previous options while every value is identical,
+    // so a stable factory would hide the changed items from the header.
+    optionFunctionWrappersRef.current = new Map();
+    navigation.setOptions(stabilize());
   }, [navigation, normalizedOptions, props.optionsVersion, tabActive]);
 
   useEffect(() => {

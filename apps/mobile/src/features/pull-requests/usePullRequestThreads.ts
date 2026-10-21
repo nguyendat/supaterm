@@ -71,8 +71,8 @@ export function usePullRequestThreads(
       key,
       data: relations.data,
     });
-  const threads =
-    (relations.data ?? (lastRelations.key === key ? lastRelations.data : null))?.threads ?? [];
+  const known = relations.data ?? (lastRelations.key === key ? lastRelations.data : null);
+  const threads = known?.threads ?? [];
   const connected = usePullRequestConnected(params.environmentId);
   const canOperate = useEnvironmentScope(target.environmentId, AuthOrchestrationOperateScope);
   const canAsk = !connected || canOperate;
@@ -184,6 +184,7 @@ export function usePullRequestThreads(
   return {
     ...relations,
     threads,
+    threadsKnown: known != null,
     canAsk,
     canWatch: config != null,
     busy,

@@ -16,7 +16,9 @@ export function usePullRequestAgentActions(
   const links = usePullRequestThreads(params, pr, filePath);
   const connected = usePullRequestConnected(params.environmentId);
   const actions = pr ? pullRequestAgentActions(pr, links.canWatch) : [];
-  const disabled = links.busy || !pr || (connected && links.isPending && !links.threads.length);
+  // Linked threads refresh every few seconds. Only the first lookup decides between starting
+  // and continuing; later refreshes must not disable the controls while they run.
+  const disabled = links.busy || !pr || (connected && links.isPending && !links.threadsKnown);
   const start = (task: PullRequestAgentTask, threadId?: string) => {
     if (disabled) return;
     const thread = pullRequestAgentThread(links.threads, threadId);

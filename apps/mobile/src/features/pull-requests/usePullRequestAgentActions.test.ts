@@ -5,6 +5,7 @@ import { usePullRequestAgentActions } from "./usePullRequestAgentActions";
 const state = vi.hoisted(() => ({
   connected: false,
   canAsk: true,
+  threadsKnown: false,
   ask: vi.fn(),
 }));
 vi.mock("./usePullRequestConnected", () => ({
@@ -17,6 +18,7 @@ vi.mock("./usePullRequestThreads", () => ({
     canWatch: true,
     busy: false,
     isPending: true,
+    threadsKnown: state.threadsKnown,
     ask: state.ask,
   }),
 }));
@@ -31,6 +33,7 @@ const pr = { state: "open", mergeability: "conflicting" } as PullRequestDetail;
 beforeEach(() => {
   state.connected = false;
   state.canAsk = true;
+  state.threadsKnown = false;
   state.ask.mockClear();
 });
 
@@ -51,5 +54,15 @@ describe("PR agent drafts", () => {
     state.canAsk = false;
     usePullRequestAgentActions(params, pr).start("explain");
     expect(state.ask).not.toHaveBeenCalled();
+  });
+
+  it("waits for the first linked-thread lookup but not for later refreshes", () => {
+    state.connected = true;
+    expect(usePullRequestAgentActions(params, pr).disabled).toBe(true);
+    state.threadsKnown = true;
+    const actions = usePullRequestAgentActions(params, pr);
+    expect(actions.disabled).toBe(false);
+    actions.start("explain");
+    expect(state.ask.mock.calls).toEqual([[undefined, "explain"]]);
   });
 });

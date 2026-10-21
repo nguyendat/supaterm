@@ -7,6 +7,7 @@ import { afterEach, expect, it, vi } from "vite-plus/test";
 const harness = vi.hoisted(() => ({
   params: { path: ["first", "guide.pdf"] },
   renderedItems: [] as NativeStackHeaderItem[],
+  appliedOptions: {} as Record<string, unknown>,
   setOptionsCalls: 0,
   openedDocuments: [] as string[],
 }));
@@ -19,10 +20,19 @@ vi.mock("@react-navigation/native", () => {
       unstable_headerToolbarItems?: () => NativeStackHeaderItem[];
     }) {
       harness.setOptionsCalls += 1;
+      const merged = { ...harness.appliedOptions, ...options };
+      // React Navigation reuses a screen's descriptor while every option value is identical.
+      if (
+        Object.keys(merged).every((key) =>
+          Object.is(harness.appliedOptions[key], merged[key as keyof typeof merged]),
+        )
+      )
+        return;
+      harness.appliedOptions = merged;
       harness.renderedItems =
-        options.unstable_headerLeftItems?.() ??
-        options.unstable_headerRightItems?.() ??
-        options.unstable_headerToolbarItems?.() ??
+        merged.unstable_headerLeftItems?.() ??
+        merged.unstable_headerRightItems?.() ??
+        merged.unstable_headerToolbarItems?.() ??
         [];
     },
   };
@@ -68,6 +78,7 @@ afterEach(() => {
   act(() => root?.unmount());
   root = null;
   harness.renderedItems = [];
+  harness.appliedOptions = {};
   harness.setOptionsCalls = 0;
   harness.openedDocuments = [];
   vi.unstubAllGlobals();
@@ -98,6 +109,31 @@ it.each(["left", "right", "bottom"] as const)(
     expect(harness.openedDocuments).toEqual(["first/guide.pdf"]);
   },
 );
+
+function AgentToolbar(props: { readonly ready: boolean }) {
+  return (
+    <NativeHeaderToolbar placement="bottom">
+      <NativeHeaderToolbar.Button
+        label="Work on PR"
+        disabled={!props.ready}
+        onPress={() => harness.openedDocuments.push("work")}
+      />
+    </NativeHeaderToolbar>
+  );
+}
+
+it("enables a toolbar action that rendered disabled while its data loaded", () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  root = createRoot(document.createElement("div"));
+  act(() => root!.render(<AgentToolbar ready={false} />));
+  act(() => root!.render(<AgentToolbar ready />));
+
+  const button = harness.renderedItems[0];
+  if (button?.type !== "button") throw new Error("Expected the native toolbar button");
+  expect(button.disabled).toBe(false);
+  button.onPress();
+  expect(harness.openedDocuments).toEqual(["work"]);
+});
 
 const HeaderContext = createContext({
   get options(): never {
