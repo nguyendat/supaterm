@@ -41,7 +41,7 @@ import { followStreamInEnvironment } from "./runtime.ts";
 
 export type EnvironmentShellStatus = "empty" | "cached" | "synchronizing" | "live";
 
-function groupBySource<A>(
+function groupConsecutiveBySource<A>(
   entries: ReadonlyArray<readonly [RpcSession, A]>,
 ): ReadonlyArray<readonly [RpcSession, ReadonlyArray<A>]> {
   const groups: Array<readonly [RpcSession, Array<A>]> = [];
@@ -444,9 +444,13 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       },
     ).pipe(
       Stream.runForEachArray((entries) =>
-        Effect.forEach(groupBySource(entries), ([source, items]) => applyItems(items, { source }), {
-          discard: true,
-        }),
+        Effect.forEach(
+          groupConsecutiveBySource(entries),
+          ([source, items]) => applyItems(items, { source }),
+          {
+            discard: true,
+          },
+        ),
       ),
     ),
   );
