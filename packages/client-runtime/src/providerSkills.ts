@@ -85,6 +85,21 @@ export function resolveProviderSkillSourceKind(
   }
 }
 
+/**
+ * The checkout whose skills and commands a thread's next turn sees. A removed
+ * worktree is recreated from the project when that turn starts, so until then
+ * the project checkout stands in, as it does for a draft.
+ */
+export function resolveProviderWorkspaceCwd(input: {
+  readonly workspaceRoot: string | null;
+  readonly worktreePath: string | null;
+  readonly worktreeIsRepo: boolean | undefined;
+}): string | null {
+  return input.worktreePath !== null && input.worktreeIsRepo !== false
+    ? input.worktreePath
+    : input.workspaceRoot;
+}
+
 function resolveProviderWorkspaceSnapshot(
   provider: ServerProvider,
   cwd: string | null | undefined,

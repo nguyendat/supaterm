@@ -200,8 +200,8 @@ export interface ThreadDetailScreenProps {
   readonly onCancelQueuedRunEdit: () => void;
   readonly onRemoveQueuedEditAttachment: (attachmentId: string) => void;
   readonly environmentId: EnvironmentId;
-  readonly projectWorkspaceRoot: string | null;
   readonly threadCwd: string | null;
+  readonly providerWorkspaceCwd: string | null;
   readonly selectedThreadQueueCount: number;
   readonly queuedMessages: ReadonlyArray<QueuedThreadMessage>;
   readonly dispatchingMessageId: MessageId | null;
@@ -974,9 +974,7 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
     const provider = props.serverConfig?.providers.find(
       (candidate) => candidate.instanceId === selectedInstanceId,
     );
-    return provider
-      ? resolveProviderSkillsForCwd(provider, props.threadCwd ?? props.projectWorkspaceRoot)
-      : [];
+    return provider ? resolveProviderSkillsForCwd(provider, props.providerWorkspaceCwd) : [];
   })();
   const [composerFocusScope, setComposerFocusScope] = useState({
     selectedThreadKey,
@@ -1515,7 +1513,7 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
                         activeThreadBusy={props.activeThreadBusy}
                         canStopThread={props.canStopThread}
                         environmentId={props.environmentId}
-                        projectCwd={props.threadCwd ?? props.projectWorkspaceRoot}
+                        projectCwd={props.providerWorkspaceCwd}
                         awaitingCreation={clientCreation !== null}
                         draftKey={props.composerDraftKey ?? undefined}
                         followUpBehavior={props.followUpBehavior}

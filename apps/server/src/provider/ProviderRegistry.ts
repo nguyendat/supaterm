@@ -986,34 +986,37 @@ export const layer = Layer.effect(
             Effect.andThen(refreshInstance(input.instanceId)),
           )
         : Effect.void;
-      return yield* refreshMachineSnapshot.pipe(
-        Effect.andThen(instance.snapshotForCwd(input.cwd)),
+      const scanWorkspace = instance.snapshotForCwd(input.cwd);
+      return yield* Effect.gen(function* () {
+        yield* refreshMachineSnapshot;
+        // A removed worktree comes back when its thread's next turn starts. A scan
+        // now would find no project skills and keep serving that once it returns.
+        if (!(yield* fileSystem.exists(input.cwd).pipe(Effect.orElseSucceed(() => true)))) {
+          return yield* Ref.get(providersRef);
+        }
+        const scopedSnapshot = yield* scanWorkspace;
+        if ((yield* instanceRegistry.getInstance(input.instanceId)) !== instance) {
+          return yield* Ref.get(providersRef);
+        }
+        return yield* updateProviders((currentProviders) => {
+          // Read ownership inside the update so a newer claim cannot race publication.
+          if (Ref.getUnsafe(workspaceRefreshesRef).get(instance)?.get(input.cwd) !== token) {
+            return currentProviders;
+          }
+          return currentProviders.map((candidate) =>
+            candidate.instanceId === input.instanceId &&
+            Equal.equals(workspaceSnapshotOf(candidate), scannedFrom)
+              ? upsertProviderWorkspaceSnapshot(candidate, input.cwd, {
+                  ...scopedSnapshot,
+                  checkedAt: scannedAt,
 
-        Effect.flatMap((scopedSnapshot) =>
-          instanceRegistry.getInstance(input.instanceId).pipe(
-            Effect.flatMap((currentInstance) => {
-              if (currentInstance !== instance) return Ref.get(providersRef);
-              return updateProviders((currentProviders) => {
-                // Read ownership inside the update so a newer claim cannot race publication.
-                if (Ref.getUnsafe(workspaceRefreshesRef).get(instance)?.get(input.cwd) !== token) {
-                  return currentProviders;
-                }
-                return currentProviders.map((candidate) =>
-                  candidate.instanceId === input.instanceId &&
-                  Equal.equals(workspaceSnapshotOf(candidate), scannedFrom)
-                    ? upsertProviderWorkspaceSnapshot(candidate, input.cwd, {
-                        ...scopedSnapshot,
-                        checkedAt: scannedAt,
-
-                        slashCommandsPending:
-                          scopedSnapshot.slashCommandsPending ?? scopedSnapshot.status === "error",
-                      })
-                    : candidate,
-                );
-              });
-            }),
-          ),
-        ),
+                  slashCommandsPending:
+                    scopedSnapshot.slashCommandsPending ?? scopedSnapshot.status === "error",
+                })
+              : candidate,
+          );
+        });
+      }).pipe(
         Effect.ensuring(
           Ref.update(workspaceRefreshesRef, (refreshes) => {
             const current = refreshes.get(instance);

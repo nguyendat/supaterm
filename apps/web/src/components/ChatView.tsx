@@ -368,7 +368,10 @@ import {
   serverEnvironment,
 } from "../state/server";
 import { threadEnvironment } from "../state/threads";
-import { resolveProviderSkillsForCwd } from "@supaterm/client-runtime/providerSkills";
+import {
+  resolveProviderSkillsForCwd,
+  resolveProviderWorkspaceCwd,
+} from "@supaterm/client-runtime/providerSkills";
 import { vcsEnvironment } from "../state/vcs";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useProjectClone } from "../state/projectClones";
@@ -3092,6 +3095,13 @@ export default function ChatView(props: ChatViewProps) {
     }
   }, [environmentId, gitStatusCwd, liveIsGitRepo]);
   const isGitRepo = liveIsGitRepo ?? recallCheckoutIsRepo(environmentId, gitStatusCwd) ?? true;
+  const providerWorkspaceCwd = activeProject
+    ? resolveProviderWorkspaceCwd({
+        workspaceRoot: activeProject.workspaceRoot,
+        worktreePath: activeThread?.worktreePath ?? null,
+        worktreeIsRepo: isGitRepo,
+      })
+    : null;
   // A provider-native subagent cannot take messages: a status bar replaces the
   // composer and its strips. Its approvals and questions are asked on the
   // top-level parent thread.
@@ -5737,7 +5747,7 @@ export default function ChatView(props: ChatViewProps) {
   });
   const getShortcutContextStable = useStableCallback(getShortcutContext);
   const timelineSkills = activeProviderStatus
-    ? resolveProviderSkillsForCwd(activeProviderStatus, gitCwd)
+    ? resolveProviderSkillsForCwd(activeProviderStatus, providerWorkspaceCwd)
     : EMPTY_PROVIDER_SKILLS;
   const threadFindControlsRef = useRef<ThreadFindControls | null>(null);
   const [isThreadFindActive, setIsThreadFindActive] = useState(false);
@@ -7560,6 +7570,7 @@ export default function ChatView(props: ChatViewProps) {
                                   keybindings={keybindings}
                                   terminalOpen={Boolean(terminalUiState.terminalOpen)}
                                   gitCwd={gitCwd}
+                                  providerWorkspaceCwd={providerWorkspaceCwd}
                                   pullRequestProjectId={
                                     supportsPullRequests ? (activeProject?.id ?? null) : null
                                   }

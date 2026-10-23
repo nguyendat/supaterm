@@ -2275,6 +2275,13 @@ it.layer(
       Effect.gen(function* () {
         const driver = ProviderDriverKind.make("codex");
         const instanceId = ProviderInstanceId.make("codex");
+        const fileSystem = yield* FileSystem.FileSystem;
+        const workspace = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "supaterm-provider-registry-workspace-",
+        });
+        const otherWorkspace = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "supaterm-provider-registry-other-workspace-",
+        });
         const machineProvider = {
           instanceId,
           driver,
@@ -2403,7 +2410,7 @@ it.layer(
 
         yield* Effect.gen(function* () {
           const registry = yield* ProviderRegistry.ProviderRegistry;
-          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace" });
+          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: workspace });
           assert.strictEqual((yield* registry.getProviders)[0]?.workspaceSnapshots, undefined);
           yield* Ref.set(failScan, false);
           const workspaceUpdate = yield* registry.streamChanges.pipe(
@@ -2412,11 +2419,11 @@ it.layer(
           );
           yield* Effect.yieldNow;
           const firstRefresh = yield* registry
-            .refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace" })
+            .refreshWorkspaceSnapshot({ instanceId, cwd: workspace })
             .pipe(Effect.forkChild);
           yield* Deferred.await(probeStarted);
           const duplicateRefresh = yield* registry
-            .refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace" })
+            .refreshWorkspaceSnapshot({ instanceId, cwd: workspace })
             .pipe(Effect.forkChild);
           yield* Effect.yieldNow;
           assert.strictEqual(yield* Ref.get(snapshotCalls), 2);
@@ -2440,7 +2447,7 @@ it.layer(
             status: "error",
             slashCommandsPending: false,
           });
-          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace" });
+          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: workspace });
           assert.strictEqual(yield* Ref.get(snapshotCalls), 3);
           assert.deepStrictEqual(
             (yield* registry.getProviders)[0]?.workspaceSnapshots?.[0]?.slashCommands,
@@ -2450,13 +2457,13 @@ it.layer(
             (yield* registry.getProviders)[0]?.workspaceSnapshots?.[0]?.slashCommandsPending,
             undefined,
           );
-          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace" });
+          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: workspace });
           assert.strictEqual(yield* Ref.get(snapshotCalls), 3);
           yield* TestClock.adjust(PROVIDER_WORKSPACE_SNAPSHOT_TTL_MS - 1);
-          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace" });
+          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: workspace });
           assert.strictEqual(yield* Ref.get(snapshotCalls), 3);
           yield* TestClock.adjust(1);
-          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace" });
+          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: workspace });
           assert.strictEqual(yield* Ref.get(snapshotCalls), 4);
           const newSkills = [
             ...scopedProvider.skills,
@@ -2465,7 +2472,7 @@ it.layer(
           yield* Ref.set(scopedResult, { ...scopedProvider, skills: newSkills });
           yield* registry.refreshWorkspaceSnapshot({
             instanceId,
-            cwd: "/workspace",
+            cwd: workspace,
             fresh: true,
           });
           assert.strictEqual(yield* Ref.get(snapshotCalls), 5);
@@ -2480,7 +2487,7 @@ it.layer(
           yield* Ref.set(scanGate, { started: slowStarted, release: releaseSlow });
           yield* Ref.set(scopedResult, scopedProvider);
           const slowScan = yield* registry
-            .refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace", fresh: true })
+            .refreshWorkspaceSnapshot({ instanceId, cwd: workspace, fresh: true })
             .pipe(Effect.forkChild);
           yield* Deferred.await(slowStarted);
           const latestSkills = [
@@ -2490,7 +2497,7 @@ it.layer(
           yield* Ref.set(scopedResult, { ...scopedProvider, skills: latestSkills });
           yield* registry.refreshWorkspaceSnapshot({
             instanceId,
-            cwd: "/workspace",
+            cwd: workspace,
             fresh: true,
           });
           yield* Deferred.succeed(releaseSlow, undefined);
@@ -2507,7 +2514,7 @@ it.layer(
           yield* Ref.set(scanGate, { started: olderStarted, release: releaseOlder });
           yield* Ref.set(scopedResult, scopedProvider);
           const olderScan = yield* registry
-            .refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace2" })
+            .refreshWorkspaceSnapshot({ instanceId, cwd: otherWorkspace })
             .pipe(Effect.forkChild);
           yield* Deferred.await(olderStarted);
           const newerStarted = yield* Deferred.make<void>();
@@ -2515,25 +2522,25 @@ it.layer(
           yield* Ref.set(scanGate, { started: newerStarted, release: releaseNewer });
           yield* Ref.set(scopedResult, { ...scopedProvider, skills: latestSkills });
           const newerScan = yield* registry
-            .refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace2", fresh: true })
+            .refreshWorkspaceSnapshot({ instanceId, cwd: otherWorkspace, fresh: true })
             .pipe(Effect.forkChild);
           yield* Deferred.await(newerStarted);
           yield* Deferred.succeed(releaseOlder, undefined);
           yield* Fiber.join(olderScan);
           assert.strictEqual(
             (yield* registry.getProviders)[0]?.workspaceSnapshots?.find(
-              (snapshot) => snapshot.cwd === "/workspace2",
+              (snapshot) => snapshot.cwd === otherWorkspace,
             ),
             undefined,
           );
           const callsWhileForced = yield* Ref.get(snapshotCalls);
-          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace2" });
+          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: otherWorkspace });
           assert.strictEqual(yield* Ref.get(snapshotCalls), callsWhileForced);
           yield* Deferred.succeed(releaseNewer, undefined);
           yield* Fiber.join(newerScan);
           assert.deepStrictEqual(
             (yield* registry.getProviders)[0]?.workspaceSnapshots?.find(
-              (snapshot) => snapshot.cwd === "/workspace2",
+              (snapshot) => snapshot.cwd === otherWorkspace,
             )?.skills,
             latestSkills,
           );
@@ -2559,6 +2566,10 @@ it.layer(
       Effect.gen(function* () {
         const driver = ProviderDriverKind.make("codex");
         const instanceId = ProviderInstanceId.make("codex");
+        const fileSystem = yield* FileSystem.FileSystem;
+        const workspace = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "supaterm-provider-registry-unhealthy-workspace-",
+        });
         const healthyProvider = {
           instanceId,
           driver,
@@ -2640,12 +2651,12 @@ it.layer(
             registry.getProviders,
             (providers) => providers[0]?.workspaceSnapshots?.[0],
           );
-          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace" });
+          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: workspace });
           assert.deepStrictEqual((yield* workspaceOf)?.slashCommands, [COMPACT_SLASH_COMMAND]);
 
           yield* TestClock.adjust(PROVIDER_WORKSPACE_SNAPSHOT_TTL_MS);
           yield* Ref.set(scanResult, { ...unhealthyProvider, skills: laterSkills });
-          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace" });
+          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: workspace });
           const unhealthy = yield* workspaceOf;
           assert.deepStrictEqual(unhealthy?.skills, laterSkills);
           assert.deepStrictEqual(unhealthy?.slashCommands, [COMPACT_SLASH_COMMAND]);
@@ -2655,7 +2666,7 @@ it.layer(
           assert.strictEqual(provider?.message, unhealthyProvider.message);
 
           yield* Ref.set(scanResult, { ...unhealthyProvider, skills: [] });
-          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace" });
+          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: workspace });
           assert.deepStrictEqual((yield* workspaceOf)?.skills, []);
 
           const discoveredCommand = { name: "review", description: "Review changes" };
@@ -2664,18 +2675,113 @@ it.layer(
             slashCommands: [discoveredCommand],
             slashCommandsPending: false,
           });
-          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace" });
+          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: workspace });
           const discovered = yield* workspaceOf;
           assert.deepStrictEqual(discovered?.slashCommands, [discoveredCommand]);
           assert.strictEqual(discovered?.slashCommandsPending, undefined);
 
           yield* TestClock.adjust(PROVIDER_WORKSPACE_SNAPSHOT_TTL_MS);
           yield* Ref.set(scanResult, { ...healthyProvider, skills: laterSkills });
-          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: "/workspace" });
+          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: workspace });
           const recovered = yield* workspaceOf;
           assert.deepStrictEqual(recovered?.skills, laterSkills);
           assert.deepStrictEqual(recovered?.slashCommands, [COMPACT_SLASH_COMMAND]);
           assert.strictEqual(recovered?.slashCommandsPending, undefined);
+        }).pipe(Effect.provide(runtimeServices));
+      }),
+    );
+
+    it.effect("scans a removed workspace only once it is back", () =>
+      Effect.gen(function* () {
+        const driver = ProviderDriverKind.make("codex");
+        const instanceId = ProviderInstanceId.make("codex");
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const parent = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "supaterm-provider-registry-removed-workspace-",
+        });
+        const workspace = path.join(parent, "worktree");
+        const provider = {
+          instanceId,
+          driver,
+          status: "ready",
+          enabled: true,
+          installed: true,
+          auth: { status: "authenticated" },
+          checkedAt: "2026-06-10T00:00:00.000Z",
+          version: "1.0.0",
+          models: [],
+          slashCommands: [COMPACT_SLASH_COMMAND],
+          skills: [],
+        } as const satisfies ServerProvider;
+        const projectSkills = [
+          { name: "project", path: path.join(workspace, "SKILL.md"), enabled: true },
+        ];
+        const scans = yield* Ref.make(0);
+        const instance: ProviderInstance = {
+          instanceId,
+          driverKind: driver,
+          continuationIdentity: { driverKind: driver, continuationKey: "codex:instance:codex" },
+          displayName: undefined,
+          enabled: true,
+          snapshot: {
+            resolveMaintenance: () =>
+              Effect.succeed(
+                makeManualOnlyProviderMaintenanceCapabilities({
+                  provider: driver,
+                  packageName: null,
+                }),
+              ),
+            getSnapshot: Effect.succeed(provider),
+            refresh: Effect.succeed(provider),
+            streamChanges: Stream.empty,
+            applyUsageLimits: () => Effect.void,
+          },
+          snapshotForCwd: () =>
+            Ref.update(scans, (count) => count + 1).pipe(
+              Effect.as({ ...provider, skills: projectSkills }),
+            ),
+          orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+          textGeneration: {} as ProviderInstance["textGeneration"],
+        };
+        const layerInstanceRegistry = Layer.succeed(
+          ProviderInstanceRegistry.ProviderInstanceRegistry,
+          {
+            getInstance: (requestedId) =>
+              Effect.succeed(requestedId === instanceId ? instance : undefined),
+            listInstances: Effect.succeed([instance]),
+            listUnavailable: Effect.succeed([]),
+            streamChanges: Stream.empty,
+            subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), PubSub.subscribe),
+          },
+        );
+        const scope = yield* Scope.make();
+        yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+        const runtimeServices = yield* Layer.build(
+          ProviderRegistry.layer.pipe(
+            Layer.provideMerge(layerInstanceRegistry),
+            Layer.provideMerge(
+              ServerConfig.layerTest(process.cwd(), {
+                prefix: "supaterm-provider-registry-removed-workspace-",
+              }),
+            ),
+            Layer.provideMerge(NodeServices.layer),
+          ),
+        ).pipe(Scope.provide(scope));
+
+        yield* Effect.gen(function* () {
+          const registry = yield* ProviderRegistry.ProviderRegistry;
+          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: workspace });
+          assert.strictEqual(yield* Ref.get(scans), 0);
+          assert.strictEqual((yield* registry.getProviders)[0]?.workspaceSnapshots, undefined);
+
+          yield* fileSystem.makeDirectory(workspace);
+          yield* registry.refreshWorkspaceSnapshot({ instanceId, cwd: workspace });
+          assert.strictEqual(yield* Ref.get(scans), 1);
+          assert.deepStrictEqual(
+            (yield* registry.getProviders)[0]?.workspaceSnapshots?.[0]?.skills,
+            projectSkills,
+          );
         }).pipe(Effect.provide(runtimeServices));
       }),
     );

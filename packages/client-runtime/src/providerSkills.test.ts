@@ -17,6 +17,7 @@ import {
   resolveProviderSkillsForCwd,
   resolveProviderSlashCommandsForCwd,
   resolveProviderSkillSourceKind,
+  resolveProviderWorkspaceCwd,
 } from "./providerSkills.ts";
 
 const provider = {
@@ -239,6 +240,26 @@ describe("resolveProviderSkillSourceKind", () => {
         path: "/opt/skills/team-review/SKILL.md",
       }),
     ).toBe("other");
+  });
+});
+
+describe("resolveProviderWorkspaceCwd", () => {
+  const workspaceRoot = "/repo";
+  const worktreePath = "/worktrees/repo/feature";
+
+  it("reads a thread's worktree while it is a checkout", () => {
+    expect(resolveProviderWorkspaceCwd({ workspaceRoot, worktreePath, worktreeIsRepo: true })).toBe(
+      worktreePath,
+    );
+    expect(
+      resolveProviderWorkspaceCwd({ workspaceRoot, worktreePath, worktreeIsRepo: undefined }),
+    ).toBe(worktreePath);
+  });
+
+  it("falls back to the project checkout once the worktree is gone", () => {
+    expect(
+      resolveProviderWorkspaceCwd({ workspaceRoot, worktreePath, worktreeIsRepo: false }),
+    ).toBe(workspaceRoot);
   });
 });
 

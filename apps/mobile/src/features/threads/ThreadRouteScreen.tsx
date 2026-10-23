@@ -75,6 +75,7 @@ import { useSelectedThreadWorktree } from "../../state/use-selected-thread-workt
 import { useThreadComposerState } from "../../state/use-thread-composer-state";
 import { resolveMergeBackTargetThreadId } from "@supaterm/client-runtime/state/thread-relationships";
 import { resolveLatestMergeBackRun } from "@supaterm/client-runtime/state/thread-workflows";
+import { resolveProviderWorkspaceCwd } from "@supaterm/client-runtime/providerSkills";
 import { threadEnvironment } from "../../state/threads";
 import { projectThreadContentPresentation } from "./threadContentPresentation";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
@@ -292,7 +293,7 @@ function ThreadRouteContent(
   const selectedThreadDetailHasPreparingRun =
     selectedThreadDetail?.runs.some((run) => run.status === "preparing") ?? false;
   const setupMessage = selectedThreadDetail?.messages.find((message) => message.role === "user");
-  const { selectedThreadCwd } = useSelectedThreadWorktree();
+  const { selectedThreadCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
   const composer = useThreadComposerState();
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
@@ -448,6 +449,11 @@ function ThreadRouteContent(
         })
       : null,
   );
+  const providerWorkspaceCwd = resolveProviderWorkspaceCwd({
+    workspaceRoot: selectedThreadProject?.workspaceRoot ?? null,
+    worktreePath: selectedThreadWorktreePath,
+    worktreeIsRepo: gitStatus.data?.isRepo,
+  });
   const { sessions: knownTerminalSessions } = useKnownTerminalSessions({
     environmentId: selectedThread?.environmentId ?? null,
     threadId: selectedThread?.id ?? null,
@@ -963,8 +969,8 @@ function ThreadRouteContent(
           onCancelQueuedRunEdit={composer.cancelQueuedRunEdit}
           onRemoveQueuedEditAttachment={composer.onRemoveQueuedEditAttachment}
           environmentId={selectedThread.environmentId}
-          projectWorkspaceRoot={selectedThreadProject?.workspaceRoot ?? null}
           threadCwd={selectedThreadCwd}
+          providerWorkspaceCwd={providerWorkspaceCwd}
           selectedThreadQueueCount={composer.selectedThreadQueueCount}
           queuedMessages={composer.selectedThreadQueuedMessages}
           dispatchingMessageId={composer.dispatchingQueuedMessageId}

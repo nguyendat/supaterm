@@ -1573,6 +1573,7 @@ export interface ChatComposerProps {
   keybindings: ResolvedKeybindingsConfig;
   terminalOpen: boolean;
   gitCwd: string | null;
+  providerWorkspaceCwd: string | null;
   pullRequestProjectId: ProjectId | null;
   pullRequestRepository: string | null;
   threadPullRequests: ReadonlyArray<ThreadPullRequestLink> | undefined;
@@ -1652,11 +1653,11 @@ export interface ChatComposerProps {
  */
 function useProviderWorkspaceSnapshotRefresh(input: {
   readonly environmentId: EnvironmentId;
-  readonly gitCwd: string | null;
+  readonly cwd: string | null;
   readonly selectedProviderEntry: ProviderInstanceEntry | undefined;
   readonly selectedProviderStatus: ServerProvider | null;
 }) {
-  const { environmentId, gitCwd, selectedProviderEntry, selectedProviderStatus } = input;
+  const { environmentId, cwd, selectedProviderEntry, selectedProviderStatus } = input;
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
   });
@@ -1668,12 +1669,12 @@ function useProviderWorkspaceSnapshotRefresh(input: {
     notBefore: number;
   } | null>(null);
   const workspaceRefreshScopeKey =
-    gitCwd && selectedProviderEntry
-      ? `${environmentId}:${selectedProviderEntry.instanceId}:${gitCwd}`
+    cwd && selectedProviderEntry
+      ? `${environmentId}:${selectedProviderEntry.instanceId}:${cwd}`
       : null;
   const workspaceSlashCommandsPending =
     selectedProviderStatus?.workspaceSnapshots?.some(
-      (snapshot) => snapshot.cwd === gitCwd && snapshot.slashCommandsPending === true,
+      (snapshot) => snapshot.cwd === cwd && snapshot.slashCommandsPending === true,
     ) ?? false;
   useEffect(() => {
     if (
@@ -1692,7 +1693,7 @@ function useProviderWorkspaceSnapshotRefresh(input: {
   }, [workspaceRefreshRetry, workspaceRefreshScopeKey, workspaceSlashCommandsPending]);
   // Losing a snapshot (the server dropped it) lifts both the TTL and the retry
   // cooldown so the next check rescans at once.
-  const hasWorkspaceSnapshot = hasCompleteProviderWorkspaceSnapshot(selectedProviderStatus, gitCwd);
+  const hasWorkspaceSnapshot = hasCompleteProviderWorkspaceSnapshot(selectedProviderStatus, cwd);
   const [hadWorkspaceSnapshot, setHadWorkspaceSnapshot] = useState(hasWorkspaceSnapshot);
   const [workspaceSnapshotLossCount, setWorkspaceSnapshotLossCount] = useState(0);
   if (hadWorkspaceSnapshot !== hasWorkspaceSnapshot) {
@@ -1713,7 +1714,7 @@ function useProviderWorkspaceSnapshotRefresh(input: {
       lastWorkspaceSnapshotLossRef.current = snapshotLossCount;
       workspaceRefreshKeyRef.current = null;
     }
-    if (key === null || !gitCwd || !selectedProviderEntry) return;
+    if (key === null || !cwd || !selectedProviderEntry) return;
     const lastRequest = workspaceRefreshKeyRef.current;
     if (
       lastRequest?.key === key &&
@@ -1721,7 +1722,7 @@ function useProviderWorkspaceSnapshotRefresh(input: {
     )
       return;
     // A pending retry needs no clearing here: its cooldown lapses long before the TTL.
-    if (hasCurrentProviderWorkspaceSnapshot(selectedProviderStatus, gitCwd, now)) return;
+    if (hasCurrentProviderWorkspaceSnapshot(selectedProviderStatus, cwd, now)) return;
     if (retry?.key === key && now < retry.notBefore) return;
     const request = { key, requestedAt: now };
     workspaceRefreshKeyRef.current = request;
@@ -1735,7 +1736,7 @@ function useProviderWorkspaceSnapshotRefresh(input: {
     };
     void refreshProviders({
       environmentId,
-      input: { instanceId: selectedProviderEntry.instanceId, cwd: gitCwd },
+      input: { instanceId: selectedProviderEntry.instanceId, cwd },
     }).then((result) => {
       const refreshedSnapshot =
         result._tag === "Success" &&
@@ -1743,7 +1744,7 @@ function useProviderWorkspaceSnapshotRefresh(input: {
           result.value.providers.find(
             (provider) => provider.instanceId === selectedProviderEntry.instanceId,
           ),
-          gitCwd,
+          cwd,
         );
       if (!refreshedSnapshot) retryLater();
     }, retryLater);
@@ -1942,6 +1943,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     keybindings,
     terminalOpen,
     gitCwd,
+    providerWorkspaceCwd,
     pullRequestProjectId,
     pullRequestRepository,
     threadPullRequests,
@@ -2352,14 +2354,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const selectedProviderStatus = selectedProviderEntry?.snapshot ?? null;
   const compactCommandAvailable = providerSupportsManualCompaction(selectedProviderEntry);
   const selectedProviderSkills = selectedProviderStatus
-    ? resolveProviderSkillsForCwd(selectedProviderStatus, gitCwd)
+    ? resolveProviderSkillsForCwd(selectedProviderStatus, providerWorkspaceCwd)
     : NO_PROVIDER_SKILLS;
   const selectedProviderSlashCommands = selectedProviderStatus
-    ? resolveProviderSlashCommandsForCwd(selectedProviderStatus, gitCwd)
+    ? resolveProviderSlashCommandsForCwd(selectedProviderStatus, providerWorkspaceCwd)
     : NO_PROVIDER_SLASH_COMMANDS;
   const refreshWorkspaceSnapshotOnTyping = useProviderWorkspaceSnapshotRefresh({
     environmentId,
-    gitCwd,
+    cwd: providerWorkspaceCwd,
     selectedProviderEntry,
     selectedProviderStatus,
   });
