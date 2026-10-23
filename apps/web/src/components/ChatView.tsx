@@ -417,7 +417,7 @@ import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveTimelineIsAtEnd } from "./chat/MessagesTimeline.logic";
 import {
   overlayComposerIsResting,
-  resolveComposerTimelineInset,
+  resolveComposerTimelineLayout,
   resolveComposerUsageMeterSlot,
   resolveScrollToEndClearance,
 } from "./composerFooterLayout";
@@ -1355,6 +1355,7 @@ export default function ChatView(props: ChatViewProps) {
   const getTimelineScrollableNodeStable = useStableCallback(getTimelineScrollableNode);
   const [composerOverlayElement, setComposerOverlayElement] = useState<HTMLDivElement | null>(null);
   const [composerTimelineInset, setComposerTimelineInset] = useState(0);
+  const [composerOverlayHeight, setComposerOverlayHeight] = useState(0);
   const composerTimelineInsetRef = useRef(0);
   const [composerReservedHeight, setComposerReservedHeight] = useState(0);
   const composerReservedHeightRef = useRef(0);
@@ -4794,13 +4795,15 @@ export default function ChatView(props: ChatViewProps) {
             Number.parseFloat(getComputedStyle(noticeStack).minHeight),
         )
       : 0;
-    const nextInset = resolveComposerTimelineInset({
+    const layout = resolveComposerTimelineLayout({
       currentInset: composerTimelineInsetRef.current,
       overlayHeight: height,
       isResting,
       restingOnlyHeight,
       expandedNoticesHeight,
     });
+    const nextInset = layout.contentInsetEndAdjustment;
+    setComposerOverlayHeight(layout.composerOverlayHeight);
     if (composerTimelineInsetRef.current !== nextInset) {
       composerTimelineInsetRef.current = nextInset;
       setComposerTimelineInset(nextInset);
@@ -7360,7 +7363,7 @@ export default function ChatView(props: ChatViewProps) {
                     onAnchorReady={onTimelineAnchorReadyStable}
                     onAnchorSizeChanged={onTimelineAnchorSizeChangedStable}
                     contentInsetEndAdjustment={composerTimelineInset}
-                    composerOverlayHeight={isDraftHeroState ? 0 : composerTimelineInset}
+                    composerOverlayHeight={isDraftHeroState ? 0 : composerOverlayHeight}
                     emptyPlaceholderInset={composerReservedHeight}
                     liveFollowEnabled={!paintOnlyDisplayedTimeline && timelineLiveFollowEnabled}
                     onIsAtEndChange={onIsAtEndChangeStable}

@@ -87,6 +87,17 @@ export function resolveComposerTimelineInset(input: {
     : overlayHeight;
 }
 
+export function resolveComposerTimelineLayout(
+  input: Parameters<typeof resolveComposerTimelineInset>[0],
+) {
+  const contentInsetEndAdjustment = resolveComposerTimelineInset(input);
+  return {
+    contentInsetEndAdjustment,
+    // Only scroll space survives collapse; masking that reservation hides readable messages.
+    composerOverlayHeight: Math.ceil(input.overlayHeight - (input.expandedNoticesHeight ?? 0)),
+  };
+}
+
 type ComposerUsageMeterSlot = "row" | "context-strip";
 
 /**

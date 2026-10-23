@@ -28,6 +28,38 @@ import { MessagesTimeline, remarkThoughtPreview } from "./MessagesTimeline";
 import { parseMarkdownWithMath } from "@supaterm/shared/markdownMath";
 import { readTimelinePosition } from "./timelineScrollAnchoring";
 import { useComposerFocusState } from "./useComposerFocusState";
+import { resolveComposerTimelineLayout } from "../composerFooterLayout";
+
+it("reveals messages above the collapsed composer without shrinking the scroll reservation", async () => {
+  const props = baseProps();
+  const entries = Array.from({ length: 30 }, (_, index) =>
+    message(`Message ${index}: ${longText()}`, {}, `fade-message-${index}`),
+  );
+  const expanded = resolveComposerTimelineLayout({
+    currentInset: 0,
+    overlayHeight: 320,
+    isResting: false,
+  });
+  await using screen = await renderElement(
+    <MessagesTimeline {...props} {...expanded} timelineEntries={entries} />,
+  );
+  await expect.poll(() => props.listRef.current?.getScrollableNode()).toBeTruthy();
+  const viewport = props.listRef.current!.getScrollableNode()!;
+  const expandedViewportHeight = viewport.clientHeight;
+  const resting = resolveComposerTimelineLayout({
+    currentInset: expanded.contentInsetEndAdjustment,
+    overlayHeight: 64,
+    isResting: true,
+  });
+  await screen.rerender(<MessagesTimeline {...props} {...resting} timelineEntries={entries} />);
+
+  expect(resting.contentInsetEndAdjustment).toBe(320);
+  expect(viewport.clientHeight).toBe(expandedViewportHeight);
+  const maskedTimeline = screen.container.querySelector<HTMLElement>(
+    ".timeline-scroll-bottom-fade",
+  )!;
+  expect(getComputedStyle(maskedTimeline).maskImage).toContain("calc(100% - 64px)");
+});
 
 const pullRequestQuery = vi.hoisted(() => ({ error: "Pull request not found" }));
 vi.mock(import("~/state/query"), async (original) => ({
